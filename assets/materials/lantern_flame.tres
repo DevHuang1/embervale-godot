@@ -1,0 +1,10 @@
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[ext_resource type="Shader" path="res://assets/shaders/lantern_glow.gdshader" id="1_lantern"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_lantern")
+shader_parameter/emissive_color = Color(0.96, 0.72, 0.29, 1)
+shader_parameter/emissive_intensity = 2.2
+shader_parameter/pulse_speed = 4.2

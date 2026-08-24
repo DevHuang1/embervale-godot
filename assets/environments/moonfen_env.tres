@@ -1,0 +1,64 @@
+[gd_resource type="Environment" load_steps=2 format=3]
+
+[ext_resource type="Sky" path="res://assets/environments/moonfen_sky.tres" id="1_sky"]
+
+[resource]
+background_mode = 2
+sky = ExtResource("1_sky")
+background_energy_multiplier = 1.0
+ambient_light_source = 2
+ambient_light_color = Color(0.13, 0.10, 0.26, 1)
+ambient_light_energy = 1.0
+tonemap_mode = 3
+tonemap_exposure = 1.05
+tonemap_white = 6.0
+ssao_enabled = true
+ssao_radius = 1.6
+ssao_intensity = 1.4
+ssao_power = 1.6
+ssao_detail = 0.8
+ssao_horizon = 0.06
+ssao_sharpness = 0.92
+ssao_light_affect = 0.15
+ssao_ao_channel_affect = 0.0
+glow_enabled = true
+glow_levels/1 = 0.0
+glow_levels/2 = 1.0
+glow_levels/3 = 0.85
+glow_levels/4 = 0.55
+glow_levels/5 = 0.3
+glow_levels/6 = 0.0
+glow_levels/7 = 0.0
+glow_normalized = false
+glow_intensity = 1.05
+glow_strength = 1.2
+glow_bloom = 0.12
+glow_blend_mode = 2
+glow_hdr_threshold = 0.85
+glow_hdr_scale = 2.0
+glow_hdr_luminance_cap = 12.0
+fog_enabled = true
+fog_light_color = Color(0.26, 0.22, 0.46, 1)
+fog_light_energy = 0.95
+fog_sun_scatter = 0.12
+fog_density = 0.006
+fog_aerial_perspective = 0.25
+fog_sky_affect = 0.4
+fog_height = 0.3
+fog_height_density = 0.05
+volumetric_fog_enabled = true
+volumetric_fog_density = 0.008
+volumetric_fog_albedo = Color(0.52, 0.44, 0.62, 1)
+volumetric_fog_emission = Color(0.08, 0.04, 0.16, 1)
+volumetric_fog_emission_energy = 0.25
+volumetric_fog_anisotropy = 0.55
+volumetric_fog_length = 96.0
+volumetric_fog_detail_spread = 2.0
+volumetric_fog_gi_inject = 0.6
+volumetric_fog_ambient_inject = 0.45
+volumetric_fog_temporal_reprojection_enabled = true
+volumetric_fog_temporal_reprojection_amount = 0.9
+adjustment_enabled = true
+adjustment_brightness = 1.10
+adjustment_contrast = 1.04
+adjustment_saturation = 1.12

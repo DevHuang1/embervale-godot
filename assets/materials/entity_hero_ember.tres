@@ -1,0 +1,48 @@
+[gd_resource type="ShaderMaterial" load_steps=7 format=3]
+
+[ext_resource type="Shader" path="res://assets/shaders/entity_body.gdshader" id="1_entity"]
+[ext_resource type="Texture2D" path="res://assets/textures/generated/detail_grain.png" id="2_alb"]
+[ext_resource type="Texture2D" path="res://assets/textures/generated/hero_ember_normal.png" id="3_nrm"]
+[ext_resource type="Texture2D" path="res://assets/textures/generated/hero_ember_orm.png" id="4_orm"]
+[ext_resource type="Texture2D" path="res://assets/textures/generated/hero_ember_emission_mask.png" id="5_ems"]
+[ext_resource type="Texture2D" path="res://assets/textures/generated/detail_normal.png" id="6_dtl"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_entity")
+shader_parameter/base_color = Color(0.23, 0.13, 0.07, 1)
+shader_parameter/roughness = 0.66
+shader_parameter/metallic = 0.0
+shader_parameter/specular = 0.32
+shader_parameter/albedo_texture = ExtResource("2_alb")
+shader_parameter/albedo_mix = 0.35
+shader_parameter/normal_texture = ExtResource("3_nrm")
+shader_parameter/normal_mix = 0.55
+shader_parameter/orm_texture = ExtResource("4_orm")
+shader_parameter/orm_mix = 0.7
+shader_parameter/detail_normal = ExtResource("6_dtl")
+shader_parameter/detail_normal_strength = 0.3
+shader_parameter/detail_normal_scale = Vector2(6, 9)
+shader_parameter/emission_mask = ExtResource("5_ems")
+shader_parameter/emission_mask_mix = 0.85
+shader_parameter/rim_color = Color(1.0, 0.55, 0.22, 1)
+shader_parameter/rim_power = 2.4
+shader_parameter/rim_intensity = 1.15
+shader_parameter/rim_ambient_floor = 0.1
+shader_parameter/rim_width = 0.25
+shader_parameter/emission_color = Color(1.0, 0.45, 0.12, 1)
+shader_parameter/emission_energy = 0.85
+shader_parameter/glow_intensity = 1.0
+shader_parameter/flash_color = Color(1, 0.84, 0.47, 1)
+shader_parameter/flash_intensity = 0.0
+shader_parameter/sway_amount = 0.005
+shader_parameter/sway_speed = 1.6
+shader_parameter/cloth_noise_amount = 0.05
+shader_parameter/cloth_noise_scale = 18.0
+shader_parameter/trim_color = Color(0.23, 0.16, 0.1, 1)
+shader_parameter/trim_height = -0.35
+shader_parameter/trim_softness = 0.22
+shader_parameter/trim_blend = 0.45
+shader_parameter/joint_ao_strength = 0.22
+shader_parameter/joint_ao_low = -0.3
+shader_parameter/joint_ao_high = -0.08

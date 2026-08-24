@@ -1,0 +1,108 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Script" path="res://scripts/entities/moonfen_fenling.gd" id="1_scr"]
+[ext_resource type="Material" path="res://assets/materials/entity_hushling.tres" id="2_mat"]
+[ext_resource type="Material" path="res://assets/materials/hushling_eye.tres" id="3_eye"]
+[ext_resource type="Script" path="res://scripts/entities/entity_animator.gd" id="4_anim"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_body"]
+radius = 0.42
+height = 0.84
+
+[sub_resource type="SphereMesh" id="SphereMesh_eye"]
+radius = 0.07
+height = 0.14
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_tendril"]
+top_radius = 0.015
+bottom_radius = 0.06
+height = 0.65
+
+[sub_resource type="SphereShape3D" id="SphereShape_hitbox"]
+radius = 0.95
+
+[sub_resource type="SphereShape3D" id="SphereShape_attack"]
+radius = 1.2
+
+[sub_resource type="SphereShape3D" id="SphereShape_collision"]
+radius = 0.52
+
+[node name="MoonfenFenling" type="CharacterBody3D" groups=["enemy", "hushling"]]
+script = ExtResource("1_scr")
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="Body" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("SphereMesh_body")
+material_override = ExtResource("2_mat")
+
+[node name="Eyes" type="Node3D" parent="Visual"]
+
+[node name="Eye1" type="MeshInstance3D" parent="Visual/Eyes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.45, 0.3, 0)
+mesh = SubResource("SphereMesh_eye")
+material_override = ExtResource("3_eye")
+
+[node name="Eye2" type="MeshInstance3D" parent="Visual/Eyes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.45, 0.3, 0)
+mesh = SubResource("SphereMesh_eye")
+material_override = ExtResource("3_eye")
+
+[node name="Eye3" type="MeshInstance3D" parent="Visual/Eyes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0.45)
+mesh = SubResource("SphereMesh_eye")
+material_override = ExtResource("3_eye")
+
+[node name="Tendrils" type="Node3D" parent="Visual"]
+
+[node name="Tendril1" type="MeshInstance3D" parent="Visual/Tendrils"]
+transform = Transform3D(1, 0, 0, 0, 0.5, 0.866, 0, -0.866, 0.5, 0.6, -0.2, 0)
+mesh = SubResource("CylinderMesh_tendril")
+material_override = ExtResource("2_mat")
+
+[node name="Tendril2" type="MeshInstance3D" parent="Visual/Tendrils"]
+transform = Transform3D(1, 0, 0, 0, 0.5, 0.866, 0, -0.866, 0.5, -0.3, -0.2, 0.52)
+mesh = SubResource("CylinderMesh_tendril")
+material_override = ExtResource("2_mat")
+
+[node name="Tendril3" type="MeshInstance3D" parent="Visual/Tendrils"]
+transform = Transform3D(1, 0, 0, 0, 0.5, 0.866, 0, -0.866, 0.5, -0.3, -0.2, -0.52)
+mesh = SubResource("CylinderMesh_tendril")
+material_override = ExtResource("2_mat")
+
+[node name="Tendril4" type="MeshInstance3D" parent="Visual/Tendrils"]
+transform = Transform3D(1, 0, 0, 0, 0.5, 0.866, 0, -0.866, 0.5, 0, -0.2, -0.6)
+mesh = SubResource("CylinderMesh_tendril")
+material_override = ExtResource("2_mat")
+
+[node name="Tendril5" type="MeshInstance3D" parent="Visual/Tendrils"]
+transform = Transform3D(1, 0, 0, 0, 0.5, 0.866, 0, -0.866, 0.5, 0.3, -0.2, 0.52)
+mesh = SubResource("CylinderMesh_tendril")
+material_override = ExtResource("2_mat")
+
+[node name="Animator" type="Node3D" parent="."]
+script = ExtResource("4_anim")
+mode = 1
+visual_root = NodePath("../Visual")
+torso = NodePath("../Visual/Body")
+
+[node name="Hitbox" type="Area3D" parent="."]
+monitoring = true
+monitorable = true
+collision_layer = 2
+collision_mask = 1
+
+[node name="HitboxShape" type="CollisionShape3D" parent="Hitbox"]
+shape = SubResource("SphereShape_hitbox")
+
+[node name="AttackArea" type="Area3D" parent="." groups=["enemy_attack"]]
+monitoring = true
+monitorable = true
+collision_layer = 4
+collision_mask = 1
+
+[node name="AttackShape" type="CollisionShape3D" parent="AttackArea"]
+shape = SubResource("SphereShape_attack")
+
+[node name="CollisionShape" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape_collision")

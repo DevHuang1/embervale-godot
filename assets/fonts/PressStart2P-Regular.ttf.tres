@@ -1,0 +1,17 @@
+[gd_resource type="FontFile" load_steps=1 format=3]
+
+[resource]
+path="res://.godot/imported/PressStart2P-Regular.ttf-e20d5ff307f5ecfa1e9984f5c6184197.fontdata"
+antialiasing=1
+multichannel_signed_distance_field=true
+msdf_pixel_range=8
+msdf_size=48
+size=Vector2i(14, 0)
+rendering=0
+force_autohinter=false
+hinting=3
+subpixel_positioning=4
+keep_rounding_remainders=true
+oversampling=0.0
+allow_system_fallback=true
+modulate_color_glyphs=false

@@ -1,0 +1,120 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/main_menu.gd" id="1_0"]
+[ext_resource type="FontFile" path="res://assets/fonts/PressStart2P-Regular.ttf.tres" id="1_2"]
+[ext_resource type="FontFile" path="res://assets/fonts/VT323-Regular.ttf.tres" id="1_3"]
+
+[node name="MainMenu" type="CanvasLayer"]
+layer = 5
+script = ExtResource("1_0")
+
+[node name="Root" type="Control" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Background" type="ColorRect" parent="Root"]
+layout_mode = 2
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.043, 0.094, 0.078, 1)
+
+[node name="VBox" type="VBoxContainer" parent="Root"]
+layout_mode = 2
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -260.0
+offset_top = -240.0
+offset_right = 260.0
+offset_bottom = 240.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 28
+
+[node name="IntroCard" type="PanelContainer" parent="Root/VBox"]
+layout_mode = 2
+theme_override_constants/panel_inset = 24
+
+[node name="IntroVBox" type="VBoxContainer" parent="Root/VBox/IntroCard"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="ChapterLabel" type="Label" parent="Root/VBox/IntroCard/IntroVBox"]
+layout_mode = 2
+text = "A TALE FROM EMBERVALE"
+
+horizontal_alignment = 1
+theme_override_fonts/font = ExtResource("1_2")
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.43, 0.27, 0.18, 1)
+
+[node name="TitleLabel" type="Label" parent="Root/VBox/IntroCard/IntroVBox"]
+layout_mode = 2
+text = "THE LANTERN BEARER"
+horizontal_alignment = 1
+theme_override_fonts/font = ExtResource("1_2")
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.96, 0.72, 0.29, 1)
+
+[node name="SubtitleLabel" type="Label" parent="Root/VBox/IntroCard/IntroVBox"]
+layout_mode = 2
+text = "Night has settled over the Whispergrove. Take up the lantern,
+walk the pale path, and wake what sleeps beneath the moss."
+horizontal_alignment = 1
+autowrap_mode = 2
+theme_override_fonts/font = ExtResource("1_3")
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(0.56, 0.67, 0.45, 1)
+
+[node name="CTASpacer" type="Control" parent="Root/VBox/IntroCard/IntroVBox"]
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+
+[node name="CTAButton" type="Button" parent="Root/VBox/IntroCard/IntroVBox"]
+layout_mode = 2
+text = "BEGIN A NEW TALE"
+theme_override_fonts/font = ExtResource("1_2")
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.09, 0.21, 0.17, 1)
+
+[node name="MenuButtons" type="HBoxContainer" parent="Root/VBox"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 16
+
+[node name="ContinueButton" type="Button" parent="Root/VBox/MenuButtons"]
+layout_mode = 2
+text = "CONTINUE"
+disabled = true
+theme_override_fonts/font = ExtResource("1_2")
+theme_override_font_sizes/font_size = 10
+theme_override_colors/font_color = Color(0.4, 0.72, 0.7, 1)
+
+[node name="SatchelButton" type="Button" parent="Root/VBox/MenuButtons"]
+layout_mode = 2
+text = "SATCHEL"
+disabled = true
+tooltip_text = "The satchel opens only in the field."
+theme_override_fonts/font = ExtResource("1_2")
+theme_override_font_sizes/font_size = 10
+theme_override_colors/font_color = Color(0.4, 0.72, 0.7, 1)
+
+[node name="SettingsButton" type="Button" parent="Root/VBox/MenuButtons"]
+layout_mode = 2
+text = "SETTINGS"
+tooltip_text = "Volume and camera hints."
+theme_override_fonts/font = ExtResource("1_2")
+theme_override_font_sizes/font_size = 10
+theme_override_colors/font_color = Color(0.4, 0.72, 0.7, 1)
+
+[node name="FooterLabel" type="Label" parent="Root/VBox"]
+layout_mode = 2
+text = "WASD / drag to move - tap an enemy to engage - Q lash / E mend"
+horizontal_alignment = 1
+theme_override_fonts/font = ExtResource("1_3")
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.3, 0.27, 0.2, 1)

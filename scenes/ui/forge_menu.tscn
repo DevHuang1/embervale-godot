@@ -1,0 +1,190 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/forge_menu.gd" id="1_0"]
+[ext_resource type="FontFile" path="res://assets/fonts/PressStart2P-Regular.ttf" id="1_2"]
+[ext_resource type="FontFile" path="res://assets/fonts/VT323-Regular.ttf" id="1_3"]
+
+[node name="ForgeMenu" type="CanvasLayer"]
+layer = 20
+script = ExtResource("1_0")
+
+[node name="Root" type="PanelContainer" parent="."]
+anchors_preset = 15
+offset_left = 60.0
+offset_top = 60.0
+offset_right = -60.0
+offset_bottom = -60.0
+theme_override_constants = {"panel_inset": 16}
+
+[node name="VBox" type="VBoxContainer" parent="Root"]
+
+[node name="Header" type="HBoxContainer" parent="Root/VBox"]
+
+[node name="Title" type="Label" parent="Root/VBox/Header"]
+text = "DIVINING LENS"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 20}
+theme_override_colors = {"font_color": Color(0.09, 0.21, 0.17, 1)}
+
+[node name="CloseButton" type="TextureButton" parent="Root/VBox/Header"]
+tooltip_text = "Close (Esc)"
+
+[node name="Pipeline" type="PanelContainer" parent="Root/VBox"]
+size_flags_vertical = 2
+theme_override_constants = {"panel_inset": 12}
+
+[node name="PipelineVBox" type="VBoxContainer" parent="Root/VBox/Pipeline"]
+
+[node name="PipelineTitle" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
+text = "FORGING PIPELINE"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 14}
+theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
+
+[node name="Step1" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
+text = "1 - divine the object's essence on-device"
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 12}
+theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
+
+[node name="Step2" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
+text = "2 - bind its class to a weapon form"
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 12}
+theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
+
+[node name="Step3" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
+text = "3 - roll rarity from the photo itself"
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 12}
+theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
+
+[node name="Step4" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
+text = "4 - reveal your forged gear"
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 12}
+theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
+
+[node name="Result" type="PanelContainer" parent="Root/VBox"]
+visible = false
+theme_override_constants = {"panel_inset": 16}
+
+[node name="ResultVBox" type="VBoxContainer" parent="Root/VBox/Result"]
+
+[node name="ResultTitle" type="Label" parent="Root/VBox/Result/ResultVBox"]
+text = "FORGE COMPLETE"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 18}
+theme_override_colors = {"font_color": Color(0.96, 0.72, 0.29, 1)}
+
+[node name="WeaponGlyph" type="Label" parent="Root/VBox/Result/ResultVBox"]
+text = "+"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 48}
+
+[node name="WeaponName" type="Label" parent="Root/VBox/Result/ResultVBox"]
+text = "MUG MACE"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 24}
+theme_override_colors = {"font_color": Color(0.09, 0.21, 0.17, 1)}
+
+[node name="WeaponStats" type="Label" parent="Root/VBox/Result/ResultVBox"]
+text = "ATK 7 / REACH 8.2 / MUG SLAM (AOE)"
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 14}
+theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
+
+[node name="RarityLabel" type="Label" parent="Root/VBox/Result/ResultVBox"]
+text = "RARITY: COMMON"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 14}
+theme_override_colors = {"font_color": Color(0.58, 0.67, 0.65, 1)}
+
+[node name="NamingTitle" type="Label" parent="Root/VBox/Result/ResultVBox"]
+text = "NAME THE RELIC & ITS RITES"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 12}
+theme_override_colors = {"font_color": Color(0.43, 0.27, 0.18, 1)}
+
+[node name="ItemRow" type="HBoxContainer" parent="Root/VBox/Result/ResultVBox"]
+
+[node name="ItemTag" type="Label" parent="Root/VBox/Result/ResultVBox/ItemRow"]
+custom_minimum_size = Vector2(110, 0)
+text = "ITEM"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 10}
+theme_override_colors = {"font_color": Color(0.96, 0.72, 0.29, 1)}
+
+[node name="ItemNameEdit" type="LineEdit" parent="Root/VBox/Result/ResultVBox/ItemRow"]
+size_flags_horizontal = 3
+max_length = 22
+placeholder_text = "Name this relic..."
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 16}
+
+[node name="Skill1Row" type="HBoxContainer" parent="Root/VBox/Result/ResultVBox"]
+
+[node name="Skill1Tag" type="Label" parent="Root/VBox/Result/ResultVBox/Skill1Row"]
+custom_minimum_size = Vector2(110, 0)
+text = "SKILL 1"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 10}
+theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
+
+[node name="Skill1Edit" type="LineEdit" parent="Root/VBox/Result/ResultVBox/Skill1Row"]
+size_flags_horizontal = 3
+max_length = 22
+placeholder_text = "Kindled Strike"
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 16}
+
+[node name="Skill2Row" type="HBoxContainer" parent="Root/VBox/Result/ResultVBox"]
+
+[node name="Skill2Tag" type="Label" parent="Root/VBox/Result/ResultVBox/Skill2Row"]
+custom_minimum_size = Vector2(110, 0)
+text = "SKILL 2"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 10}
+theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
+
+[node name="Skill2Edit" type="LineEdit" parent="Root/VBox/Result/ResultVBox/Skill2Row"]
+size_flags_horizontal = 3
+max_length = 22
+placeholder_text = "Grove Cyclone"
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 16}
+
+[node name="UltimateRow" type="HBoxContainer" parent="Root/VBox/Result/ResultVBox"]
+
+[node name="UltimateTag" type="Label" parent="Root/VBox/Result/ResultVBox/UltimateRow"]
+custom_minimum_size = Vector2(110, 0)
+text = "ULTIMATE"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 10}
+theme_override_colors = {"font_color": Color(0.96, 0.72, 0.29, 1)}
+
+[node name="UltimateEdit" type="LineEdit" parent="Root/VBox/Result/ResultVBox/UltimateRow"]
+size_flags_horizontal = 3
+max_length = 22
+placeholder_text = "Relic Cataclysm"
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 16}
+
+[node name="KitPreview" type="Label" parent="Root/VBox/Result/ResultVBox"]
+text = "The lens fixes every number — names are yours alone."
+autowrap_mode = 2
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 13}
+theme_override_colors = {"font_color": Color(0.56, 0.64, 0.45, 1)}
+
+[node name="EquipButton" type="Button" parent="Root/VBox/Result/ResultVBox"]
+text = "EQUIP"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 14}
+theme_override_colors = {"font_color": Color(0.4, 0.72, 0.7, 1)}
+
+[node name="ScanButton" type="Button" parent="Root/VBox"]
+text = "BEGIN DIVINATION"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 16}
+theme_override_colors = {"font_color": Color(0.4, 0.72, 0.7, 1)}

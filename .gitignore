@@ -1,0 +1,38 @@
+# Godot 4
+.import/
+export_presets.cfg
+*.uid
+*.pid
+*.log
+*.tmp
+*~
+.godot/
+# downloaded art/sfx source archives (keep out of VCS)
+.assets_tmp/
+# stray nested copy of scripts
+Users/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build
+build/
+exports/
+*.apk
+*.aab
+*.ipa
+*.mobileprovision
+
+# Local config
+*.local.cfg
+user_*.cfg
+
+# Hackathon plan (keep untracked)
+SHIPATON_PLAN.md

@@ -1,0 +1,204 @@
+[gd_scene load_steps=17 format=3]
+
+[ext_resource type="Script" path="res://scripts/entities/hero.gd" id="1_scr"]
+[ext_resource type="Material" path="res://assets/materials/entity_hero.tres" id="2_mat"]
+[ext_resource type="Material" path="res://assets/materials/lantern_flame.tres" id="3_flame"]
+[ext_resource type="Script" path="res://scripts/entities/entity_animator.gd" id="4_anim"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_hero"]
+radius = 0.38
+height = 1.5
+
+[sub_resource type="SphereMesh" id="SphereMesh_head"]
+radius = 0.2
+height = 0.4
+
+[sub_resource type="SphereMesh" id="SphereMesh_glass"]
+radius = 0.13
+height = 0.26
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_limb"]
+radius = 0.09
+height = 0.52
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_leg"]
+radius = 0.115
+height = 0.5
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape_hero"]
+radius = 0.42
+height = 1.5
+
+[sub_resource type="SphereShape3D" id="SphereShape_hitbox"]
+radius = 0.95
+
+[sub_resource type="SphereShape3D" id="SphereShape_attack"]
+radius = 1.6
+
+[sub_resource type="Gradient" id="Grad_spark"]
+offsets = PackedFloat32Array(0, 0.6, 1)
+colors = PackedColorArray(1, 0.84, 0.47, 0.9, 0.96, 0.72, 0.29, 0.5, 0.96, 0.72, 0.29, 0)
+
+[sub_resource type="GradientTexture1D" id="GradTex_spark"]
+gradient = SubResource("Grad_spark")
+
+[sub_resource type="ParticleProcessMaterial" id="Proc_spark"]
+emission_shape = 1
+emission_sphere_radius = 0.12
+direction = Vector3(0, 1, 0)
+spread = 40.0
+initial_velocity_min = 0.2
+initial_velocity_max = 0.6
+gravity = Vector3(0, 0.45, 0)
+scale_min = 0.4
+scale_max = 1.0
+color = Color(0.96, 0.72, 0.29, 1)
+color_ramp = SubResource("GradTex_spark")
+
+[sub_resource type="StandardMaterial3D" id="Mat_spark"]
+transparency = 1
+blend_mode = 1
+shading_mode = 0
+vertex_color_use_as_albedo = true
+billboard_mode = 3
+disable_receive_shadows = true
+
+[sub_resource type="QuadMesh" id="Quad_spark"]
+size = Vector2(0.07, 0.07)
+material = SubResource("Mat_spark")
+
+[node name="Hero" type="CharacterBody3D" groups=["player"]]
+script = ExtResource("1_scr")
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="Body" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)
+mesh = SubResource("CapsuleMesh_hero")
+material_override = ExtResource("2_mat")
+
+[node name="Head" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.42, 0)
+mesh = SubResource("SphereMesh_head")
+material_override = ExtResource("2_mat")
+
+[node name="ArmL" type="Node3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.46, 1.02, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Visual/ArmL"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.26, 0)
+mesh = SubResource("CapsuleMesh_limb")
+material_override = ExtResource("2_mat")
+
+[node name="Forearm" type="Node3D" parent="Visual/ArmL"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Visual/ArmL/Forearm"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.16, 0)
+mesh = SubResource("CapsuleMesh_limb")
+material_override = ExtResource("2_mat")
+
+[node name="ArmR" type="Node3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.46, 1.02, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Visual/ArmR"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.26, 0)
+mesh = SubResource("CapsuleMesh_limb")
+material_override = ExtResource("2_mat")
+
+[node name="Forearm" type="Node3D" parent="Visual/ArmR"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Visual/ArmR/Forearm"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.16, 0)
+mesh = SubResource("CapsuleMesh_limb")
+material_override = ExtResource("2_mat")
+
+[node name="Lantern" type="Node3D" parent="Visual/ArmR"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.18, 0.3)
+
+[node name="LanternLight" type="OmniLight3D" parent="Visual/ArmR/Lantern"]
+light_color = Color(0.96, 0.72, 0.29, 1)
+light_energy = 1.8
+omni_range = 12.0
+omni_attenuation = 2.0
+light_shadow_enabled = true
+
+[node name="LanternMesh" type="MeshInstance3D" parent="Visual/ArmR/Lantern"]
+mesh = SubResource("SphereMesh_glass")
+material_override = ExtResource("3_flame")
+
+[node name="LanternParticles" type="GPUParticles3D" parent="Visual/ArmR/Lantern"]
+emitting = true
+amount = 20
+lifetime = 1.0
+local_coords = false
+process_material = SubResource("Proc_spark")
+draw_pass_1 = SubResource("Quad_spark")
+
+[node name="LegL" type="Node3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.17, 0.52, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Visual/LegL"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.25, 0)
+mesh = SubResource("CapsuleMesh_leg")
+material_override = ExtResource("2_mat")
+
+[node name="Foot" type="Node3D" parent="Visual/LegL"]
+transform = Transform3D(0.62, 0, 0, 0, 0.34, 0, 0, 0, 0.92, 0, -0.5, 0.03)
+
+[node name="Mesh" type="MeshInstance3D" parent="Visual/LegL/Foot"]
+mesh = SubResource("SphereMesh_head")
+material_override = ExtResource("2_mat")
+
+[node name="LegR" type="Node3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.17, 0.52, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Visual/LegR"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.25, 0)
+mesh = SubResource("CapsuleMesh_leg")
+material_override = ExtResource("2_mat")
+
+[node name="Foot" type="Node3D" parent="Visual/LegR"]
+transform = Transform3D(0.62, 0, 0, 0, 0.34, 0, 0, 0, 0.92, 0, -0.5, 0.03)
+
+[node name="Mesh" type="MeshInstance3D" parent="Visual/LegR/Foot"]
+mesh = SubResource("SphereMesh_head")
+material_override = ExtResource("2_mat")
+
+[node name="Animator" type="Node3D" parent="."]
+script = ExtResource("4_anim")
+visual_root = NodePath("../Visual")
+torso = NodePath("../Visual/Body")
+head = NodePath("../Visual/Head")
+arm_l = NodePath("../Visual/ArmL")
+arm_r = NodePath("../Visual/ArmR")
+forearm_l = NodePath("../Visual/ArmL/Forearm")
+forearm_r = NodePath("../Visual/ArmR/Forearm")
+leg_l = NodePath("../Visual/LegL")
+leg_r = NodePath("../Visual/LegR")
+foot_l = NodePath("../Visual/LegL/Foot")
+foot_r = NodePath("../Visual/LegR/Foot")
+lantern = NodePath("../Visual/ArmR/Lantern")
+
+[node name="CollisionShape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)
+shape = SubResource("CapsuleShape_hero")
+
+[node name="Hitbox" type="Area3D" parent="." groups=["player"]]
+monitoring = true
+monitorable = true
+collision_layer = 1
+collision_mask = 4
+
+[node name="HitboxShape" type="CollisionShape3D" parent="Hitbox"]
+shape = SubResource("SphereShape_hitbox")
+
+[node name="AttackArea" type="Area3D" parent="." groups=["player_attack"]]
+monitoring = true
+monitorable = true
+collision_layer = 1
+collision_mask = 2
+
+[node name="AttackShape" type="CollisionShape3D" parent="AttackArea"]
+shape = SubResource("SphereShape_attack")

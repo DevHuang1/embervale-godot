@@ -1,0 +1,135 @@
+EMBERVALE MOBILE — GODOT 4.3 RUN GUIDE
+=========================================
+
+PROJECT LOCATION
+----------------
+/Users/yuza/embervale-godot
+
+REQUIREMENTS
+------------
+- Godot 4.3+ (stable)
+- macOS 11+ (universal build works on Apple Silicon & Intel)
+
+INSTALL GODOT
+-------------
+Option A: Direct Download
+  1. Go to https://godotengine.org/download/macos/
+  2. Download "Godot_v4.3-stable_macos.universal.zip"
+  3. Unzip to /Applications/Godot.app
+
+Option B: Homebrew
+  brew install --cask godot
+
+Option C: Steam
+  Install "Godot Engine" from Steam (auto-updates)
+
+FIRST RUN — REMOVE QUARANTINE (REQUIRED ON MACOS)
+-------------------------------------------------
+xattr -d com.apple.quarantine /Applications/Godot.app
+
+ADD FONTS (REQUIRED FOR UI)
+---------------------------
+Download and place in /Users/yuza/embervale-godot/assets/fonts/:
+
+1. Press Start 2P (for titles/buttons)
+   https://fonts.google.com/specimen/Press+Start+2P
+   → Download family → PressStart2P-Regular.ttf
+
+2. VT323 (for body text)
+   https://fonts.google.com/specimen/VT323
+   → Download family → VT323-Regular.ttf
+
+In Godot Editor:
+  - Select each .ttf in FileSystem dock
+  - Import tab → Type: "FontFile"
+  - Size: 14, Antialiasing: On, MSDF: On
+  - Click "Reimport"
+
+RUN THE PROJECT
+---------------
+Method 1: Terminal
+  cd /Users/yuza/embervale-godot
+  /Applications/Godot.app/Contents/MacOS/Godot --path .
+
+Method 2: Godot Project Manager
+  1. Open Godot.app
+  2. Click "Import"
+  3. Browse to /Users/yuza/embervale-godot/project.godot
+  4. Select project → "Run" (F5)
+
+Method 3: Finder
+  open /Applications/Godot.app --args --path /Users/yuza/embervale-godot
+
+EXPORT TEMPLATES (for iOS/Android builds)
+-----------------------------------------
+In Godot Editor:
+  Editor → Manage Export Templates → Download "4.3.stable"
+
+CONTROLS
+--------
+Desktop:
+  WASD / Arrow Keys    Move
+  LMB / Space          Attack / Engage enemy
+  RMB / Enter          Interact
+  Q                    Cinder Lash
+  E                    Mend Flame
+  F                    Open Scan (Divining Lens)
+  Escape               Pause / Close menus
+
+Mobile (when exported):
+  Drag on screen       Virtual joystick move
+  Tap enemy            Engage auto-combat
+  Double-tap           Interact
+  Skill buttons        Cinder Lash / Mend Flame
+  Scan button          Open camera forge
+
+TROUBLESHOOTING
+---------------
+"Project not found" → Check project.godot exists in folder
+Fonts missing → Reimport .ttf files as FontFile with MSDF
+Camera not working on mobile → Enable Camera permission in iOS/Android settings
+Black screen → Check that Environment resource is assigned in grove.tscn
+Shaders not loading → Verify .gdshader files in assets/shaders/
+
+PROJECT STRUCTURE
+-----------------
+embervale-godot/
+├── project.godot
+├── scenes/
+│   ├── main/main.tscn        # Entry point
+│   ├── world/grove.tscn      # 3D Whispergrove
+│   ├── entities/             # Hero, Hushling, Boss
+│   └── ui/                   # HUD, Satchel, Forge, Menu
+├── scripts/
+│   ├── autoload/             # GameState, ScanManager, Audio, Input
+│   ├── systems/              # WorldManager, CameraRig
+│   ├── entities/             # Hero, Hushling, Boss logic
+│   └── ui/                   # HUD, Satchel, Forge, Menu
+├── assets/
+│   ├── shaders/              # hit_flash, lantern_glow, hero_lantern
+│   ├── environments/         # embervale_env, embervale_sky
+│   ├── ui/theme.tres
+│   └── fonts/                # ADD YOUR .ttf FILES HERE
+└── addons/
+
+KEY GAMEPLAY
+------------
+- Quest: I. Seek Sprite → II. Claim Shard → III. Light Beacon → IV. Complete
+- Auto-combat: tap Hushling → Elian approaches → strikes every 0.92s
+- Passive: every 3rd strike +4 ember damage
+- Skills: Cinder Lash (16 dmg, 6s cd), Mend Flame (+10 warmth, 9s cd)
+- XP: first kill 35 → Lv 2, then +10/kill
+- Scan: camera → detect object → forge weapon with rarity roll
+- Boss: Hushling Matriarch (4 phases, summons, thorn rain, bramble storm)
+
+VERIFY BUILD
+------------
+1. Open project in Godot
+2. Press F5 → Main Menu should appear
+3. Click "CARRY THE FLAME →" → Grove loads
+4. Tap Hushling → auto-combat engages
+5. Press Q/E → skills fire with cooldowns
+5. Press S → Scan camera opens
+6. Open Satchel (I) → inventory + class skills visible
+
+DONE — The grove awaits. Carry the flame.

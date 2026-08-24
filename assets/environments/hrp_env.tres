@@ -1,0 +1,33 @@
+[gd_resource type="Environment" format=3]
+
+
+[resource]
+resource_name = "hrp_env"
+ambient_light_source = 2
+ambient_light_color = Color(0.44, 0.47, 0.43, 1)
+ambient_light_energy = 1.05
+tonemap_mode = 3
+tonemap_exposure = 1.05
+tonemap_white = 6.0
+ssao_enabled = true
+ssao_radius = 1.2
+ssao_intensity = 2.0
+ssil_enabled = true
+glow_enabled = true
+glow_intensity = 0.9
+glow_bloom = 0.08
+glow_blend_mode = 1
+fog_enabled = true
+fog_light_color = Color(0.12, 0.16, 0.17, 1)
+fog_density = 0.008
+fog_sky_affect = 0.4
+volumetric_fog_enabled = true
+volumetric_fog_density = 0.03
+volumetric_fog_albedo = Color(0.5, 0.56, 0.54, 1)
+volumetric_fog_emission = Color(0.03, 0.04, 0.04, 1)
+volumetric_fog_anisotropy = 0.6
+sdfgi_enabled = true
+sdfgi_cascades = 4
+adjustment_enabled = true
+adjustment_contrast = 1.06
+adjustment_saturation = 1.04

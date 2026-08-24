@@ -1,0 +1,35 @@
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[ext_resource type="Shader" path="res://assets/shaders/entity_body.gdshader" id="1_entity"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_entity")
+shader_parameter/base_color = Color(0.5, 0.5, 0.5, 1)
+shader_parameter/roughness = 0.6
+shader_parameter/metallic = 0.0
+shader_parameter/specular = 0.35
+shader_parameter/albedo_mix = 0.0
+shader_parameter/normal_mix = 0.0
+shader_parameter/orm_mix = 0.0
+shader_parameter/detail_normal_strength = 0.0
+shader_parameter/detail_normal_scale = Vector2(7, 7)
+shader_parameter/emission_mask_mix = 0.0
+shader_parameter/emission_color = Color(0, 0, 0, 1)
+shader_parameter/emission_energy = 0.0
+shader_parameter/glow_intensity = 1.0
+shader_parameter/rim_color = Color(0.96, 0.72, 0.29, 1)
+shader_parameter/rim_power = 2.6
+shader_parameter/rim_intensity = 1.1
+shader_parameter/rim_ambient_floor = 0.12
+shader_parameter/rim_width = 0.2
+shader_parameter/sss_strength = 0.0
+shader_parameter/sss_tint = Color(0.45, 0.75, 0.55, 1)
+shader_parameter/flash_color = Color(1, 0.84, 0.47, 1)
+shader_parameter/flash_intensity = 0.0
+shader_parameter/scan_reveal = 0.0
+shader_parameter/sway_amount = 0.004
+shader_parameter/sway_speed = 1.6
+shader_parameter/cloth_noise_amount = 0.05
+shader_parameter/cloth_noise_scale = 18.0
+shader_parameter/joint_ao_strength = 0.0

@@ -1,0 +1,28 @@
+[gd_resource type="Resource" script_class="AudioCueConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/autoload/audio_cue_config.gd" id="1_cfg"]
+
+[resource]
+script = ExtResource("1_cfg")
+cues = {
+"footstep_grass": {"bus": "SFX", "pitch_max": 1.1, "pitch_min": 0.92, "variants": 3, "volume_db": -10.0},
+"footstep_mud": {"bus": "SFX", "pitch_max": 1.08, "pitch_min": 0.88, "variants": 3, "volume_db": -9.0},
+"footstep_stone": {"bus": "SFX", "pitch_max": 1.12, "pitch_min": 0.9, "variants": 3, "volume_db": -11.0},
+"dodge_roll": {"bus": "SFX", "pitch_max": 1.05, "pitch_min": 0.95, "variants": 2, "volume_db": -7.0},
+"swing_open": {"bus": "SFX", "pitch_max": 1.08, "pitch_min": 0.94, "variants": 2, "volume_db": -7.5},
+"swing_reverse": {"bus": "SFX", "pitch_max": 1.08, "pitch_min": 0.94, "variants": 2, "volume_db": -7.0},
+"swing_finisher": {"bus": "SFX", "pitch_max": 1.05, "pitch_min": 0.96, "variants": 2, "volume_db": -5.5},
+"magic_cast": {"bus": "SFX", "pitch_max": 1.03, "pitch_min": 0.97, "variants": 2, "volume_db": -7.0},
+"slash_impact": {"bus": "SFX", "pitch_max": 1.09, "pitch_min": 0.93, "variants": 2, "volume_db": -6.5},
+"lantern_hum": {"bus": "SFX", "pitch_max": 1.02, "pitch_min": 0.98, "variants": 3, "volume_db": -16.0},
+"lantern_creak": {"bus": "SFX", "pitch_max": 1.06, "pitch_min": 0.94, "variants": 2, "volume_db": -13.0},
+"hushling_telegraph": {"bus": "SFX", "pitch_max": 1.12, "pitch_min": 0.9, "variants": 2, "volume_db": -9.0},
+"hushling_lunge": {"bus": "SFX", "pitch_max": 1.1, "pitch_min": 0.92, "variants": 2, "volume_db": -8.0},
+"spore_burst": {"bus": "SFX", "pitch_max": 1.12, "pitch_min": 0.9, "variants": 2, "volume_db": -6.5},
+"hushling_death": {"bus": "SFX", "pitch_max": 1.05, "pitch_min": 0.95, "variants": 2, "volume_db": -8.0},
+"boss_stomp": {"bus": "SFX", "pitch_max": 1.06, "pitch_min": 0.94, "variants": 2, "volume_db": -4.5},
+"boss_death": {"bus": "SFX", "pitch_max": 1.03, "pitch_min": 0.97, "variants": 2, "volume_db": -4.0},
+"ui_confirm": {"bus": "SFX", "pitch_max": 1.01, "pitch_min": 0.99, "variants": 1, "volume_db": -8.0},
+"ui_cancel": {"bus": "SFX", "pitch_max": 1.01, "pitch_min": 0.99, "variants": 1, "volume_db": -9.0},
+"forge_success": {"bus": "SFX", "pitch_max": 1.0, "pitch_min": 1.0, "variants": 1, "volume_db": -5.0}
+}

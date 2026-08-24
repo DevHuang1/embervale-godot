@@ -1,0 +1,41 @@
+[gd_resource type="ShaderMaterial" load_steps=6 format=3]
+
+[ext_resource type="Shader" path="res://assets/shaders/entity_body.gdshader" id="1_entity"]
+[ext_resource type="Texture2D" path="res://assets/textures/generated/boss_bark_normal.png" id="2_nrm"]
+[ext_resource type="Texture2D" path="res://assets/textures/generated/boss_orm.png" id="3_orm"]
+[ext_resource type="Texture2D" path="res://assets/textures/generated/boss_heart_mask.png" id="4_hrt"]
+[ext_resource type="Texture2D" path="res://assets/textures/generated/detail_normal.png" id="5_dtl"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_entity")
+shader_parameter/base_color = Color(0.13, 0.11, 0.12, 1)
+shader_parameter/roughness = 0.55
+shader_parameter/metallic = 0.08
+shader_parameter/specular = 0.4
+shader_parameter/normal_texture = ExtResource("2_nrm")
+shader_parameter/normal_mix = 0.62
+shader_parameter/orm_texture = ExtResource("3_orm")
+shader_parameter/orm_mix = 0.65
+shader_parameter/detail_normal = ExtResource("5_dtl")
+shader_parameter/detail_normal_strength = 0.18
+shader_parameter/detail_normal_scale = Vector2(9, 9)
+shader_parameter/emission_mask = ExtResource("4_hrt")
+shader_parameter/emission_mask_mix = 0.9
+shader_parameter/rim_color = Color(1.0, 0.38, 0.16, 1)
+shader_parameter/rim_power = 2.2
+shader_parameter/rim_intensity = 1.3
+shader_parameter/rim_ambient_floor = 0.16
+shader_parameter/rim_width = 0.3
+shader_parameter/emission_color = Color(0.25, 0.04, 0.02, 1)
+shader_parameter/emission_energy = 0.35
+shader_parameter/glow_intensity = 1.0
+shader_parameter/flash_color = Color(1, 0.84, 0.47, 1)
+shader_parameter/flash_intensity = 0.0
+shader_parameter/sway_amount = 0.002
+shader_parameter/sway_speed = 0.9
+shader_parameter/cloth_noise_amount = 0.04
+shader_parameter/cloth_noise_scale = 9.0
+shader_parameter/joint_ao_strength = 0.18
+shader_parameter/joint_ao_low = -1.8
+shader_parameter/joint_ao_high = -0.6

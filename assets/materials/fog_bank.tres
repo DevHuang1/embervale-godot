@@ -1,0 +1,13 @@
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[ext_resource type="Shader" path="res://assets/shaders/fog_card.gdshader" id="1_fog"]
+
+[resource]
+render_priority = -5
+shader = ExtResource("1_fog")
+shader_parameter/fog_tint = Color(0.62, 0.7, 0.68, 1)
+shader_parameter/fog_alpha = 0.13
+shader_parameter/drift_speed = 0.06
+shader_parameter/noise_scale = 2.6
+shader_parameter/fade_near = 3.0
+shader_parameter/fade_far = 46.0

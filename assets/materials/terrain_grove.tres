@@ -1,0 +1,24 @@
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[ext_resource type="Shader" path="res://assets/shaders/terrain_moss.gdshader" id="1_terrain"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_terrain")
+shader_parameter/tile_scale = 16.0
+shader_parameter/macro_scale = 0.9
+shader_parameter/detail_scale = 46.0
+shader_parameter/moss_color = Vector3(0.22, 0.38, 0.14)
+shader_parameter/grass_color = Vector3(0.42, 0.64, 0.20)
+shader_parameter/dry_grass_color = Vector3(0.56, 0.49, 0.20)
+shader_parameter/soil_color = Vector3(0.23, 0.20, 0.13)
+shader_parameter/grass_coverage = 0.62
+shader_parameter/damp_amount = 0.28
+shader_parameter/dry_patch_amount = 0.18
+shader_parameter/roughness_min = 0.68
+shader_parameter/roughness_max = 0.95
+shader_parameter/bump_strength = 0.78
+shader_parameter/terrain_brightness = 1.28
+shader_parameter/ember_fleck_color = Vector3(0.96, 0.72, 0.29)
+shader_parameter/ember_fleck_density = 0.045
+shader_parameter/ember_fleck_intensity = 0.85

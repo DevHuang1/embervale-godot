@@ -1,0 +1,37 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="ShaderMaterial" path="res://assets/materials/fog_bank.tres" id="1_mat"]
+
+[sub_resource type="Gradient" id="grad_fade"]
+offsets = PackedFloat32Array(0.0, 0.22, 0.78, 1.0)
+colors = PackedColorArray(0.9, 0.95, 0.93, 0.0, 1, 1, 1, 1, 1, 1, 1, 1, 0.9, 0.95, 0.93, 0.0)
+
+[sub_resource type="GradientTexture1D" id="grad_fade_tex"]
+gradient = SubResource("grad_fade")
+
+[sub_resource type="ParticleProcessMaterial" id="pm_fog"]
+emission_shape = 3
+emission_box_extents = Vector3(18, 1.4, 18)
+direction = Vector3(1, 0, 0.3)
+spread = 12.0
+initial_velocity_min = 0.25
+initial_velocity_max = 0.6
+gravity = Vector3(0, 0, 0)
+angular_velocity_min = -4.0
+angular_velocity_max = 4.0
+scale_min = 0.7
+scale_max = 1.6
+color_ramp = SubResource("grad_fade_tex")
+
+[sub_resource type="QuadMesh" id="quad_card"]
+material = ExtResource("1_mat")
+size = Vector2(13, 13)
+
+[node name="FogBank" type="GPUParticles3D"]
+amount = 9
+lifetime = 11.0
+preprocess = 10.0
+randomness = 0.35
+visibility_aabb = AABB(-30, -8, -30, 60, 16, 60)
+process_material = SubResource("pm_fog")
+draw_pass_1 = SubResource("quad_card")

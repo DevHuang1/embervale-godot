@@ -1,0 +1,126 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/boss_altar.gd" id="1_0"]
+[ext_resource type="FontFile" path="res://assets/fonts/PressStart2P-Regular.ttf" id="1_2"]
+[ext_resource type="FontFile" path="res://assets/fonts/VT323-Regular.ttf" id="1_3"]
+
+[node name="BossAltar" type="CanvasLayer"]
+layer = 25
+script = ExtResource("1_0")
+
+[node name="Root" type="PanelContainer" parent="."]
+anchors_preset = 15
+offset_left = 80.0
+offset_top = 60.0
+offset_right = -80.0
+offset_bottom = -60.0
+theme_override_constants = {"panel_inset": 16}
+
+[node name="VBox" type="VBoxContainer" parent="Root"]
+custom_constants = {"separation": 12}
+
+[node name="Title" type="Label" parent="Root/VBox"]
+text = "SHAPE YOUR FOE"
+horizontal_alignment = 1
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 20}
+theme_override_colors = {"font_color": Color(0.96, 0.72, 0.29, 1)}
+
+[node name="ScanLine" type="Label" parent="Root/VBox"]
+text = "You hold 5 scans."
+horizontal_alignment = 1
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 14}
+theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
+
+[node name="LockedBlurb" type="Label" parent="Root/VBox"]
+text = "Summons, Root Prison and the Bramble Storm are hers alone."
+autowrap_mode = 2
+horizontal_alignment = 1
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 13}
+theme_override_colors = {"font_color": Color(0.43, 0.27, 0.18, 1)}
+
+[node name="ActionRow" type="HBoxContainer" parent="Root/VBox"]
+alignment = 1
+custom_constants = {"separation": 16}
+
+[node name="ScanButton" type="Button" parent="Root/VBox/ActionRow"]
+custom_minimum_size = Vector2(240, 56)
+text = "SCAN AN OBJECT"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 12}
+theme_override_colors = {"font_color": Color(0.4, 0.72, 0.7, 1)}
+
+[node name="DefaultButton" type="Button" parent="Root/VBox/ActionRow"]
+custom_minimum_size = Vector2(240, 56)
+text = "FACE THE DEFAULT"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 12}
+theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1)}
+
+[node name="Status" type="Label" parent="Root/VBox"]
+text = ""
+autowrap_mode = 2
+horizontal_alignment = 1
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 13}
+theme_override_colors = {"font_color": Color(0.85, 0.62, 0.4, 1)}
+
+[node name="CustomBox" type="VBoxContainer" parent="Root/VBox"]
+visible = false
+custom_constants = {"separation": 10}
+
+[node name="PaletteTag" type="Label" parent="Root/VBox/CustomBox"]
+text = "EXTRACTED PALETTE"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 10}
+theme_override_colors = {"font_color": Color(0.43, 0.27, 0.18, 1)}
+
+[node name="PaletteRow" type="HBoxContainer" parent="Root/VBox/CustomBox"]
+custom_constants = {"separation": 8}
+
+[node name="SkillTag" type="Label" parent="Root/VBox/CustomBox"]
+text = "CHOOSE ONE RITE (REPLACES THORN CASCADE)"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 10}
+theme_override_colors = {"font_color": Color(0.43, 0.27, 0.18, 1)}
+
+[node name="SkillGrid" type="GridContainer" parent="Root/VBox/CustomBox"]
+columns = 2
+custom_constants = {"h_separation": 10, "v_separation": 8}
+
+[node name="SfxTag" type="Label" parent="Root/VBox/CustomBox"]
+text = "VOICE OF THE BEAST"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 10}
+theme_override_colors = {"font_color": Color(0.43, 0.27, 0.18, 1)}
+
+[node name="SfxRow" type="HBoxContainer" parent="Root/VBox/CustomBox"]
+custom_constants = {"separation": 8}
+
+[node name="Summary" type="Label" parent="Root/VBox/CustomBox"]
+text = "Choose one rite from her pool to complete the binding."
+autowrap_mode = 2
+theme_override_fonts = {"font": ExtResource("1_3")}
+theme_override_font_sizes = {"font_size": 14}
+theme_override_colors = {"font_color": Color(0.56, 0.64, 0.45, 1)}
+
+[node name="LockRow" type="HBoxContainer" parent="Root/VBox/CustomBox"]
+alignment = 1
+custom_constants = {"separation": 16}
+
+[node name="LockButton" type="Button" parent="Root/VBox/CustomBox/LockRow"]
+custom_minimum_size = Vector2(260, 56)
+text = "LOCK IN (USES 1 SCAN)"
+disabled = true
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 11}
+theme_override_colors = {"font_color": Color(0.96, 0.72, 0.29, 1)}
+
+[node name="RescanButton" type="Button" parent="Root/VBox/CustomBox/LockRow"]
+visible = false
+custom_minimum_size = Vector2(160, 56)
+text = "RESCAN"
+theme_override_fonts = {"font": ExtResource("1_2")}
+theme_override_font_sizes = {"font_size": 11}

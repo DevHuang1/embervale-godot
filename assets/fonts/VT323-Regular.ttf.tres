@@ -1,0 +1,17 @@
+[gd_resource type="FontFile" load_steps=1 format=3]
+
+[resource]
+path="res://.godot/imported/VT323-Regular.ttf-fc3781f5235ceff7fbc465ccf3078d1e.fontdata"
+antialiasing=1
+multichannel_signed_distance_field=true
+msdf_pixel_range=8
+msdf_size=48
+size=Vector2i(14, 0)
+rendering=0
+force_autohinter=false
+hinting=3
+subpixel_positioning=4
+keep_rounding_remainders=true
+oversampling=0.0
+allow_system_fallback=true
+modulate_color_glyphs=false

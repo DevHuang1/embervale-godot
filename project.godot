@@ -1,0 +1,69 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Embervale Mobile"
+run/main_scene="res://scenes/main/main.tscn"
+config/features=PackedStringArray("4.7")
+
+[autoload]
+
+GameState="*res://scripts/autoload/game_state.gd"
+ScanManager="*res://scripts/autoload/scan_manager.gd"
+AudioManager="*res://scripts/autoload/audio_manager.gd"
+InputManager="*res://scripts/autoload/input_manager.gd"
+
+[debug]
+
+settings/gizmos/global=true
+
+[display]
+
+window/size/viewport_width=1080
+window/size/viewport_height=1920
+window/mode/window_mode=0
+
+[groups]
+
+player="player"
+enemy="enemy"
+boss="boss"
+hushling="hushling"
+pickup="pickup"
+projectile="projectile"
+
+
+
+[layer_names]
+
+2d_physics/layer_1="player"
+3d_physics/layer_1="player"
+2d_physics/layer_2="enemy"
+3d_physics/layer_2="enemy"
+2d_physics/layer_3="projectile"
+3d_physics/layer_3="projectile"
+2d_physics/layer_4="pickup"
+3d_physics/layer_4="pickup"
+3d_physics/layer_5="boss"
+3d_physics/layer_6="environment"
+
+[physics]
+
+physics/common/physics_tick=60
+
+[rendering]
+
+rendering/quality/shadows/enabled=true
+rendering/quality/shadow_atlas/size=2048
+rendering/quality/shadow_atlas/quadrant_subdivision=4
+rendering/lights_and_shadows/use_occlusion_culling=true
+rendering/environment/defaults/default_clear_color=Color(0.043, 0.094, 0.078, 1)
+rendering/environment/defaults/default_environment="res://assets/environments/embervale_env.tres"

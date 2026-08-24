@@ -1,0 +1,7 @@
+[gd_resource type="Sky" load_steps=1 format=3]
+
+[resource]
+type = 2
+radiance_size = 2
+uniform_color = Color(0.018, 0.035, 0.09, 1)
+uniform_energy = 0.28
