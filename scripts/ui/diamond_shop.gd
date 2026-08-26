@@ -39,6 +39,10 @@ const ITEMS := [
 
 func _ready() -> void:
 	visible = false
+	# The Glintmonger's case reads as a warm display sheet over the dim.
+	UiKit.apply_parchment($Root/Center/Panel)
+	UiKit.style_secondary_button(close_button)
+	UiKit.style_secondary_button(unequip_button)
 	close_button.pressed.connect(close)
 	unequip_button.pressed.connect(_on_unequip_all)
 	game_state.diamonds_changed.connect(func(_t): _refresh())
@@ -62,6 +66,7 @@ func _refresh() -> void:
 func _build_row(item: Dictionary) -> Control:
 	var panel := PanelContainer.new()
 	panel.add_theme_constant_override("panel_inset", 10)
+	panel.add_theme_stylebox_override("panel", UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON))
 	var hbox := HBoxContainer.new()
 	panel.add_child(hbox)
 
@@ -73,8 +78,7 @@ func _build_row(item: Dictionary) -> Control:
 			glyph.text = "🗡"
 		_:
 			glyph.text = "✨"
-	glyph.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-	glyph.add_theme_font_size_override("font_size", 24)
+	UiKit.style_label(glyph, "", 22)
 	hbox.add_child(glyph)
 
 	var info := VBoxContainer.new()
@@ -83,29 +87,26 @@ func _build_row(item: Dictionary) -> Control:
 	var name_l := Label.new()
 	name_l.text = "%s%s" % [str(item.name),
 		"" if str(item.kind) != "sfx" else "  (SFX)"]
-	name_l.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-	name_l.add_theme_font_size_override("font_size", 13)
-	name_l.add_theme_color_override("font_color", Color(0.09, 0.21, 0.17))
+	UiKit.style_label(name_l, &"MenuTitle", 13)
 	info.add_child(name_l)
 	var desc := Label.new()
 	desc.text = str(item.desc)
-	desc.add_theme_font_override("font", load("res://assets/fonts/VT323-Regular.ttf"))
-	desc.add_theme_font_size_override("font_size", 13)
-	desc.add_theme_color_override("font_color", Color(0.56, 0.67, 0.45))
+	UiKit.style_label(desc, &"Caption", 11)
 	info.add_child(desc)
 
 	var btn := Button.new()
 	btn.custom_minimum_size = Vector2(160, 0)
-	btn.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-	btn.add_theme_font_size_override("font_size", 10)
 	if game_state.active_cosmetic_id_for(str(item.kind)) == str(item.id):
 		btn.text = "WORN"
 		btn.disabled = true
+		UiKit.style_secondary_button(btn)
 	elif game_state.owns_cosmetic(str(item.id)):
 		btn.text = "EQUIP"
+		UiKit.style_button(btn)
 		btn.pressed.connect(_on_equip.bind(item))
 	else:
 		btn.text = "💎 %d" % int(item.price)
+		UiKit.style_primary_button(btn)
 		btn.pressed.connect(_on_buy.bind(item))
 	hbox.add_child(btn)
 	return panel

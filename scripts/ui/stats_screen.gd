@@ -29,6 +29,10 @@ var _points_at_open := 0
 
 func _ready() -> void:
 	visible = false
+	UiKit.apply_parchment($Root/Center/Panel)
+	UiKit.style_primary_button(confirm_button)
+	UiKit.style_secondary_button(reset_button)
+	UiKit.style_secondary_button(close_button)
 	confirm_button.pressed.connect(_on_confirm)
 	reset_button.pressed.connect(_on_reset)
 	close_button.pressed.connect(close)
@@ -75,6 +79,7 @@ func _refresh() -> void:
 		var btn := Button.new()
 		btn.custom_minimum_size = Vector2(52, 34)
 		btn.text = "+"
+		UiKit.style_secondary_button(btn)
 		btn.disabled = game_state.stat_points - _pending_total() <= 0
 		btn.pressed.connect(_on_add.bind(row.key))
 		rows_grid.add_child(btn)
@@ -86,15 +91,14 @@ func _tag(txt: String) -> Label:
 	l.text = txt
 	l.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
 	l.add_theme_font_size_override("font_size", 14)
-	l.add_theme_color_override("font_color", Color(0.96, 0.72, 0.29))
+	l.add_theme_color_override("font_color", UiKit.EMBER)
 	return l
 
 func _label(txt: String, col: Color) -> Label:
 	var l := Label.new()
 	l.text = txt
 	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	l.add_theme_font_override("font", load("res://assets/fonts/VT323-Regular.ttf"))
-	l.add_theme_font_size_override("font_size", 15)
+	UiKit.style_label(l, &"Caption", 12)
 	l.add_theme_color_override("font_color", col)
 	return l
 

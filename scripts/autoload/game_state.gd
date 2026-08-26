@@ -329,16 +329,12 @@ func get_base_auto_damage() -> int:
 	return (LEVEL_2_ATK_BONUS if level >= 2 else 0) + weapon_atk \
 		+ attack_damage_bonus()
 
+## DEPRECATED: enemies no longer retaliate through GameState. A struck enemy
+## now answers with its own telegraphed counter-strike — see
+## Hushling._begin_counter_windup / Hero.notify_enemy_strike. Kept as an
+## inert stub for save-compat with older callers/tests.
 func apply_enemy_retaliation() -> Dictionary:
-	var retaliation = 4
-	take_damage(retaliation)
-	return {
-		"damage": retaliation,
-		"log": " The Hushling answers for %d." % retaliation,
-		"enemy_attack_time": 0.34,
-		"player_hit_time": 0.26,
-		"shake": 0.45
-	}
+	return {}
 
 func take_damage(amount: int) -> bool:
 	var old_hp = hp

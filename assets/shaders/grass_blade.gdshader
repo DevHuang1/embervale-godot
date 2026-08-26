@@ -16,7 +16,31 @@ uniform float blade_height : hint_range(0.05, 2.0) = 0.34;
 uniform vec2 wind_zone = vec2(0.0);
 uniform float wind_gloss : hint_range(0.0, 1.0) = 0.25;
 
+// WorldState globals: shared gust field + hero trample push.
+global uniform vec2 world_wind;
+global uniform vec4 world_hero_pos_radius;   // xy = hero (x,z), z = radius
+// Extra movers (enemies/boss): xy = position xz, z = push radius
+// (shader globals cannot be arrays, so slots ship individually)
+global uniform vec4 world_pusher_1;
+global uniform vec4 world_pusher_2;
+global uniform vec4 world_pusher_3;
+
 varying float v_h;
+
+// Offset pushing a blade away from a mover's feet inside its radius
+vec3 _push_offset(vec4 mover, vec3 world_vertex) {
+	if (mover.z < 0.001) {
+		return vec3(0.0);
+	}
+	vec2 away = world_vertex.xz - mover.xy;
+	float d = length(away);
+	float push = (1.0 - smoothstep(0.0, mover.z, d)) * v_h;
+	if (push < 0.001) {
+		return vec3(0.0);
+	}
+	vec2 dir = away / max(d, 0.0001);
+	return vec3(dir.x * push * 0.26, -push * 0.05, dir.y * push * 0.26);
+}
 
 void vertex() {
 	v_h = clamp((VERTEX.y + blade_height * 0.5) / blade_height, 0.0, 1.0);
@@ -27,9 +51,16 @@ void vertex() {
 	float sway = sin(phase) * wind_strength * gust * v_h;
 	VERTEX.x += sway;
 	VERTEX.z += cos(phase * 0.83) * wind_strength * 0.55 * gust * v_h;
-	// Zone wind bends whole blades downwind, tips furthest
-	VERTEX.x += wind_zone.x * v_h;
-	VERTEX.z += wind_zone.y * v_h;
+	// Zone wind bends whole blades downwind, tips furthest (local + shared)
+	vec2 zone = wind_zone + world_wind;
+	VERTEX.x += zone.x * v_h;
+	VERTEX.z += zone.y * v_h;
+	// Trample: hero plus up to three extra movers (enemies/boss)
+	vec3 world_v = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	VERTEX += _push_offset(world_hero_pos_radius, world_v);
+	VERTEX += _push_offset(world_pusher_1, world_v);
+	VERTEX += _push_offset(world_pusher_2, world_v);
+	VERTEX += _push_offset(world_pusher_3, world_v);
 }
 
 void fragment() {

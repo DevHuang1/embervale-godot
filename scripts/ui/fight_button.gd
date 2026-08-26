@@ -38,6 +38,7 @@ var dimmed := false:
 		queue_redraw()
 var _pressed := false
 var _cooldown_ratio := 0.0
+var _ready_flash := 0.0    # brief glow when a cooldown completes
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -46,10 +47,25 @@ func _ready() -> void:
 ## Cooldown ring: ratio = remaining/total; 0 means ready.
 func set_cooldown(remaining: float, total: float) -> void:
 	var ratio := clampf(remaining / maxf(total, 0.01), 0.0, 1.0) if remaining > 0.0 else 0.0
+	# Crossing from cooling → ready sparks a one-shot flash
+	if _cooldown_ratio > 0.02 and ratio <= 0.001:
+		_flash_ready()
 	if absf(ratio - _cooldown_ratio) < 0.004:
 		return
 	_cooldown_ratio = ratio
 	queue_redraw()
+
+## Radial flash ring + soft scale pop when the rite comes off cooldown.
+func _flash_ready() -> void:
+	_ready_flash = 1.0
+	queue_redraw()
+	var tween := create_tween()
+	tween.tween_method(func(v: float): _ready_flash = v, 1.0, 0.0, 0.45)
+	pivot_offset = size * 0.5
+	scale = Vector2(1.12, 1.12)
+	var pop := create_tween()
+	pop.tween_property(self, "scale", Vector2.ONE, 0.24) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
@@ -81,10 +97,20 @@ func _fire() -> void:
 func _press_feedback() -> void:
 	_pressed = true
 	queue_redraw()
-	modulate = Color(1.5, 1.5, 1.25)
+	pivot_offset = size * 0.5
+	scale = Vector2(1.08, 1.08)
 	var tween := create_tween()
+	tween.set_parallel(true)
 	tween.tween_property(self, "modulate", Color.WHITE, 0.18) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(self, "scale", Vector2.ONE, 0.16) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+func _process(delta: float) -> void:
+	if _ready_flash > 0.0:
+		_ready_flash = maxf(_ready_flash - delta * 2.2, 0.0)
+		if _ready_flash == 0.0:
+			queue_redraw()
 
 func _draw() -> void:
 	var center := size * 0.5
@@ -108,6 +134,12 @@ func _draw() -> void:
 		# Dark overlay drains clockwise from the top as the cooldown recovers
 		draw_arc(center, r, -PI * 0.5, -PI * 0.5 + TAU * _cooldown_ratio,
 			48, CD_OVERLAY, 6.0, true)
+	if _ready_flash > 0.01:
+		# Expanding glow ring when the rite comes off cooldown
+		var flash_col := accent.lightened(0.5)
+		flash_col.a = 0.85 * _ready_flash
+		draw_arc(center, r * (1.04 + 0.12 * (1.0 - _ready_flash)),
+			0.0, TAU, 64, flash_col, 4.0 + 3.0 * _ready_flash, true)
 
 ## Diagonal sword slash: a broad angled blade with an ember edge, a small
 ## cross-guard and pommel — reads as "strike" at a thumb-glance.

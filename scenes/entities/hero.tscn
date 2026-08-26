@@ -72,63 +72,65 @@ script = ExtResource("1_scr")
 
 [node name="Visual" type="Node3D" parent="."]
 
-[node name="Body" type="MeshInstance3D" parent="Visual"]
+[node name="Rig" type="Node3D" parent="Visual"]
+
+[node name="Body" type="MeshInstance3D" parent="Visual/Rig"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)
 mesh = SubResource("CapsuleMesh_hero")
 material_override = ExtResource("2_mat")
 
-[node name="Head" type="MeshInstance3D" parent="Visual"]
+[node name="Head" type="MeshInstance3D" parent="Visual/Rig"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.42, 0)
 mesh = SubResource("SphereMesh_head")
 material_override = ExtResource("2_mat")
 
-[node name="ArmL" type="Node3D" parent="Visual"]
+[node name="ArmL" type="Node3D" parent="Visual/Rig"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.46, 1.02, 0)
 
-[node name="Mesh" type="MeshInstance3D" parent="Visual/ArmL"]
+[node name="Mesh" type="MeshInstance3D" parent="Visual/Rig/ArmL"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.26, 0)
 mesh = SubResource("CapsuleMesh_limb")
 material_override = ExtResource("2_mat")
 
-[node name="Forearm" type="Node3D" parent="Visual/ArmL"]
+[node name="Forearm" type="Node3D" parent="Visual/Rig/ArmL"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
 
-[node name="Mesh" type="MeshInstance3D" parent="Visual/ArmL/Forearm"]
+[node name="Mesh" type="MeshInstance3D" parent="Visual/Rig/ArmL/Forearm"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.16, 0)
 mesh = SubResource("CapsuleMesh_limb")
 material_override = ExtResource("2_mat")
 
-[node name="ArmR" type="Node3D" parent="Visual"]
+[node name="ArmR" type="Node3D" parent="Visual/Rig"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.46, 1.02, 0)
 
-[node name="Mesh" type="MeshInstance3D" parent="Visual/ArmR"]
+[node name="Mesh" type="MeshInstance3D" parent="Visual/Rig/ArmR"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.26, 0)
 mesh = SubResource("CapsuleMesh_limb")
 material_override = ExtResource("2_mat")
 
-[node name="Forearm" type="Node3D" parent="Visual/ArmR"]
+[node name="Forearm" type="Node3D" parent="Visual/Rig/ArmR"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
 
-[node name="Mesh" type="MeshInstance3D" parent="Visual/ArmR/Forearm"]
+[node name="Mesh" type="MeshInstance3D" parent="Visual/Rig/ArmR/Forearm"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.16, 0)
 mesh = SubResource("CapsuleMesh_limb")
 material_override = ExtResource("2_mat")
 
-[node name="Lantern" type="Node3D" parent="Visual/ArmR"]
+[node name="Lantern" type="Node3D" parent="Visual/Rig/ArmR"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.18, 0.3)
 
-[node name="LanternLight" type="OmniLight3D" parent="Visual/ArmR/Lantern"]
+[node name="LanternLight" type="OmniLight3D" parent="Visual/Rig/ArmR/Lantern"]
 light_color = Color(0.96, 0.72, 0.29, 1)
 light_energy = 1.8
 omni_range = 12.0
 omni_attenuation = 2.0
 light_shadow_enabled = true
 
-[node name="LanternMesh" type="MeshInstance3D" parent="Visual/ArmR/Lantern"]
+[node name="LanternMesh" type="MeshInstance3D" parent="Visual/Rig/ArmR/Lantern"]
 mesh = SubResource("SphereMesh_glass")
 material_override = ExtResource("3_flame")
 
-[node name="LanternParticles" type="GPUParticles3D" parent="Visual/ArmR/Lantern"]
+[node name="LanternParticles" type="GPUParticles3D" parent="Visual/Rig/ArmR/Lantern"]
 emitting = true
 amount = 20
 lifetime = 1.0
@@ -136,50 +138,50 @@ local_coords = false
 process_material = SubResource("Proc_spark")
 draw_pass_1 = SubResource("Quad_spark")
 
-[node name="LegL" type="Node3D" parent="Visual"]
+[node name="LegL" type="Node3D" parent="Visual/Rig"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.17, 0.52, 0)
 
-[node name="Mesh" type="MeshInstance3D" parent="Visual/LegL"]
+[node name="Mesh" type="MeshInstance3D" parent="Visual/Rig/LegL"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.25, 0)
 mesh = SubResource("CapsuleMesh_leg")
 material_override = ExtResource("2_mat")
 
-[node name="Foot" type="Node3D" parent="Visual/LegL"]
+[node name="Foot" type="Node3D" parent="Visual/Rig/LegL"]
 transform = Transform3D(0.62, 0, 0, 0, 0.34, 0, 0, 0, 0.92, 0, -0.5, 0.03)
 
-[node name="Mesh" type="MeshInstance3D" parent="Visual/LegL/Foot"]
+[node name="Mesh" type="MeshInstance3D" parent="Visual/Rig/LegL/Foot"]
 mesh = SubResource("SphereMesh_head")
 material_override = ExtResource("2_mat")
 
-[node name="LegR" type="Node3D" parent="Visual"]
+[node name="LegR" type="Node3D" parent="Visual/Rig"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.17, 0.52, 0)
 
-[node name="Mesh" type="MeshInstance3D" parent="Visual/LegR"]
+[node name="Mesh" type="MeshInstance3D" parent="Visual/Rig/LegR"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.25, 0)
 mesh = SubResource("CapsuleMesh_leg")
 material_override = ExtResource("2_mat")
 
-[node name="Foot" type="Node3D" parent="Visual/LegR"]
+[node name="Foot" type="Node3D" parent="Visual/Rig/LegR"]
 transform = Transform3D(0.62, 0, 0, 0, 0.34, 0, 0, 0, 0.92, 0, -0.5, 0.03)
 
-[node name="Mesh" type="MeshInstance3D" parent="Visual/LegR/Foot"]
+[node name="Mesh" type="MeshInstance3D" parent="Visual/Rig/LegR/Foot"]
 mesh = SubResource("SphereMesh_head")
 material_override = ExtResource("2_mat")
 
 [node name="Animator" type="Node3D" parent="."]
 script = ExtResource("4_anim")
 visual_root = NodePath("../Visual")
-torso = NodePath("../Visual/Body")
-head = NodePath("../Visual/Head")
-arm_l = NodePath("../Visual/ArmL")
-arm_r = NodePath("../Visual/ArmR")
-forearm_l = NodePath("../Visual/ArmL/Forearm")
-forearm_r = NodePath("../Visual/ArmR/Forearm")
-leg_l = NodePath("../Visual/LegL")
-leg_r = NodePath("../Visual/LegR")
-foot_l = NodePath("../Visual/LegL/Foot")
-foot_r = NodePath("../Visual/LegR/Foot")
-lantern = NodePath("../Visual/ArmR/Lantern")
+torso = NodePath("../Visual/Rig/Body")
+head = NodePath("../Visual/Rig/Head")
+arm_l = NodePath("../Visual/Rig/ArmL")
+arm_r = NodePath("../Visual/Rig/ArmR")
+forearm_l = NodePath("../Visual/Rig/ArmL/Forearm")
+forearm_r = NodePath("../Visual/Rig/ArmR/Forearm")
+leg_l = NodePath("../Visual/Rig/LegL")
+leg_r = NodePath("../Visual/Rig/LegR")
+foot_l = NodePath("../Visual/Rig/LegL/Foot")
+foot_r = NodePath("../Visual/Rig/LegR/Foot")
+lantern = NodePath("../Visual/Rig/ArmR/Lantern")
 
 [node name="CollisionShape" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)

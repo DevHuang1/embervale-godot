@@ -134,3 +134,83 @@ at the same path without touching materials or code.
   UI instantiation smoke validated live (HUD/stats/diamond shop/minimap).
 
 Deferred: emote wheel, full animation-skin libraries, additional realm scenes.
+
+## UI Kit & Screens (Ember Glass parity pass)
+- **A** `tools/generate_ui_textures.gd` — offline foundry for UI surfaces:
+  `ui_parchment_paper.png` (fiber grain + edge vignette),
+  `ui_parchment_ink.png`, `ui_ink_wash.png`. Swappable at the same path.
+- **M** `scripts/ui/ui_kit.gd` — new tokens (parchment stock, danger/sage
+  brights, chip bg, modal dim) and helpers: import-independent `_ui_tex()`
+  (PNG bytes → ImageTexture, works headless without an import cache),
+  `style_secondary_button` / `style_danger_button` roles, `style_label`
+  (routes code-built labels through the Theme's font variations),
+  `parchment_stylebox` / `apply_parchment` (warm stock + fiber veil,
+  idempotent), `pill_stylebox`.
+- **M** `scenes/ui/main_menu.tscn` + `scripts/ui/main_menu.gd` — landing page:
+  hero/confirm cards on parchment, full button-role pass (primary CTA &
+  confirm-yes, secondary continue/settings/confirm-no, danger quit), theme-
+  routed typography, version-chip tint, green firefly ambience, wordmark
+  fade-in entrance, two-line footer hint.
+- **M** shop / satchel / forge / diamond shop / stats / settings — every
+  code-built row now routes through `UiKit.style_label` (fixes invisible
+  `Color(0.09,0.21,0.17)` item names), rows sit on parchment stock, and all
+  buttons carry a role (buy/equip/scan/confirm primary; equip/worn/close
+  secondary; desktop QUIT danger).
+- **M** `scripts/ui/hud.gd` — quest ledger rendered as ink-on-parchment so its
+  sepia/ink label colors read as authored (was dark-on-dark glass).
+- **A** `tests/test_landing_page.gd` — headless suite: textures load without
+  import cache, parchment surfaces present, all six landing buttons carry the
+  correct role color, typography variations resolve, fireflies exist, entrance
+  completes.
+
+## UE-style Scanned Surfaces & Physics (Chaos-lite pass)
+- **A** `assets/textures/pbr/{grass,dirt,sand,rock,bark,wood,clay}/` — 21 CC0
+  photo-scanned maps (PolyHaven, 1024², jpg) with `LICENSES.md`. Swappable at
+  the same paths for painted/4k masters.
+- **M** `assets/shaders/terrain_ground.gdshader` — v3: four PBR layer sets
+  (albedo+normal+roughness each), UE-landscape-style exp height-weighted
+  blending (`height_contrast`), tier-gated parallax occlusion
+  (`pom_mode` 0/1/2, near-faded), per-layer detail normals close-range,
+  rain wetting via `world_rain_level`, wear map applied post-POM,
+  `debug_view` weight inspector. Realm tints still drive every biome.
+- **A** `assets/materials/terrain_{bramblewood,whispergrove,mistfen,heartwood,moonfen}.tres`
+  — realm materials binding the scanned sets; TerrainRelief loads by biome id
+  (bare-shader fallback) and follows QualityScaler pom tiers.
+- **M** `rock.gdshader` / `bark.gdshader` — triplanar scan-rock and streak-
+  space scan-bark; grove/moonfen stone + GroveDressing props auto-bind.
+- **M** `scripts/systems/quality_scaler.gd` — new tier knobs `debris_max`
+  (6/12/24), `pom_mode` (0/1/2), `vegetation_pushers` (1/4/4),
+  `corpse_pool_size` (2/4/6), `contact_shadows`; omni/spot shadows now opt-in
+  via the `contact_shadow` light group so decorative fills never become blocky
+  shadow casters; softer sun blur at HIGH. Fixed negative sun shadow_bias in
+  grove/moonfen that banded per-pixel normal-mapped ground.
+- **A** `scripts/systems/debris_system.gd` — pooled RigidBody3D shard bursts
+  (rock/wood/leaf/crystal/ceramic styles), environment-only collision,
+  oldest-first cap retire, scene-reset park. Wired through ImpactDirector:
+  strikes, slams and hard landings spray surface-appropriate debris.
+- **A** `scripts/props/destructible_prop.gd` — code-built breakable pots /
+  crates / glowcaps placed by GroveDressing near flatten anchors; chip-flash,
+  debris + CombatFx burst, loot rolls into GameState.add_loot; hero strikes,
+  slams and hard landings damage nearby props.
+- **A** `scripts/systems/tumble_corpse.gd` — death physics: visuals reparent
+  into a rigid shell on kill, take the killing impulse, tumble, sink and fade;
+  static registry enforces the tier corpse budget. Bosses attempt a per-bone
+  PhysicalBoneSimulator3D ragdoll first and fall back to a big tumble.
+  Hushling/boss death flows updated (deferred launches — die() can run inside
+  physics callbacks).
+- **M** `grass_blade.gdshader` + `project.godot` — vegetation trample/push via
+  `world_pusher_1/2/3` vec4 shader globals (arrays are unsupported as globals);
+  WorldState publishes nearest enemies/boss as push spheres and gained
+  `gust(strength)` for slam/boss-death wind surges.
+- **A** `tests/test_material_bindings.gd`, `tests/test_debris_system.gd`,
+  `tests/test_destructibles.gd`, `tests/test_death_corpse.gd`;
+  **M** `tests/test_quality_scaler.gd` — knob assertions plus contact-shadow
+  group contract. Full headless suite green.
+- **A** `tests/diag_debug_shot.gd` — rendered terrain probe (weight debug view,
+  LOW/HIGH tiers, wide angle) used to bisect the shadow-map artifacts.
+- **M** `scripts/systems/quality_scaler.gd` — POM tier now actually pushed into
+  the live terrain-ground materials on level change **and** scene load
+  (MEDIUM = single-step offset, LOW = off), closing a gap where MEDIUM/LOW
+  still ran the full 8-step march; HIGH gains +0.2 SSAO intensity for the
+  grounded UE look (Task 9). Re-applied on realm travel so boot/LOW-mode and
+  scene swaps keep the correct tier.

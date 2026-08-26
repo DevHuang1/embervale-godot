@@ -1,120 +1,215 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=4 format=3]
 
-[ext_resource type="Script" path="res://scripts/ui/main_menu.gd" id="1_0"]
-[ext_resource type="FontFile" path="res://assets/fonts/PressStart2P-Regular.ttf.tres" id="1_2"]
-[ext_resource type="FontFile" path="res://assets/fonts/VT323-Regular.ttf.tres" id="1_3"]
+[ext_resource type="Script" path="res://scripts/ui/main_menu.gd" id="1_scr"]
+
+[sub_resource type="Gradient" id="grad_vignette"]
+offsets = PackedFloat32Array(0.5, 0.86, 1)
+colors = PackedColorArray(0, 0, 0, 0, 0.008, 0.016, 0.012, 0.18, 0.004, 0.008, 0.006, 0.62)
+
+[sub_resource type="GradientTexture2D" id="tex_vignette"]
+gradient = SubResource("grad_vignette")
+fill = 1
+fill_from = Vector2(0.5, 0.42)
+fill_to = Vector2(0.5, 1.08)
 
 [node name="MainMenu" type="CanvasLayer"]
-layer = 5
-script = ExtResource("1_0")
+layer = 10
+script = ExtResource("1_scr")
 
 [node name="Root" type="Control" parent="."]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+mouse_filter = 2
 
-[node name="Background" type="ColorRect" parent="Root"]
-layout_mode = 2
+[node name="FallbackBG" type="ColorRect" parent="Root"]
+visible = false
+layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-color = Color(0.043, 0.094, 0.078, 1)
+mouse_filter = 2
+color = Color(0.043, 0.09, 0.071, 1)
 
-[node name="VBox" type="VBoxContainer" parent="Root"]
-layout_mode = 2
+[node name="Vignette" type="TextureRect" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = SubResource("tex_vignette")
+stretch_mode = 6
+
+[node name="Embers" type="CPUParticles2D" parent="Root"]
+position = Vector2(540, 1980)
+amount = 26
+lifetime = 9.0
+preprocess = 9.0
+speed_scale = 0.6
+emission_shape = 3
+emission_rect_extents = Vector2(600, 30)
+gravity = Vector2(0, -34)
+initial_velocity_min = 6.0
+initial_velocity_max = 26.0
+scale_amount_min = 3.0
+scale_amount_max = 7.0
+color = Color(1, 0.76, 0.38, 0.4)
+
+[node name="Fireflies" type="CPUParticles2D" parent="Root"]
+position = Vector2(540, 980)
+amount = 34
+lifetime = 11.0
+preprocess = 11.0
+speed_scale = 0.34
+emission_shape = 3
+emission_rect_extents = Vector2(640, 320)
+gravity = Vector2(0, 0)
+initial_velocity_min = 2.0
+initial_velocity_max = 9.0
+scale_amount_min = 1.6
+scale_amount_max = 4.4
+damping_min = 0.2
+damping_max = 0.9
+color = Color(0.5, 0.82, 0.46, 0.45)
+
+[node name="Wordmark" type="Label" parent="Root"]
+layout_mode = 1
+offset_left = 44.0
+offset_top = 34.0
+offset_right = 420.0
+offset_bottom = 70.0
+theme_type_variation = &"Wordmark"
+text = "EMBERVALE"
+
+[node name="HeroCard" type="PanelContainer" parent="Root"]
+layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -260.0
-offset_top = -240.0
-offset_right = 260.0
-offset_bottom = 240.0
+offset_left = -470.0
+offset_top = -280.0
+offset_right = 470.0
+offset_bottom = 260.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/separation = 28
 
-[node name="IntroCard" type="PanelContainer" parent="Root/VBox"]
-layout_mode = 2
-theme_override_constants/panel_inset = 24
-
-[node name="IntroVBox" type="VBoxContainer" parent="Root/VBox/IntroCard"]
+[node name="HeroVBox" type="VBoxContainer" parent="Root/HeroCard"]
 layout_mode = 2
 theme_override_constants/separation = 14
 
-[node name="ChapterLabel" type="Label" parent="Root/VBox/IntroCard/IntroVBox"]
+[node name="Eyebrow" type="Label" parent="Root/HeroCard/HeroVBox"]
 layout_mode = 2
+theme_type_variation = &"Eyebrow"
 text = "A TALE FROM EMBERVALE"
-
 horizontal_alignment = 1
-theme_override_fonts/font = ExtResource("1_2")
-theme_override_font_sizes/font_size = 11
-theme_override_colors/font_color = Color(0.43, 0.27, 0.18, 1)
 
-[node name="TitleLabel" type="Label" parent="Root/VBox/IntroCard/IntroVBox"]
+[node name="TitleLabel" type="Label" parent="Root/HeroCard/HeroVBox"]
 layout_mode = 2
+theme_type_variation = &"Title"
 text = "THE LANTERN BEARER"
 horizontal_alignment = 1
-theme_override_fonts/font = ExtResource("1_2")
-theme_override_font_sizes/font_size = 22
-theme_override_colors/font_color = Color(0.96, 0.72, 0.29, 1)
+theme_override_font_sizes/font_size = 66
 
-[node name="SubtitleLabel" type="Label" parent="Root/VBox/IntroCard/IntroVBox"]
+[node name="SubtitleLabel" type="Label" parent="Root/HeroCard/HeroVBox"]
 layout_mode = 2
+theme_type_variation = &"Subtitle"
 text = "Night has settled over the Whispergrove. Take up the lantern,
 walk the pale path, and wake what sleeps beneath the moss."
 horizontal_alignment = 1
 autowrap_mode = 2
-theme_override_fonts/font = ExtResource("1_3")
-theme_override_font_sizes/font_size = 16
-theme_override_colors/font_color = Color(0.56, 0.67, 0.45, 1)
 
-[node name="CTASpacer" type="Control" parent="Root/VBox/IntroCard/IntroVBox"]
-custom_minimum_size = Vector2(0, 8)
+[node name="CTASpacer" type="Control" parent="Root/HeroCard/HeroVBox"]
+custom_minimum_size = Vector2(0, 10)
 layout_mode = 2
 
-[node name="CTAButton" type="Button" parent="Root/VBox/IntroCard/IntroVBox"]
+[node name="CTAButton" type="Button" parent="Root/HeroCard/HeroVBox"]
+custom_minimum_size = Vector2(0, 140)
 layout_mode = 2
+theme_override_font_sizes/font_size = 34
 text = "BEGIN A NEW TALE"
-theme_override_fonts/font = ExtResource("1_2")
-theme_override_font_sizes/font_size = 14
-theme_override_colors/font_color = Color(0.09, 0.21, 0.17, 1)
 
-[node name="MenuButtons" type="HBoxContainer" parent="Root/VBox"]
+[node name="ConfirmCard" type="PanelContainer" parent="Root/HeroCard/HeroVBox"]
+visible = false
+layout_mode = 2
+
+[node name="ConfirmVBox" type="VBoxContainer" parent="Root/HeroCard/HeroVBox/ConfirmCard"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="ConfirmLabel" type="Label" parent="Root/HeroCard/HeroVBox/ConfirmCard/ConfirmVBox"]
+layout_mode = 2
+theme_type_variation = &"Body"
+text = "Begin anew? Your saved tale will fade into the mist."
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="ConfirmRow" type="HBoxContainer" parent="Root/HeroCard/HeroVBox/ConfirmCard/ConfirmVBox"]
 layout_mode = 2
 alignment = 1
 theme_override_constants/separation = 16
 
-[node name="ContinueButton" type="Button" parent="Root/VBox/MenuButtons"]
+[node name="ConfirmYes" type="Button" parent="Root/HeroCard/HeroVBox/ConfirmCard/ConfirmVBox/ConfirmRow"]
+custom_minimum_size = Vector2(0, 64)
 layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "BEGIN ANEW"
+
+[node name="ConfirmNo" type="Button" parent="Root/HeroCard/HeroVBox/ConfirmCard/ConfirmVBox/ConfirmRow"]
+custom_minimum_size = Vector2(0, 64)
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "NOT YET"
+
+[node name="SecondaryRow" type="HBoxContainer" parent="Root/HeroCard/HeroVBox"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 14
+
+[node name="ContinueButton" type="Button" parent="Root/HeroCard/HeroVBox/SecondaryRow"]
+custom_minimum_size = Vector2(172, 56)
+layout_mode = 2
+disabled = true
 text = "CONTINUE"
-disabled = true
-theme_override_fonts/font = ExtResource("1_2")
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.4, 0.72, 0.7, 1)
 
-[node name="SatchelButton" type="Button" parent="Root/VBox/MenuButtons"]
-layout_mode = 2
-text = "SATCHEL"
-disabled = true
-tooltip_text = "The satchel opens only in the field."
-theme_override_fonts/font = ExtResource("1_2")
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.4, 0.72, 0.7, 1)
-
-[node name="SettingsButton" type="Button" parent="Root/VBox/MenuButtons"]
+[node name="SettingsButton" type="Button" parent="Root/HeroCard/HeroVBox/SecondaryRow"]
+custom_minimum_size = Vector2(172, 56)
 layout_mode = 2
 text = "SETTINGS"
-tooltip_text = "Volume and camera hints."
-theme_override_fonts/font = ExtResource("1_2")
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.4, 0.72, 0.7, 1)
 
-[node name="FooterLabel" type="Label" parent="Root/VBox"]
+[node name="QuitButton" type="Button" parent="Root/HeroCard/HeroVBox/SecondaryRow"]
+custom_minimum_size = Vector2(172, 56)
 layout_mode = 2
-text = "WASD / drag to move - tap an enemy to engage - Q lash / E mend"
+text = "QUIT"
+
+[node name="FooterHint" type="Label" parent="Root"]
+layout_mode = 1
+anchors_preset = 12
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -500.0
+offset_top = -120.0
+offset_right = 500.0
+offset_bottom = -84.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_type_variation = &"Caption"
+text = "WASD / drag to move · tap an enemy to engage\nQ · CINDER LASH · E · MEND FLAME · F · DIVINING LENS"
 horizontal_alignment = 1
-theme_override_fonts/font = ExtResource("1_3")
-theme_override_font_sizes/font_size = 13
-theme_override_colors/font_color = Color(0.3, 0.27, 0.2, 1)
+
+[node name="VersionChip" type="Label" parent="Root"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -300.0
+offset_top = 36.0
+offset_right = -40.0
+offset_bottom = 70.0
+grow_horizontal = 0
+theme_type_variation = &"Caption"
+text = "v0.9 · a lantern tale"
+horizontal_alignment = 2

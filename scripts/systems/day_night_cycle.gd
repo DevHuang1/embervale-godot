@@ -28,6 +28,16 @@ var _firefly_proc: ParticleProcessMaterial
 var _mist_proc: ParticleProcessMaterial
 var _mist_base_color := Color(0.65, 0.75, 0.72, 0.08)
 
+# Cached for other systems (WorldState polls this instead of re-deriving).
+var night_factor: float = 0.0
+
+# Volumetric fog only renders under Forward+; skip per-frame writes elsewhere.
+var _vol_fog_supported := true
+
+# Realm grading state (lerped so realm travel eases instead of snapping).
+var _grade_base := {}
+var _grade_tween: Tween
+
 # Keyframe ramps evaluated at the (biased) time of day
 var _light_color: Gradient
 var _light_energy: Gradient
@@ -64,6 +74,16 @@ func _ready() -> void:
 	_own_environment()
 	_cache_scene_state()
 	_build_gradients()
+	_vol_fog_supported = _detect_volumetric_support()
+
+## Volumetric fog is a Forward+ feature; the mobile renderer ignores it, so
+## skip the per-frame writes there (and on any future Compatibility export).
+func _detect_volumetric_support() -> bool:
+	if RenderingServer.has_method("get_current_rendering_method"):
+		return str(RenderingServer.call("get_current_rendering_method")) == "forward_plus"
+	var method := str(ProjectSettings.get_setting(
+		"rendering/renderer/rendering_method", "forward_plus"))
+	return method == "forward_plus"
 
 func _own_environment() -> void:
 	if _env_node == null or _env_node.environment == null:
@@ -176,9 +196,9 @@ func _process(delta: float) -> void:
 		time_of_day + delta * time_scale_debug / maxf(day_length_seconds, 0.001), 1.0)
 	if _env == null:
 		return
-	_apply()
+	_apply(delta)
 
-func _apply() -> void:
+func _apply(delta: float) -> void:
 	var t := effective_time_of_day()
 	var bias := {}
 	var wm := get_parent() as WorldManager
@@ -188,6 +208,8 @@ func _apply() -> void:
 	var fog_add := float(bias.get("fog_add", 0.0))
 
 	var nf := _night_factor(t)
+	night_factor = nf
+	var ws := get_node_or_null("/root/WorldState")
 
 	# --- Sun/moon light ---
 	if _sun:
@@ -210,13 +232,15 @@ func _apply() -> void:
 		_env.background_energy_multiplier = _bg_energy.sample(t).r \
 			* lerpf(1.0, energy_mult, 0.6)
 
-	# --- Ambient / fog ---
+	# --- Ambient / fog (rain thickens the ground mist) ---
+	var rain_add: float = ws.rain_level * 0.0028 if ws != null else 0.0
 	_env.ambient_light_color = _ambient_color.sample(t)
 	_env.ambient_light_energy = _ambient_energy.sample(t).r * energy_mult
 	_env.fog_light_color = _fog_color.sample(t)
-	_env.fog_density = _fog_density.sample(t).r + fog_add
-	_env.volumetric_fog_density = _vol_fog_density.sample(t).r + fog_add * 0.5
-	_env.volumetric_fog_emission = _vol_fog_emission.sample(t)
+	_env.fog_density = _fog_density.sample(t).r + fog_add + rain_add
+	if _vol_fog_supported:
+		_env.volumetric_fog_density = _vol_fog_density.sample(t).r + fog_add * 0.5
+		_env.volumetric_fog_emission = _vol_fog_emission.sample(t)
 
 	# --- Night factor drives warm lights + fireflies/mist ---
 	if not _warm_base_energy.is_empty() and _warm_lights:
@@ -225,10 +249,30 @@ func _apply() -> void:
 			if light is OmniLight3D and _warm_base_energy.has(light.get_instance_id()):
 				light.light_energy = _warm_base_energy[light.get_instance_id()] * warm_mult
 	if _fireflies:
-		_fireflies.amount_ratio = lerpf(0.06, 1.0, nf)
+		var p_scale: float = ws.particle_scale if ws != null else 1.0
+		var magic_lift: float = lerpf(0.9, 1.08, ws.magic_level) if ws != null else 1.0
+		_fireflies.amount_ratio = clampf(
+			lerpf(0.06, 1.0, nf) * magic_lift * p_scale, 0.0, 1.0)
+		# Fireflies shy away from the hero's feet (emission-box offset).
+		if _firefly_proc and ws != null:
+			var away: Vector3 = _fireflies.global_position - ws.hero_position
+			away.y = 0.0
+			var dist: float = away.length()
+			var flee: Vector3 = away.normalized() * minf(dist, 4.0) * 0.22 \
+				if dist > 0.05 else Vector3.ZERO
+			var offset: Vector3 = _firefly_proc.emission_shape_offset
+			_firefly_proc.emission_shape_offset = \
+				offset.lerp(flee, minf(delta * 3.0, 1.0))
 	if _mist and _mist_proc:
+		var wet: float = ws.rain_level if ws != null else 0.0
 		_mist_proc.color = Color(_mist_base_color.r, _mist_base_color.g,
-			_mist_base_color.b, lerpf(_mist_base_color.a * 0.7, _mist_base_color.a, nf))
+			_mist_base_color.b,
+			lerpf(_mist_base_color.a * 0.7, _mist_base_color.a,
+				nf) * (1.0 + wet * 0.35))
+
+	# Share the cached factor with the WorldState autoload when present.
+	if ws != null and ws.has_method("report_night_factor"):
+		ws.report_night_factor(nf)
 
 func _night_factor(t: float) -> float:
 	var up := smoothstep(0.46, 0.55, t)
@@ -237,8 +281,10 @@ func _night_factor(t: float) -> float:
 
 ## Realm theming: shifts the cached particle bases so the per-frame
 ## night crossfade keeps working on the new palette (Bramblewood gold,
-## Mistfen blue, Heartwood ember).
-func apply_realm(mist_color: Color, firefly_color: Color) -> void:
+## Mistfen blue, Heartwood ember). `grade` optionally re-grades the
+## Environment's adjustment/glow stack with a 2s ease per realm.
+func apply_realm(mist_color: Color, firefly_color: Color,
+		grade: Dictionary = {}) -> void:
 	if _mist_proc:
 		_mist_base_color = Color(mist_color.r, mist_color.g, mist_color.b,
 			_mist_base_color.a)
@@ -252,3 +298,26 @@ func apply_realm(mist_color: Color, firefly_color: Color) -> void:
 				firefly_color.b, ramp.gradient.colors[0].a))
 			ramp.gradient.set_color(1, Color(firefly_color.r * 0.85,
 				firefly_color.g * 0.9, firefly_color.b, 0.0))
+	_apply_grade(grade)
+
+func _apply_grade(grade: Dictionary) -> void:
+	if grade.is_empty() or _env == null or not _env.adjustment_enabled:
+		return
+	if _grade_base.is_empty():
+		_grade_base = {
+			"saturation": _env.adjustment_saturation,
+			"contrast": _env.adjustment_contrast,
+			"glow": _env.glow_intensity,
+		}
+	if _grade_tween != null and _grade_tween.is_valid():
+		_grade_tween.kill()
+	var target_sat := float(grade.get("saturation", _grade_base.saturation))
+	var target_con := float(grade.get("contrast", _grade_base.contrast))
+	var target_glow := float(grade.get("glow", _grade_base.glow))
+	_grade_tween = create_tween().set_parallel(true)
+	_grade_tween.tween_property(_env, "adjustment_saturation", target_sat, 2.0) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_grade_tween.tween_property(_env, "adjustment_contrast", target_con, 2.0) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_grade_tween.tween_property(_env, "glow_intensity", target_glow, 2.0) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)

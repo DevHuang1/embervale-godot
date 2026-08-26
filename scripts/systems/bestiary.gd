@@ -25,56 +25,61 @@ const REALMS := {
 		"intro": "The grove's green edge stirs with small hungers.",
 		"mist_tint": Color(0.65, 0.75, 0.72),
 		"firefly_tint": Color(1.0, 0.86, 0.45),
+		"grade": {"saturation": 1.12, "contrast": 1.04, "glow": 1.05},
 	},
 	REALM_MISTFEN: {
 		"title": "Mistfen",
 		"intro": "Pale fog pools between the roots — eyes move in it.",
 		"mist_tint": Color(0.55, 0.66, 0.78),
 		"firefly_tint": Color(0.62, 0.80, 0.96),
+		"grade": {"saturation": 0.92, "contrast": 1.07, "glow": 1.15},
 	},
 	REALM_HEARTWOOD: {
 		"title": "Heartwood Rite",
 		"intro": "The old altar answers. Something ancient wakes.",
 		"mist_tint": Color(0.78, 0.60, 0.52),
 		"firefly_tint": Color(1.0, 0.55, 0.30),
+		"grade": {"saturation": 1.06, "contrast": 1.10, "glow": 1.2},
 	},
 }
 
 ## Enemy tier variants per realm. Fields feed CharacterModelData plus the
 ## Hushling behavior flags; hp/atk tuned against hero armor math.
+## Scales sit ~0.85x under the classic sizes so packs read smaller against
+## the untouched boss scale (hero adds its own visual_scale on top).
 const ENEMY_VARIANTS := {
 	REALM_BRAMBLEWOOD: {
 		"normal": {
-			"display": "Hushling", "scale": 1.0, "hp": 28, "atk_bonus": 0,
+			"display": "Hushling", "scale": 0.85, "hp": 28, "atk_bonus": 0,
 			"speed": 1.0, "volley": false,
 			"tint": Color(0, 0, 0, 0), "eye": Color(0, 0, 0, 0),
 		},
 		"hard": {
-			"display": "Elder Hushling", "scale": 1.32, "hp": 48, "atk_bonus": 2,
+			"display": "Elder Hushling", "scale": 1.12, "hp": 48, "atk_bonus": 2,
 			"speed": 0.92, "volley": true,
 			"tint": Color(0.13, 0.20, 0.12), "eye": Color(1.0, 0.42, 0.16),
 		},
 	},
 	REALM_MISTFEN: {
 		"normal": {
-			"display": "Fenwick Hushling", "scale": 1.08, "hp": 34, "atk_bonus": 1,
+			"display": "Fenwick Hushling", "scale": 0.92, "hp": 34, "atk_bonus": 1,
 			"speed": 1.05, "volley": false,
 			"tint": Color(0.16, 0.22, 0.26), "eye": Color(0.62, 0.80, 0.96),
 		},
 		"hard": {
-			"display": "Drowned Elder", "scale": 1.40, "hp": 58, "atk_bonus": 3,
+			"display": "Drowned Elder", "scale": 1.19, "hp": 58, "atk_bonus": 3,
 			"speed": 0.95, "volley": true,
 			"tint": Color(0.10, 0.16, 0.22), "eye": Color(0.45, 0.85, 1.0),
 		},
 	},
 	REALM_HEARTWOOD: {
 		"normal": {
-			"display": "Ember Hushling", "scale": 1.12, "hp": 38, "atk_bonus": 1,
+			"display": "Ember Hushling", "scale": 0.95, "hp": 38, "atk_bonus": 1,
 			"speed": 1.08, "volley": false,
 			"tint": Color(0.24, 0.14, 0.10), "eye": Color(1.0, 0.55, 0.30),
 		},
 		"hard": {
-			"display": "Cinder Elder", "scale": 1.46, "hp": 64, "atk_bonus": 4,
+			"display": "Cinder Elder", "scale": 1.24, "hp": 64, "atk_bonus": 4,
 			"speed": 1.0, "volley": true,
 			"tint": Color(0.20, 0.09, 0.06), "eye": Color(1.0, 0.30, 0.12),
 		},

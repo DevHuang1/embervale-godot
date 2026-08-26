@@ -12,9 +12,15 @@ extends RefCounted
 ##   hushling        -> assets/models/hushling.fbx
 ##   boss_matriarch  -> assets/models/boss_matriarch.fbx
 #
-# Scale per profile knocks big exports down to the proxy footprint.
-const PROFILE_SCALE := {
-	"hero": 0.82,
+## Target standing heights (world units) per profile. Measured against each
+## mounted rig's actual mesh AABB at runtime, so ANY source-art unit system
+## (cm FBX exports included) lands at the right size — no hand-tuned
+## multipliers to drift out of date.
+const PROFILE_HEIGHT := {
+	"hero": 1.62,
+	"hushling": 0.95,
+	"fenling": 0.85,
+	"boss_matriarch": 3.8,
 }
 
 static func _any_model(profile: String) -> String:
@@ -42,21 +48,19 @@ static func try_if_wire(entity: Node3D, profile: String) -> bool:
 	if rig == null:
 		return false
 	rig.name = "AuthoredRig"
-	# Scale the figure to sit naturally in the capsule world: profile-scale
-	# handles export unit differences, then the mounted rig's AABB sizes
-	# the final so feet plant at y≈0 regardless of the source art.
-	var profile_scale := float(PROFILE_SCALE.get(profile, 1.0))
-	rig.scale = Vector3.ONE * profile_scale
 	var visual := entity.get_node_or_null("Visual")
+	var host: Node3D = entity
 	if visual != null:
+		# Prefer a "Rig" wrapper (scaled assembly) so authored models inherit
+		# the entity's visual_scale; fall back to Visual itself.
+		var inner := visual.get_node_or_null("Rig") as Node3D
+		host = inner if inner != null else visual
 		_hide_procedural(visual)
-		visual.add_child(rig)
-	else:
-		entity.add_child(rig)
-	# AABB feet-plant only for profiles we've tuned; untuned rigs keep
-	# their authored origin exactly as before.
-	if PROFILE_SCALE.has(profile):
-		_fit_rig_to_ground(rig)
+	host.add_child(rig)
+	# Fit measured geometry to the profile's target height and plant the
+	# feet at y≈0 — independent of the source art's unit system.
+	if PROFILE_HEIGHT.has(profile):
+		_fit_rig(rig, float(PROFILE_HEIGHT[profile]))
 
 	# Animation bridge: imported clips, when present, become playable cues.
 	var actors := rig.find_children("*", "AnimationPlayer", true, false)
@@ -69,54 +73,66 @@ static func try_if_wire(entity: Node3D, profile: String) -> bool:
 		bridge.bind(rig)
 		# Self-driving clips: poll the host entity each frame and pick the
 		# matching cue (death > attack > move > idle) without any rewiring.
+		# Captures are weakrefs: after death the Visual reparents into a
+		# TumbleCorpse while the entity frees, so raw Node captures would
+		# dangle and spam "Lambda capture was freed" every frame.
 		var animator := entity.get_node_or_null("Animator")
+		var entity_ref: WeakRef = weakref(entity)
+		var animator_ref: WeakRef = weakref(animator)
 		bridge.state_provider = func() -> Dictionary:
-			var st := {"dead": false, "attacking": false, "casting": false,
+			var e: Object = entity_ref.get_ref()
+			if e == null:
+				return {}
+			var st := {"dead": false, "hit": false, "attacking": false, "casting": false,
 				"moving": false, "running": false, "dodging": false}
-			var defeated = entity.get("is_defeated")
+			var defeated = e.get("is_defeated")
 			if defeated != null:
 				st.dead = bool(defeated)
-			if animator != null and animator.get("anim_state") != null \
-					and animator.get("mode") != null \
-					and animator.get("AnimState") != null:
-				var anim_state := int(animator.anim_state)
-				st.attacking = anim_state == int(animator.AnimState.ATTACK)
-				st.casting = st.attacking and str(animator.get("attack_style")) == "magic"
-				# movement comes from the animator's own move_ratio (only
-				# horizontal walking, excludes jumps/glides), not full 3D
-				# velocity which would trigger walking in mid-air.
-				var ratio := float(animator.get("move_ratio"))
+			# Use public animator values/methods instead of trying to read the
+			# script's enum constant through Object.get(). The old check always
+			# failed for valid EntityAnimator instances, leaving imported rigs
+			# stuck in their first clip.
+			var anim: Object = animator_ref.get_ref()
+			if anim != null and anim.get("anim_state") != null:
+				var anim_state := int(anim.get("anim_state"))
+				st.dead = st.dead or anim_state == int(EntityAnimator.AnimState.DEAD)
+				st.hit = anim_state == int(EntityAnimator.AnimState.HIT)
+				st.attacking = anim_state == int(EntityAnimator.AnimState.ATTACK)
+				st.casting = st.attacking and str(anim.get("attack_style")) == "magic"
+				# Movement comes from the animator's own move_ratio (only
+				# horizontal walking, excludes jumps/glides), not full 3D velocity.
+				var ratio := float(anim.get("move_ratio"))
 				st.moving = ratio > 0.08
 				st.running = ratio > 0.65
-			if animator != null and animator.get("dodge_ratio") != null:
-				st.dodging = float(animator.get("dodge_ratio")) > 0.4
+			if anim != null and anim.get("dodge_ratio") != null:
+				st.dodging = float(anim.get("dodge_ratio")) > 0.4
 			return st
 		entity.set_meta("anim_bridge", bridge)
 	return true
 
-## AABB-fit a tuned profile's rig to the proxy footprint: reads the lowest
-## mesh vertex (the feet) in the rig's own space and lowers the root until
-## it sits at the hero's foot line, so big exports neither float nor sink
-## regardless of source units or standing height.
-static func _fit_rig_to_ground(rig: Node3D) -> void:
+## Measure the rig's merged mesh AABB (in the rig's own space) and rescale
+## it uniformly so the figure stands `target_height` world units tall, then
+## lower it so the lowest vertex sits at y≈0. Works for any export units.
+static func _fit_rig(rig: Node3D, target_height: float) -> void:
 	if rig == null:
 		return
-	var lowest := 0.0
-	var found := false
+	var acc := AABB()
+	var first := true
 	for mi in rig.find_children("*", "MeshInstance3D", true, false):
-		if not mi is MeshInstance3D:
-			continue
-		var mesh := mi as MeshInstance3D
-		var aabb := mesh.get_aabb()
-		if aabb.size.y <= 0.001:
-			continue
-		var local_bottom := rig.to_local(mesh.to_global(aabb.position))
-		if not found or local_bottom.y < lowest:
-			lowest = local_bottom.y
-			found = true
-	if not found or absf(lowest) < 0.001:
+		var to_rig: Transform3D = rig.global_transform.affine_inverse() \
+			* (mi as MeshInstance3D).global_transform
+		var ab: AABB = to_rig * (mi as MeshInstance3D).get_aabb()
+		if first:
+			acc = ab
+			first = false
+		else:
+			acc = acc.merge(ab)
+	if first or acc.size.y <= 0.001:
 		return
-	rig.position.y -= lowest
+	var k := target_height / acc.size.y
+	rig.scale *= k
+	# Plant feet: shift so the scaled AABB bottom lands on y=0.
+	rig.position.y -= acc.position.y * rig.scale.y
 
 # Names that stay visible when a real model mounts (light + sockets + FX
 # that gear, relics and the lantern still rely on).
@@ -149,7 +165,7 @@ static func _hide_procedural_recursive(node: Node) -> void:
 static func bind_sockets(entity: Node3D, mapping: Dictionary) -> void:
 	if entity == null:
 		return
-	var rig := entity.get_node_or_null("Visual/AuthoredRig") as Node3D
+	var rig := _find_authored_rig(entity)
 	if rig == null:
 		return
 	for socket_id in mapping:
@@ -167,11 +183,10 @@ static func bind_sockets(entity: Node3D, mapping: Dictionary) -> void:
 			if host:
 				host.add_child(socket)
 			socket.global_transform = target.global_transform
-		# Keep the socket's authored pose relative to the new target so the
-		# weapon never pops: reparent first, then re-apply the delta.
-		var rel := socket.global_transform * target.global_transform.affine_inverse()
+		# Hitch onto the bone keeping the CURRENT world pose (reparent
+		# preserves global). Never re-derive through inverse-basis math —
+		# unit-scaled skeletons (x100 armatures) collapse that to zero.
 		socket.reparent(target)
-		socket.global_transform = rel
 
 static func _find_attachment_socket(host: Node, socket_id: String) -> AttachmentSocket:
 	var direct := host.get_node_or_null("Visual/%s" % socket_id) as AttachmentSocket
@@ -183,6 +198,12 @@ static func _find_attachment_socket(host: Node, socket_id: String) -> Attachment
 			continue
 		if s.socket_id == socket_id:
 			return s
+	return null
+
+## Locate the mounted authored rig wherever it lives (Visual or a Rig wrapper).
+static func _find_authored_rig(entity: Node) -> Node3D:
+	for cand in entity.find_children("AuthoredRig", "Node3D", true, false):
+		return cand as Node3D
 	return null
 
 ## Resolve a socket target by name: first a Node3D child anywhere in the

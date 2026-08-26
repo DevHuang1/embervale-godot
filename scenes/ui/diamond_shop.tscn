@@ -1,8 +1,6 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=2 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/diamond_shop.gd" id="1_0"]
-[ext_resource type="FontFile" path="res://assets/fonts/PressStart2P-Regular.ttf" id="1_2"]
-[ext_resource type="FontFile" path="res://assets/fonts/VT323-Regular.ttf" id="1_3"]
 
 [node name="DiamondShop" type="CanvasLayer"]
 layer = 22
@@ -12,7 +10,7 @@ script = ExtResource("1_0")
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-color = Color(0.02, 0.03, 0.05, 0.74)
+color = Color(0.006, 0.012, 0.02, 0.76)
 
 [node name="Center" type="CenterContainer" parent="Root"]
 layout_mode = 1
@@ -21,60 +19,59 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 
 [node name="Panel" type="PanelContainer" parent="Root/Center"]
-custom_minimum_size = Vector2(620, 480)
-theme_override_constants = {"panel_inset": 16}
+custom_minimum_size = Vector2(660, 500)
 
 [node name="VBox" type="VBoxContainer" parent="Root/Center/Panel"]
-custom_constants = {"separation": 10}
+theme_override_constants/separation = 12
 
 [node name="Header" type="HBoxContainer" parent="Root/Center/Panel/VBox"]
+layout_mode = 2
 
 [node name="Title" type="Label" parent="Root/Center/Panel/VBox/Header"]
+layout_mode = 2
+theme_type_variation = &"MenuTitle"
 text = "THE GLINTMONGER'S CASE"
 size_flags_horizontal = 3
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 15}
-theme_override_colors = {"font_color": Color(0.55, 0.85, 1, 1)}
+theme_override_colors/font_color = Color(0.62, 0.85, 1, 1)
 
 [node name="DiamondsLabel" type="Label" parent="Root/Center/Panel/VBox/Header"]
+layout_mode = 2
+theme_type_variation = &"RowLabel"
 text = "💎 0"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 13}
 
 [node name="Note" type="Label" parent="Root/Center/Panel/VBox"]
+layout_mode = 2
+theme_type_variation = &"Subtitle"
 text = "Looks and voice only — never power. That's the deal."
 horizontal_alignment = 1
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 14}
-theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
 
 [node name="Scroll" type="ScrollContainer" parent="Root/Center/Panel/VBox"]
+layout_mode = 2
 size_flags_vertical = 3
 
 [node name="ItemsVBox" type="VBoxContainer" parent="Root/Center/Panel/VBox/Scroll"]
+layout_mode = 2
 size_flags_horizontal = 3
-custom_constants = {"separation": 8}
+theme_override_constants/separation = 10
 
 [node name="Message" type="Label" parent="Root/Center/Panel/VBox"]
+layout_mode = 2
+theme_type_variation = &"Body"
 text = ""
 autowrap_mode = 2
 horizontal_alignment = 1
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 14}
-theme_override_colors = {"font_color": Color(0.85, 0.62, 0.4, 1)}
 
 [node name="Footer" type="HBoxContainer" parent="Root/Center/Panel/VBox"]
+layout_mode = 2
 alignment = 1
-custom_constants = {"separation": 18}
+theme_override_constants/separation = 18
 
 [node name="UnequipAll" type="Button" parent="Root/Center/Panel/VBox/Footer"]
-custom_minimum_size = Vector2(180, 46)
+custom_minimum_size = Vector2(190, 50)
+layout_mode = 2
 text = "BACK TO VANILLA"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 9}
 
 [node name="Close" type="Button" parent="Root/Center/Panel/VBox/Footer"]
-custom_minimum_size = Vector2(140, 46)
+custom_minimum_size = Vector2(140, 50)
+layout_mode = 2
 text = "CLOSE"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 11}

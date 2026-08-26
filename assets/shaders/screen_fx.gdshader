@@ -11,9 +11,18 @@ uniform float vignette_softness : hint_range(0.05, 1.0) = 0.55;
 uniform vec3 vignette_color : source_color = vec3(0.20, 0.02, 0.02);
 uniform float saturation : hint_range(0.0, 1.6) = 1.0;
 uniform float chroma_strength : hint_range(0.0, 1.0) = 0.0;
+// Rain sheen: a faint vertical smear plus cool highlight lift.
+uniform float wetness : hint_range(0.0, 1.0) = 0.0;
 
 void fragment() {
 	vec4 base = texture(screen_tex, SCREEN_UV);
+
+	// Rain smear: blend one vertical-offset tap so streaks feel wet
+	if (wetness > 0.001) {
+		vec4 drip = texture(screen_tex, SCREEN_UV + vec2(0.0, wetness * 0.006));
+		base.rgb = mix(base.rgb, mix(drip.rgb, base.rgb, 0.55), wetness * 0.35);
+		base.rgb += wetness * vec3(0.010, 0.014, 0.020);
+	}
 	
 	// Chromatic aberration: offset RGB samples radially from center
 	if (chroma_strength > 0.001) {

@@ -20,6 +20,50 @@ GameState="*res://scripts/autoload/game_state.gd"
 ScanManager="*res://scripts/autoload/scan_manager.gd"
 AudioManager="*res://scripts/autoload/audio_manager.gd"
 InputManager="*res://scripts/autoload/input_manager.gd"
+WorldState="*res://scripts/autoload/world_state.gd"
+
+[shader_globals]
+
+world_combat_intensity={
+"type": "float",
+"value": 0.0
+}
+world_magic_level={
+"type": "float",
+"value": 0.35
+}
+world_rain_level={
+"type": "float",
+"value": 0.0
+}
+world_wind={
+"type": "vec2",
+"value": Vector2(0, 0)
+}
+world_hero_pos_radius={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+world_pusher_1={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+world_pusher_2={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+world_pusher_3={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+world_wear_bounds={
+"type": "vec4",
+"value": Vector4(-76, -76, 152, 152)
+}
+world_wear_map={
+"type": "sampler2D",
+"value": ""
+}
 
 [debug]
 
@@ -39,6 +83,10 @@ boss="boss"
 hushling="hushling"
 pickup="pickup"
 projectile="projectile"
+
+[gui]
+
+theme/custom="res://assets/ui/theme.tres"
 
 
 

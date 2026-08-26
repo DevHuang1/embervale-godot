@@ -176,6 +176,189 @@ static func spawn_arc_trail(context: Node, pos: Vector3,
 	tween.tween_property(material, "albedo_color:a", 0.0, 0.2)
 	tween.chain().tween_callback(mi.queue_free)
 
+# === Magic bolt: a glowing orb that flies from→to with a spark trail ===
+static func spawn_bolt(context: Node, from_pos: Vector3, to_pos: Vector3,
+		color: Color = Color(0.96, 0.62, 0.22), flight_time: float = 0.28,
+		size: float = 0.3) -> void:
+	if context == null or not context.is_inside_tree():
+		return
+	var mi := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = size * 0.5
+	sphere.height = size
+	sphere.radial_segments = 16
+	sphere.rings = 8
+	var material := StandardMaterial3D.new()
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = color
+	material.disable_receive_shadows = true
+	sphere.material = material
+	mi.mesh = sphere
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_fx_root(context).add_child(mi)
+	mi.global_position = from_pos
+	# Spark trail shed along the flight path
+	var emit_tween := mi.create_tween()
+	emit_tween.tween_method(func(t: float):
+		if not is_instance_valid(mi):
+			return
+		spawn_burst(context, mi.global_position, Color(color.r, color.g, color.b, 0.55),
+			2, 1.6, 0.24, size * 0.42, false, Vector3.ZERO),
+		0.0, 1.0, flight_time)
+	var tween := mi.create_tween()
+	tween.tween_property(mi, "global_position", to_pos, flight_time) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.parallel().tween_property(mi, "scale", Vector3.ONE * 0.4, flight_time)
+	tween.tween_callback(func():
+		if is_instance_valid(mi):
+			spawn_burst(context, mi.global_position, color, 10, 4.5, 0.3, size * 0.4)
+			mi.queue_free())
+
+## Vertical light pillar: an additive billboard column that flares and thins.
+static func spawn_pillar(context: Node, pos: Vector3, height: float = 2.6,
+		color: Color = Color(0.75, 0.95, 0.55, 0.7), duration: float = 0.6,
+		width: float = 0.9) -> void:
+	if context == null or not context.is_inside_tree():
+		return
+	var quad := QuadMesh.new()
+	quad.size = Vector2(width, height)
+	var material := StandardMaterial3D.new()
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	material.albedo_texture = _pillar_texture()
+	material.albedo_color = color
+	material.disable_receive_shadows = true
+	quad.material = material
+	var mi := MeshInstance3D.new()
+	mi.mesh = quad
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_fx_root(context).add_child(mi)
+	mi.global_position = pos + Vector3(0, height * 0.5, 0)
+	mi.scale = Vector3(0.25, 0.7, 1.0)
+	var tween := mi.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(mi, "scale", Vector3(1.0, 1.0, 1.0), duration * 0.35) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(material, "albedo_color:a", 0.0, duration) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.chain().tween_callback(mi.queue_free)
+
+static var _pillar_tex_cache: GradientTexture2D = null
+
+## Tall soft-edged gradient for light pillars (bright core, feathered sides).
+static func _pillar_texture() -> GradientTexture2D:
+	if _pillar_tex_cache == null or not is_instance_valid(_pillar_tex_cache):
+		var grad := Gradient.new()
+		grad.set_color(0, Color(1, 1, 1, 0))
+		grad.add_point(0.35, Color(1, 1, 1, 0.85))
+		grad.set_color(1, Color(1, 1, 1, 0))
+		var tex := GradientTexture2D.new()
+		tex.gradient = grad
+		tex.fill_from = Vector2(0.5, 0.0)
+		tex.fill_to = Vector2(0.5, 1.0)
+		tex.width = 32
+		tex.height = 128
+		_pillar_tex_cache = tex
+	return _pillar_tex_cache
+
+# === Rising motes: weightless sparks drifting upward (heals, auras, embers)
+static func spawn_motes(context: Node, pos: Vector3, color: Color,
+		amount: int = 20, radius: float = 1.0, lifetime: float = 0.9,
+		rise_speed: float = 1.6) -> void:
+	if context == null or not context.is_inside_tree():
+		return
+	var fx := _acquire_particle(context)
+	fx.amount = amount
+	fx.lifetime = lifetime
+	fx.one_shot = true
+	fx.explosiveness = 0.0   # gentle stream, not a pop
+	fx.local_coords = false
+	var mat := ParticleProcessMaterial.new()
+	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	mat.emission_sphere_radius = radius
+	mat.direction = Vector3.UP
+	mat.spread = 18.0
+	mat.initial_velocity_min = rise_speed * 0.6
+	mat.initial_velocity_max = rise_speed
+	mat.gravity = Vector3.ZERO
+	mat.scale_min = 0.45
+	mat.scale_max = 1.0
+	mat.color = color
+	mat.color_ramp = _fade_ramp(color)
+	fx.process_material = mat
+	fx.global_position = pos
+	fx.restart()
+	fx.emitting = true
+
+## Expanding shockwave: a ground-hugging ring of light that races outward.
+static func spawn_shockwave(context: Node, pos: Vector3, radius: float = 3.0,
+		color: Color = Color(1.0, 0.84, 0.47, 0.9), duration: float = 0.45) -> void:
+	if context == null or not context.is_inside_tree():
+		return
+	var inner := TorusMesh.new()
+	inner.inner_radius = 0.86
+	inner.outer_radius = 1.0
+	var material := StandardMaterial3D.new()
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = color
+	material.disable_receive_shadows = true
+	inner.material = material
+	var mi := MeshInstance3D.new()
+	mi.mesh = inner
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_fx_root(context).add_child(mi)
+	mi.global_position = pos + Vector3(0, 0.12, 0)
+	mi.scale = Vector3(0.15, 1.0, 0.15)
+	var tween := mi.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(mi, "scale", Vector3(radius, 1.0, radius), duration) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tween.tween_property(material, "albedo_color:a", 0.0, duration) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.chain().tween_callback(mi.queue_free)
+
+## Sustained charge glow at a cast origin: swells over `charge_time` then pops.
+## Returns the MeshInstance3D so callers can free it early on interrupt.
+static func spawn_charge_glow(context: Node, pos: Vector3,
+		color: Color = Color(1.0, 0.9, 0.72), charge_time: float = 0.4,
+		end_scale: float = 1.6) -> MeshInstance3D:
+	if context == null or not context.is_inside_tree():
+		return null
+	var mi := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.16
+	sphere.height = 0.32
+	sphere.radial_segments = 12
+	sphere.rings = 6
+	var material := StandardMaterial3D.new()
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(color.r, color.g, color.b, 0.75)
+	material.disable_receive_shadows = true
+	sphere.material = material
+	mi.mesh = sphere
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_fx_root(context).add_child(mi)
+	mi.global_position = pos
+	mi.scale = Vector3.ONE * 0.2
+	var tween := mi.create_tween()
+	tween.tween_property(mi, "scale", Vector3.ONE * end_scale, charge_time) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tween.parallel().tween_property(mi, "global_position",
+		pos + Vector3(0, 0.12, 0), charge_time)
+	tween.tween_callback(func():
+		if is_instance_valid(mi):
+			spawn_burst(context, mi.global_position, color, 8, 3.0, 0.26, 0.11)
+			mi.queue_free())
+	return mi
+
 # === Magic explosion ===
 ## Staff-style detonation: flash burst + expanding ground ring.
 static func spawn_explosion(context: Node, pos: Vector3, color: Color,
@@ -196,6 +379,11 @@ static func impact(context: Node, shake: float = 0.0, hitstop_duration: float = 
 		var sfx := _find_screen_fx(context)
 		if sfx and sfx.has_method("punch_chroma"):
 			sfx.punch_chroma(chroma)
+	# Single choke point: every coordinated hit feeds the world's tension
+	if context != null and context.is_inside_tree():
+		var ws := context.get_node_or_null("/root/WorldState")
+		if ws != null and ws.has_method("notify_impact"):
+			ws.notify_impact(0.10 + chroma * 0.3)
 
 static func _find_camera_rig(context: Node) -> Node:
 	var scene := _fx_root(context)
@@ -238,6 +426,11 @@ static func _acquire_particle(context: Node) -> GPUParticles3D:
 		if not p.emitting:
 			p.global_position = Vector3.ZERO
 			return p
+	# Pool hygiene: hard cap so burst-heavy fights never grow unbounded
+	if _pool.size() >= 24:
+		var steal: GPUParticles3D = _pool[0]
+		_pool.append(_pool.pop_front())
+		return steal
 	var fx := GPUParticles3D.new()
 	fx.draw_pass_1 = _get_quad_mesh()
 	fx.visibility_aabb = AABB(Vector3(-24, -8, -24), Vector3(48, 16, 48))

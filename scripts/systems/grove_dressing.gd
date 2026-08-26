@@ -9,12 +9,12 @@ class_name GroveDressing
 @export var seed_value: int = 20260823
 @export var tree_ring_min: float = 58.0
 @export var tree_ring_max: float = 73.0
-@export var tree_count: int = 170
-@export var grove_cluster_count: int = 7
-@export var rock_count: int = 130
-@export var bush_count: int = 90
-@export var pebble_count: int = 340
-@export var tuft_count: int = 950
+@export var tree_count: int = 230
+@export var grove_cluster_count: int = 9
+@export var rock_count: int = 180
+@export var bush_count: int = 130
+@export var pebble_count: int = 520
+@export var tuft_count: int = 1500
 @export var scatter_radius: float = 71.0
 @export var tree_trunk_color: Color = Color(0.12, 0.095, 0.075)
 @export var tree_canopy_color: Color = Color(0.075, 0.15, 0.10)
@@ -23,6 +23,10 @@ class_name GroveDressing
 @export var mushroom_cap_color: Color = Color(0.36, 0.52, 0.40)
 
 var rng := RandomNumberGenerator.new()
+
+## Signature prop layer keyed to the explorable realm (falls back through
+## biome_id, then the current travel realm, then Bramblewood).
+enum RealmFlavor { BRAMBLEWOOD, MISTFEN, HEARTWOOD, MOONFEN }
 
 func _ready() -> void:
 	rng.seed = seed_value
@@ -36,12 +40,78 @@ func _ready() -> void:
 	_build_mushrooms()
 	_build_ruins()
 	_build_torches()
+	_build_realm_flavor()
+	_build_props()
+
+func _realm_flavor() -> int:
+	var id := ""
+	var world_root := get_parent()
+	if world_root != null and "biome_id" in world_root:
+		id = str(world_root.get("biome_id"))
+	else:
+		var gs := get_node_or_null("/root/GameState")
+		if gs != null:
+			id = str(gs.get("current_realm"))
+	match id:
+		"mistfen":
+			return RealmFlavor.MISTFEN
+		"heartwood":
+			return RealmFlavor.HEARTWOOD
+		"moonfen":
+			return RealmFlavor.MOONFEN
+		_:
+			return RealmFlavor.BRAMBLEWOOD
+
+func _build_realm_flavor() -> void:
+	match _realm_flavor():
+		RealmFlavor.MISTFEN:
+			_build_reeds()
+			_build_drowned_stones()
+		RealmFlavor.HEARTWOOD:
+			_build_charred_spires()
+			_build_ember_motes()
+		RealmFlavor.MOONFEN:
+			_build_glowcaps()
+		_:
+			_build_thorn_arches()
 
 func _ground_height(x: float, z: float) -> float:
 	var terrain = get_parent().get_node_or_null("Terrain")
 	if terrain and terrain.has_method("height_at"):
 		return terrain.height_at(x, z)
 	return 0.0
+
+## Breakable loot props near gameplay landmarks (flattened zones), flavored
+## per realm. Anchors come from TerrainRelief so props sit on walkable
+## ground away from quest hotspots.
+func _build_props() -> void:
+	var pools := {
+		RealmFlavor.BRAMBLEWOOD: ["pot", "pot", "crate"],
+		RealmFlavor.MISTFEN: ["pot", "crate"],
+		RealmFlavor.HEARTWOOD: ["crate", "crate", "pot"],
+		RealmFlavor.MOONFEN: ["glowcap", "glowcap", "pot"],
+	}
+	var pool: Array = pools.get(_realm_flavor(), pools[RealmFlavor.BRAMBLEWOOD])
+	var anchors := _prop_anchors()
+	var placed := 0
+	for i in mini(anchors.size() * 2, 14):
+		if placed >= 11:
+			break
+		var anchor: Vector2 = anchors[rng.randi() % anchors.size()]
+		var ang := rng.randf() * TAU
+		var rad := rng.randf_range(3.6, 6.6)
+		var p := anchor + Vector2(cos(ang) * rad, sin(ang) * rad)
+		var prop := DestructibleProp.create(str(pool[rng.randi() % pool.size()]))
+		prop.position = Vector3(p.x, _ground_height(p.x, p.y), p.y)
+		add_child(prop)
+		placed += 1
+
+func _prop_anchors() -> Array[Vector2]:
+	var terrain = get_parent().get_node_or_null("Terrain")
+	if terrain != null and terrain.has_method("prop_anchor_points"):
+		return terrain.prop_anchor_points()
+	return [Vector2.ZERO, Vector2(12, -8), Vector2(-14, 6),
+		Vector2(18, 14), Vector2(-6, -16)]
 
 func _mat(color: Color, emission: Color = Color.BLACK, energy: float = 0.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -56,9 +126,27 @@ func _mat(color: Color, emission: Color = Color.BLACK, energy: float = 0.0) -> S
 func _shader_mat(path: String, params: Dictionary) -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = load(path)
+	_bind_scan_textures(m, path)
 	for key in params:
 		m.set_shader_parameter(key, params[key])
 	return m
+
+## Bind the scanned CC0 PBR sets onto rock/bark shader materials unless the
+## caller overrides them, so procedural surfaces pick up photo detail for
+## free and never fall back to the white default texture.
+func _bind_scan_textures(m: ShaderMaterial, path: String) -> void:
+	if path.ends_with("rock.gdshader"):
+		for pair in [["rock_albedo_tex", "rock/albedo.jpg"],
+				["rock_normal_tex", "rock/normal.jpg"],
+				["rock_rough_tex", "rock/roughness.jpg"]]:
+			m.set_shader_parameter(pair[0], load(
+				"res://assets/textures/pbr/%s" % pair[1]))
+	elif path.ends_with("bark.gdshader"):
+		for pair in [["bark_albedo_tex", "bark/albedo.jpg"],
+				["bark_normal_tex", "bark/normal.jpg"],
+				["bark_rough_tex", "bark/roughness.jpg"]]:
+			m.set_shader_parameter(pair[0], load(
+				"res://assets/textures/pbr/%s" % pair[1]))
 
 func _batch(mesh: Mesh, material: Material, transforms: Array[Transform3D],
 		shadows: bool, extent: float = 35.0) -> void:
@@ -446,3 +534,215 @@ class LightFlicker:
 		if light:
 			light.light_energy = base_energy * (0.86 + 0.14 * sin(_t * 9.0) \
 				+ 0.06 * sin(_t * 23.7))
+
+# === Realm signature props ===
+
+## BRAMBLEWOOD: thorn arches straddling the pilgrim road — living gate
+## hoops woven from dark briar, announcing this realm's tangled character.
+func _build_thorn_arches() -> void:
+	var ring := TorusMesh.new()
+	ring.inner_radius = 1.68
+	ring.outer_radius = 2.12
+	ring.rings = 10
+	ring.ring_segments = 6
+	var briar := _shader_mat("res://assets/shaders/bark.gdshader", {
+		"bark_color": Color(0.09, 0.075, 0.05),
+	})
+	var transforms: Array[Transform3D] = []
+	var spots := [
+		Vector2(-16.0, 5.4), Vector2(-15.1, 1.1), Vector2(-13.8, -2.8),
+		Vector2(-15.3, -6.6), Vector2(-11.6, 5.0), Vector2(-18.8, 3.2),
+	]
+	for i in spots.size():
+		var s: Vector2 = spots[i]
+		var gy := _ground_height(s.x, s.y)
+		var b := Basis(Vector3(1, 0, 0), PI / 2.0) \
+			* Basis(Vector3.UP, rng.randf_range(-0.35, 0.35))
+		b = b.scaled(Vector3.ONE * rng.randf_range(0.9, 1.25))
+		transforms.append(Transform3D(b, Vector3(s.x, gy + 1.35, s.y)))
+	_batch(ring, briar, transforms, true, 78.0)
+
+## MISTFEN: swaying reeds in the damp hollows and pale drowned stones.
+func _build_reeds() -> void:
+	var reed := CylinderMesh.new()
+	reed.top_radius = 0.012
+	reed.bottom_radius = 0.045
+	reed.height = 1.05
+	reed.radial_segments = 4
+	reed.rings = 1
+	var grass := ShaderMaterial.new()
+	grass.shader = load("res://assets/shaders/grass_blade.gdshader")
+	grass.set_shader_parameter("blade_color", Color(0.28, 0.40, 0.34))
+	grass.set_shader_parameter("tip_color", Color(0.55, 0.72, 0.60))
+	grass.set_shader_parameter("blade_height", 1.05)
+	var transforms: Array[Transform3D] = []
+	var placed := 0
+	var tries := 0
+	while placed < 340 and tries < 1400:
+		tries += 1
+		var p := _rand_pos_in(scatter_radius)
+		if p.length() < 12.0:
+			continue
+		var gy := _ground_height(p.x, p.y)
+		if gy > -0.22:  # reeds crowd only the damp hollows
+			continue
+		var b := Basis.from_euler(Vector3(
+			rng.randf_range(-0.12, 0.12),
+			rng.randf() * TAU,
+			rng.randf_range(-0.12, 0.12)))
+		b = b.scaled(Vector3.ONE * rng.randf_range(0.55, 1.35))
+		transforms.append(Transform3D(b, Vector3(p.x, gy + 0.42, p.y)))
+		placed += 1
+	_batch(reed, grass, transforms, false, 78.0)
+
+func _build_drowned_stones() -> void:
+	var stone := SphereMesh.new()
+	stone.radius = 0.62
+	stone.height = 0.9
+	stone.radial_segments = 8
+	stone.rings = 4
+	var wet := _shader_mat("res://assets/shaders/rock.gdshader", {
+		"rock_color": Color(0.44, 0.50, 0.53),
+		"moss_color": Color(0.22, 0.32, 0.30),
+		"mottle_scale": 2.6,
+		"moss_amount": 0.45,
+	})
+	var transforms: Array[Transform3D] = []
+	for i in 48:
+		var p := _rand_pos_in(scatter_radius * 0.9)
+		if p.length() < 14.0:
+			continue
+		var gy := _ground_height(p.x, p.y)
+		var s := rng.randf_range(0.5, 1.5)
+		var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(
+			Vector3(s, s * rng.randf_range(0.4, 0.65), s))
+		# Half-sunk: pushed down so only the crown breaks the fen floor
+		transforms.append(Transform3D(b,
+			Vector3(p.x, gy - 0.18 * s, p.y)))
+	_batch(stone, wet, transforms, true, 78.0)
+
+## HEARTWOOD: charred spires with ember seams and a slow drifting mote field.
+func _build_charred_spires() -> void:
+	var spire := CylinderMesh.new()
+	spire.top_radius = 0.09
+	spire.bottom_radius = 0.52
+	spire.height = 4.6
+	spire.radial_segments = 8
+	spire.rings = 2
+	var charred := _mat(Color(0.07, 0.06, 0.055))
+	charred.roughness = 0.95
+
+	var seam := CylinderMesh.new()
+	seam.top_radius = 0.20
+	seam.bottom_radius = 0.30
+	seam.height = 0.5
+	seam.radial_segments = 8
+	seam.rings = 1
+	var ember := _mat(Color(0.55, 0.16, 0.04), Color(1.0, 0.38, 0.08), 1.8)
+
+	var trunks: Array[Transform3D] = []
+	var seams: Array[Transform3D] = []
+	var tall_spots: Array[Vector3] = []
+	for i in 16:
+		var p := _rand_pos_in(scatter_radius * 0.62)
+		if p.length() < 19.0 or Vector2(p.x, p.y).distance_to(Vector2(-16, 10)) < 13.0:
+			continue
+		var gy := _ground_height(p.x, p.y)
+		var s := rng.randf_range(0.7, 1.5)
+		var b := Basis.from_euler(Vector3(
+			rng.randf_range(-0.06, 0.06),
+			rng.randf() * TAU,
+			rng.randf_range(-0.06, 0.06))).scaled(Vector3(s, s, s))
+		trunks.append(Transform3D(b, Vector3(p.x, gy + 2.1 * s, p.y)))
+		# Ember seam bleeding through the bark at a random height
+		var seam_y := gy + rng.randf_range(0.7, 2.6) * s
+		seams.append(Transform3D(
+			Basis().scaled(Vector3.ONE * s * rng.randf_range(0.7, 1.1)),
+			Vector3(p.x, seam_y, p.y)))
+		if i % 3 == 0 and tall_spots.size() < 5:
+			tall_spots.append(Vector3(p.x, gy + 2.6 * s, p.y))
+	_batch(spire, charred, trunks, true, 78.0)
+	_batch(seam, ember, seams, false, 78.0)
+
+	for spot in tall_spots:
+		var light := OmniLight3D.new()
+		light.light_color = Color(1.0, 0.45, 0.15)
+		light.light_energy = 1.3
+		light.omni_range = 7.0
+		light.omni_attenuation = 1.6
+		light.shadow_enabled = false
+		light.position = spot
+		add_child(light)
+
+func _build_ember_motes() -> void:
+	var motes := GPUParticles3D.new()
+	motes.name = "EmberMotes"
+	motes.amount = 56
+	motes.lifetime = 5.0
+	motes.preprocess = 5.0
+	motes.local_coords = false
+	var proc := ParticleProcessMaterial.new()
+	proc.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	proc.emission_box_extents = Vector3(34.0, 3.5, 34.0)
+	proc.direction = Vector3.UP
+	proc.spread = 24.0
+	proc.initial_velocity_min = 0.15
+	proc.initial_velocity_max = 0.55
+	proc.gravity = Vector3(0, 0.12, 0)
+	proc.scale_min = 0.35
+	proc.scale_max = 0.9
+	var ramp := Gradient.new()
+	ramp.set_color(0, Color(1.0, 0.55, 0.18, 0.0))
+	ramp.set_color(1, Color(1.0, 0.42, 0.10, 0.75))
+	var ramp_tex := GradientTexture1D.new()
+	ramp_tex.gradient = ramp
+	proc.color_ramp = ramp_tex
+	motes.process_material = proc
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.09, 0.09)
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = true
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.albedo_texture = CombatFx.radial_glow_texture()
+	quad.material = mat
+	motes.draw_pass_1 = quad
+	add_child(motes)
+
+## MOONFEN: oversized glowcap clusters breathing cold cyan light.
+func _build_glowcaps() -> void:
+	var stem := CylinderMesh.new()
+	stem.top_radius = 0.07
+	stem.bottom_radius = 0.12
+	stem.height = 0.52
+	stem.radial_segments = 6
+	stem.rings = 1
+	var cap := SphereMesh.new()
+	cap.radius = 0.30
+	cap.height = 0.36
+	cap.radial_segments = 9
+	cap.rings = 4
+
+	var stems: Array[Transform3D] = []
+	var caps: Array[Transform3D] = []
+	var clusters := 9
+	for c in clusters:
+		var center := _rand_pos_in(scatter_radius * 0.55)
+		if center.length() < 10.0 \
+				or center.distance_to(Vector2(-7.0, -4.0)) < 7.0:
+			continue
+		for j in rng.randi_range(4, 7):
+			var p := center + _rand_pos_in(2.6)
+			var gy := _ground_height(p.x, p.y)
+			var s := rng.randf_range(0.7, 1.6)
+			stems.append(Transform3D(Basis().scaled(Vector3.ONE * s),
+				Vector3(p.x, gy, p.y)))
+			caps.append(Transform3D(
+				Basis().scaled(Vector3(s, s * 0.6, s)),
+				Vector3(p.x, gy + 0.46 * s, p.y)))
+
+	_batch(stem, _mat(Color(0.58, 0.56, 0.66)), stems, false)
+	_batch(cap, _mat(Color(0.20, 0.42, 0.55), Color(0.45, 0.85, 1.0), 1.7),
+		caps, false)

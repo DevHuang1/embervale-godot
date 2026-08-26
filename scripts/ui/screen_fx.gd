@@ -15,6 +15,7 @@ var _pulse := 0.0
 var _chroma := 0.0
 var _death_tween: Tween = null
 var _last_hp: int = 999
+var _world_state: Node = null   # mood source (rain, combat intensity)
 
 func _ready() -> void:
 	add_to_group("screen_fx")
@@ -36,14 +37,22 @@ func _ready() -> void:
 	GameState.defeated.connect(_on_defeated)
 
 func _process(delta: float) -> void:
+	if _world_state == null or not is_instance_valid(_world_state):
+		_world_state = get_tree().get_first_node_in_group("world_state")
+	var intensity: float = _world_state.combat_intensity \
+		if _world_state != null else 0.0
+	var rain: float = _world_state.rain_level if _world_state != null else 0.0
 	var target_vignette := clampf(VIGNETTE_BASE + _vignette_level * 0.35 + _pulse,
 		0.0, VIGNETTE_MAX)
+	# Combat tension breathes a hair of extra vignette (capped by VIGNETTE_MAX)
+	target_vignette += intensity * 0.05
 	var target_sat := clampf(lerpf(1.0, 0.25, maxf(_vignette_level - 0.9, 0.0) * 10.0), 0.2, 1.0)
 	_pulse = maxf(_pulse - delta * 1.6, 0.0)
 	_chroma = maxf(_chroma - delta * 3.2, 0.0)
 	_mat.set_shader_parameter("vignette_amount", clampf(target_vignette, 0.0, 0.9))
 	_mat.set_shader_parameter("saturation", target_sat)
 	_mat.set_shader_parameter("chroma_strength", _chroma)
+	_mat.set_shader_parameter("wetness", rain)
 
 func _on_hp_changed(_old_hp: int, new_hp: int) -> void:
 	var warmth := GameState.get_warmth_percent()

@@ -1,7 +1,10 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
-[ext_resource type="PackedScene" path="res://scenes/ui/main_menu.tscn" id="1_0"]
+[ext_resource type="PackedScene" path="res://scenes/ui/menu_backdrop.tscn" id="1_bd"]
+[ext_resource type="PackedScene" path="res://scenes/ui/main_menu.tscn" id="2_mm"]
 
 [node name="Main" type="Node"]
 
-[node name="MainMenu" parent="." instance=ExtResource("1_0")]
+[node name="MenuBackdrop" parent="." instance=ExtResource("1_bd")]
+
+[node name="MainMenu" parent="." instance=ExtResource("2_mm")]

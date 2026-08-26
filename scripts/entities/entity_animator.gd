@@ -186,7 +186,10 @@ func _animate_silhouette(delta: float) -> void:
 func _apply_scan_reveal() -> void:
 	if visual_root == null or _lod_level > 0 or mode != Mode.BIPED:
 		return
-	var since := float(Time.get_ticks_msec() - ScanManager.reveal_stamp_msec) / 1000.0
+	var scan := get_node_or_null("/root/ScanManager")
+	if scan == null:
+		return
+	var since := float(Time.get_ticks_msec() - scan.reveal_stamp_msec) / 1000.0
 	if since > 1.3:
 		return
 	var v := clampf(1.0 - since / 1.3, 0.0, 1.0)
@@ -310,6 +313,12 @@ func trigger_attack(kind: String = "") -> void:
 					_play_heavy()
 				"buff":
 					_play_buff()
+				"hurl":
+					_play_hurl()
+				"sky":
+					_play_sky()
+				"spin":
+					_play_spin()
 				_:
 					if attack_style == "magic":
 						_play_cast()
@@ -598,6 +607,7 @@ func _cancel_fidget() -> void:
 ## "heavy_impact" event, not the wind-up.
 func _play_heavy() -> void:
 	if not arm_l or not arm_r:
+		anim_state = AnimState.IDLE
 		attack_impact.emit()
 		return
 	var bl := _base_arm_l_rot
@@ -651,6 +661,7 @@ func _play_heavy() -> void:
 ## aura blooms (hooked via the "aura" event), then settles.
 func _play_buff() -> void:
 	if not arm_l or not arm_r:
+		anim_state = AnimState.IDLE
 		anim_event.emit("aura")
 		attack_impact.emit()
 		return
@@ -689,10 +700,154 @@ func _play_buff() -> void:
 		if anim_state == AnimState.ATTACK:
 			anim_state = AnimState.IDLE)
 
+## One-arm hurl: wind a projectile up over the shoulder, hips coil back,
+## then whip forward with a committed step — reads as "throwing" a bolt.
+func _play_hurl() -> void:
+	var drive := arm_r if _swing_right else arm_l
+	var guard := arm_l if _swing_right else arm_r
+	if not drive:
+		anim_state = AnimState.IDLE
+		attack_impact.emit()
+		return
+	var base_drive := _base_arm_r_rot if _swing_right else _base_arm_l_rot
+	var base_guard := _base_arm_l_rot if _swing_right else _base_arm_r_rot
+	var twist := -0.26 if _swing_right else 0.26
+	_attack_tween = create_tween()
+	if visual_root:
+		_attack_tween.parallel().tween_property(visual_root, "rotation:y", twist, 0.22) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	# Coil: drive arm cocked behind the head, torso leans away
+	_attack_tween.tween_property(drive, "rotation:x", base_drive.x - 2.9, 0.22) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_attack_tween.parallel().tween_property(drive, "rotation:z",
+		base_drive.z + (0.55 if _swing_right else -0.55), 0.22) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if guard:
+		_attack_tween.parallel().tween_property(guard, "rotation:x",
+			base_guard.x - 0.7, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if torso:
+		_attack_tween.parallel().tween_property(torso, "rotation:y", twist * 1.6, 0.22)
+	_attack_tween.tween_interval(0.06)
+	# Whip: arm snaps through, torso unwinds, root steps into the throw
+	_attack_tween.tween_property(drive, "rotation:x", base_drive.x - 0.35, 0.08) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	_attack_tween.parallel().tween_property(drive, "rotation:z", base_drive.z, 0.08)
+	if torso:
+		_attack_tween.parallel().tween_property(torso, "rotation:y", -twist, 0.08)
+	if visual_root:
+		_attack_tween.parallel().tween_property(visual_root, "position:z",
+			_base_visual_pos.z + 0.22, 0.08).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	_attack_tween.chain().tween_callback(_cast_release)
+	_finish_cast(base_drive, base_guard, drive, guard)
+
+## Sky-call: both arms thrown to the heavens, chest open, weight lifted —
+## for rites that summon from above. Impact fires as the arms reach apex.
+func _play_sky() -> void:
+	if not arm_l or not arm_r:
+		anim_state = AnimState.IDLE
+		attack_impact.emit()
+		return
+	var bl := _base_arm_l_rot
+	var br := _base_arm_r_rot
+	_attack_tween = create_tween()
+	_attack_tween.set_parallel(true)
+	_attack_tween.tween_property(arm_l, "rotation:x", bl.x - 2.6, 0.34) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	_attack_tween.tween_property(arm_l, "rotation:z", bl.z + 0.55, 0.34) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	_attack_tween.tween_property(arm_r, "rotation:x", br.x - 2.6, 0.38) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	_attack_tween.tween_property(arm_r, "rotation:z", br.z - 0.55, 0.38) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	if torso:
+		_attack_tween.tween_property(torso, "rotation:x", -0.30, 0.36) \
+			.set_trans(Tween.TRANS_SINE)
+	if visual_root:
+		_attack_tween.tween_property(visual_root, "position:y",
+			_base_visual_pos.y + 0.05, 0.36).set_trans(Tween.TRANS_SINE)
+	_attack_tween.chain().tween_callback(_cast_release)
+	_attack_tween.chain().tween_interval(0.5)
+	var bl2 := _base_arm_l_rot
+	var br2 := _base_arm_r_rot
+	_attack_tween.chain().tween_property(arm_l, "rotation", bl2, 0.40) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_attack_tween.parallel().tween_property(arm_r, "rotation", br2, 0.40) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	if torso:
+		_attack_tween.parallel().tween_property(torso, "rotation:x", 0.0, 0.38)
+	if visual_root:
+		_attack_tween.parallel().tween_property(visual_root, "position:y",
+			_base_visual_pos.y, 0.38)
+	_attack_tween.chain().tween_callback(func():
+		if anim_state == AnimState.ATTACK:
+			anim_state = AnimState.IDLE)
+
+## Full-body whirl: crouch into a complete spin, blades out — the whole
+## model turns through TAU while the ring of slashes plays around it.
+func _play_spin() -> void:
+	if not arm_l or not arm_r or not visual_root:
+		anim_state = AnimState.IDLE
+		attack_impact.emit()
+		return
+	var bl := _base_arm_l_rot
+	var br := _base_arm_r_rot
+	_attack_tween = create_tween()
+	# Crouch + arms flare wide
+	_attack_tween.set_parallel(true)
+	_attack_tween.tween_property(arm_l, "rotation:z", bl.z + 1.15, 0.14) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_attack_tween.tween_property(arm_r, "rotation:z", br.z - 1.15, 0.14) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_attack_tween.tween_property(arm_l, "rotation:x", bl.x - 1.3, 0.14)
+	_attack_tween.tween_property(arm_r, "rotation:x", br.x - 1.3, 0.14)
+	if visual_root:
+		_attack_tween.tween_property(visual_root, "position:y",
+			_base_visual_pos.y - 0.07, 0.14)
+	_attack_tween.chain().tween_callback(func(): anim_event.emit("spin_start"))
+	# The spin itself: one full turn with a snappy ease; release fires mid-turn
+	_attack_tween.tween_property(visual_root, "rotation:y", TAU, 0.42) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_attack_tween.parallel().tween_callback(_cast_release).set_delay(0.16)
+	# Settle: wrap TAU→0 invisibly, blend arms home, stand tall
+	_attack_tween.chain().tween_property(visual_root, "rotation:y", 0.0, 0.01)
+	_attack_tween.parallel().tween_property(arm_l, "rotation", bl, 0.30) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_attack_tween.parallel().tween_property(arm_r, "rotation", br, 0.30) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	if visual_root:
+		_attack_tween.parallel().tween_property(visual_root, "position:y",
+			_base_visual_pos.y, 0.28)
+	_attack_tween.chain().tween_callback(func():
+		_in_recovery = false
+		if anim_state == AnimState.ATTACK:
+			anim_state = AnimState.IDLE)
+
+## Shared cast release bookkeeping: fire the impact hook so payload timers
+## in hero code stay synced to the pose, not just fixed sleeps.
+func _cast_release() -> void:
+	_in_recovery = true
+	_emit_impact()
+
+## Common cast tail: blend the casting pair home and clear attack state.
+func _finish_cast(base_drive: Vector3, base_guard: Vector3,
+		drive: Node3D, guard: Node3D) -> void:
+	_attack_tween.chain().tween_property(drive, "rotation", base_drive, 0.24) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if guard:
+		_attack_tween.parallel().tween_property(guard, "rotation", base_guard, 0.24)
+	if visual_root:
+		_attack_tween.parallel().tween_property(visual_root, "rotation:y", 0.0, 0.26)
+		_attack_tween.parallel().tween_property(visual_root, "position:z",
+			_base_visual_pos.z, 0.24)
+	_attack_tween.chain().tween_callback(func():
+		_in_recovery = false
+		if anim_state == AnimState.ATTACK:
+			anim_state = AnimState.IDLE)
+	_swing_right = not _swing_right
+
 ## Slash dispatcher: the current combo step picks the swing variant.
 ## Magic casts and BLOB/BRUTE one-shots never enter this path.
-func _play_swing() -> void:
-	match combo_step:
+func _play_swing() -> void:	match combo_step:
 		1:
 			_play_swing_reverse()
 		2:
@@ -704,6 +859,7 @@ func _play_swing_opening() -> void:
 	var drive := arm_r if _swing_right else arm_l
 	var guard := arm_l if _swing_right else arm_r
 	if not drive:
+		anim_state = AnimState.IDLE
 		_emit_impact()
 		return
 	var base_drive := _base_arm_r_rot if _swing_right else _base_arm_l_rot
@@ -732,6 +888,7 @@ func _play_swing_reverse() -> void:
 	var drive := arm_r if _swing_right else arm_l
 	var guard := arm_l if _swing_right else arm_r
 	if not drive:
+		anim_state = AnimState.IDLE
 		_emit_impact()
 		return
 	var base_drive := _base_arm_r_rot if _swing_right else _base_arm_l_rot
@@ -756,6 +913,7 @@ func _play_swing_reverse() -> void:
 ## together with a torso dip on the snap. Long recovery; always resets.
 func _play_overhead_finisher() -> void:
 	if not arm_l or not arm_r:
+		anim_state = AnimState.IDLE
 		_emit_impact()
 		return
 	var bl := _base_arm_l_rot
@@ -886,6 +1044,7 @@ func _play_cast() -> void:
 	var drive := arm_r if _swing_right else arm_l
 	var guard := arm_l if _swing_right else arm_r
 	if not drive:
+		anim_state = AnimState.IDLE
 		attack_impact.emit()
 		return
 	var base_drive := _base_arm_r_rot if _swing_right else _base_arm_l_rot
@@ -944,6 +1103,7 @@ func _animate_blob(delta: float) -> void:
 
 func _play_pounce() -> void:
 	if not visual_root:
+		anim_state = AnimState.IDLE
 		attack_impact.emit()
 		return
 	_attack_tween = create_tween()
@@ -960,6 +1120,9 @@ func _play_pounce() -> void:
 	_attack_tween.parallel().tween_property(visual_root, "position:z",
 		_base_visual_pos.z, 0.18) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	_attack_tween.chain().tween_callback(func():
+		if anim_state == AnimState.ATTACK:
+			anim_state = AnimState.IDLE)
 
 # === BRUTE: matriarch lumber with weight shift and arm sway ===
 func _animate_brute(delta: float) -> void:
@@ -1000,6 +1163,7 @@ func _animate_brute(delta: float) -> void:
 
 func _play_slam() -> void:
 	if not arm_l or not arm_r:
+		anim_state = AnimState.IDLE
 		attack_impact.emit()
 		return
 	var bl := arm_l.rotation

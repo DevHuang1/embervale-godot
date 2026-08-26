@@ -12,6 +12,9 @@
 [ext_resource type="Script" path="res://scripts/systems/grove_dressing.gd" id="10_dress"]
 [ext_resource type="Script" path="res://scripts/systems/terrain_relief.gd" id="11_relief"]
 [ext_resource type="Shader" path="res://assets/shaders/rock.gdshader" id="12_stone"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/albedo.jpg" id="stone_albedo"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/normal.jpg" id="stone_normal"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/roughness.jpg" id="stone_rough"]
 [ext_resource type="PackedScene" path="res://scenes/ui/shop_menu.tscn" id="13_shop"]
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_pedestal"]
@@ -136,6 +139,9 @@ shader_parameter/mottle_scale = 4.5
 shader_parameter/mottle_strength = 0.35
 shader_parameter/moss_amount = 0.45
 shader_parameter/moss_threshold = 0.62
+shader_parameter/rock_albedo_tex = ExtResource("stone_albedo")
+shader_parameter/rock_normal_tex = ExtResource("stone_normal")
+shader_parameter/rock_rough_tex = ExtResource("stone_rough")
 
 [sub_resource type="BoxShape3D" id="BoxShape_wall_ew"]
 size = Vector3(152, 4, 2)
@@ -172,7 +178,7 @@ light_energy = 1.55
 light_angular_distance = 0.45
 shadow_enabled = true
 directional_shadow_max_distance = 96.0
-shadow_bias = -0.0005
+shadow_bias = 0.05
 shadow_normal_bias = 0.3
 shadow_blur = 0.8
 

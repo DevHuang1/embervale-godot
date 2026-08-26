@@ -15,9 +15,9 @@ var _current_cue := ""
 ## Gameplay cue -> likely clip names in imported packs (Quaternius and
 ## friends name clips "Idle", "Walk_01", "Attack", ... not our cue ids).
 const CUE_ALIASES := {
-	"idle": ["idle", "flying", "float"],
-	"walk": ["walk", "walking", "fly"],
-	"run": ["run", "jog", "sprint"],
+	"idle": ["idle", "flying", "fly", "float"],
+	"walk": ["walk", "walking", "fly", "flying"],
+	"run": ["run", "jog", "sprint", "walk"],
 	"light_1": ["attack", "attack1", "slash", "hit1"],
 	"light_2": ["attack2", "slash2", "hit2"],
 	"light_3": ["attack3", "combo", "hit3"],
@@ -110,6 +110,11 @@ func _process(_delta: float) -> void:
 	if player == null or not state_provider.is_valid():
 		return
 	var st: Dictionary = state_provider.call()
+	if st.is_empty():
+		# Host entity freed (e.g. Visual now rides a TumbleCorpse): freeze on
+		# the last pose instead of polling dead captures every frame.
+		set_process(false)
+		return
 	var cue := _pick_cue(st)
 	if cue == "":
 		return
@@ -121,6 +126,8 @@ func _process(_delta: float) -> void:
 func _pick_cue(st: Dictionary) -> String:
 	if st.get("dead", false):
 		return "death"
+	if st.get("hit", false):
+		return "hit"
 	if st.get("attacking", false):
 		# A cast (staff/area/heal) reads as a stance — the knight has no cast
 		# clip, so this falls back to idle rather than a walk-swing.

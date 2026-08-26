@@ -14,6 +14,16 @@ var players: Dictionary = {}
 var music_player: AudioStreamPlayer = null
 var ambient_playing: bool = false
 
+# === Reactive combat bed (WorldState-driven intensity crossfade) ===
+const BED_DURATION := 12.0
+var _combat_player: AudioStreamPlayer = null
+var _combat_stream: AudioStreamWAV = null
+var _bed_target_db := -60.0
+var _bed_live := false
+var _bed_bus := -1
+var _cue_live := 0
+const CUE_PLAYER_CAP := 14
+
 # === Synth cue engine state ===
 const SYNTH_SR := 44100
 var cue_config: AudioCueConfig = null
@@ -25,6 +35,84 @@ func _ready() -> void:
 	_load_settings()
 	_apply_volumes()
 	_load_cue_config()
+
+func _process(delta: float) -> void:
+	# Ease the combat bed toward its intensity target; stop when idle long.
+	if _combat_player == null:
+		return
+	var cur := db_to_linear(_combat_player.volume_db)
+	var goal := db_to_linear(_bed_target_db)
+	cur = lerpf(cur, goal, minf(delta * 2.5, 1.0))
+	if not _bed_live or cur < 0.004:
+		if _combat_player.playing:
+			_combat_player.stop()
+		return
+	if not _combat_player.playing:
+		_combat_player.play()
+	_combat_player.volume_db = linear_to_db(cur)
+
+## Called every frame by WorldState: crossfades the tense bed in with combat
+## intensity; `night` muffles the bed's highs (dread reads better muffled).
+func update_combat_beds(intensity: float, night: float = 0.0) -> void:
+	_bed_target_db = lerpf(-52.0, -8.0, pow(clampf(intensity, 0.0, 1.0), 1.4))
+	if intensity <= 0.02:
+		_bed_live = false
+		return
+	if _combat_player == null:
+		if _combat_stream == null:
+			var b := PackedFloat32Array()
+			b.resize(int(BED_DURATION * SYNTH_SR))
+			_render_combat_bed(b, BED_DURATION)
+			_combat_stream = _to_wav(b)
+			_combat_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+			_combat_stream.loop_begin = 0
+			_combat_stream.loop_end = b.size()
+		_combat_player = AudioStreamPlayer.new()
+		add_child(_combat_player)
+		_combat_player.stream = _combat_stream
+		_combat_player.bus = _ensure_bed_bus_name()
+		_combat_player.volume_db = -60.0
+	_bed_live = true
+	# Night low-pass on the dedicated bus (day = open highs, night = dread)
+	var idx := AudioServer.get_bus_index("CombatBed")
+	if idx >= 0 and AudioServer.get_bus_effect_count(idx) > 0:
+		var lp := AudioServer.get_bus_effect(idx, 0) as AudioEffectLowPassFilter
+		if lp != null:
+			lp.cutoff_hz = lerpf(15000.0, 4200.0, clampf(night, 0.0, 1.0))
+
+## Dedicated bus so the bed filter never touches Music/SFX settings.
+func _ensure_bed_bus_name() -> String:
+	var idx := AudioServer.get_bus_index("CombatBed")
+	if idx < 0:
+		idx = AudioServer.bus_count
+		AudioServer.add_bus(idx)
+		AudioServer.set_bus_name(idx, "CombatBed")
+		AudioServer.set_bus_send(idx, "Master")
+		var lp := AudioEffectLowPassFilter.new()
+		lp.cutoff_hz = 12000.0
+		AudioServer.add_bus_effect(idx, lp)
+	return "CombatBed"
+
+## Tense layer over the ambient pads: minor-second drone, loop-locked heart
+## thumps (4 per bar of 12s), and a thin anxious shimmer.
+func _render_combat_bed(b: PackedFloat32Array, duration: float) -> void:
+	var rate := SYNTH_SR
+	for i in b.size():
+		var t := i / float(rate)
+		var w := TAU / duration
+		var swell := 0.7 + 0.3 * sin(w * t + 0.9)
+		b[i] += 0.05 * swell * (
+			sin(TAU * 110.0 * t) * 0.8
+			+ sin(TAU * 116.54 * t + 0.4) * 0.6
+			+ sin(TAU * 220.0 * t + 1.1) * 0.22)
+	for beat in 4:  # loop-locked heartbeat at 3s spacing
+		_sweep_tone(b, beat * 3.0, 0.16, 74.0, 42.0, 0.34, 9.0)
+		_sweep_tone(b, beat * 3.0 + 0.14, 0.13, 62.0, 38.0, 0.26, 10.0)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260825
+	for k in 20:  # whole-cycle shimmer grains keep the loop seamless
+		var bt := fposmod(rng.randf(), duration - 0.3)
+		_tone_at(b, bt, 0.18, 1244.5 + rng.randf() * 300.0, 0.012, 12.0, 2)
 
 func _load_cue_config() -> void:
 	if ResourceLoader.exists("res://assets/audio/audio_config.tres"):
@@ -116,14 +204,19 @@ func play_whoosh(pitch_scale: float = 1.0) -> void:
 	play_chime(180.0 * pitch_scale, 0.0, 0.09, 0.024)
 
 ## Combo-aware layered whooshes (opening / reverse / overhead finisher).
+## The synth cue sits under a recorded CC0 swipe so every slash animation
+## carries a real air-cut; variants mirror the combo stage's weight.
 func play_swing_stage(combo_step: int) -> void:
 	match clampi(combo_step, 0, 2):
 		1:
 			play_cue("swing_reverse")
+			play_fx(["swipe_mid"], -8.0)
 		2:
 			play_cue("swing_finisher")
+			play_fx(["swipe_heavy"], -7.0)
 		_:
 			play_cue("swing_open")
+			play_fx(["swipe_light"], -8.0)
 
 func play_slash() -> void:
 	play_cue("slash_impact")
@@ -133,13 +226,40 @@ func play_magic_cast() -> void:
 	play_cue("magic_cast")
 	play_fx(["magic1", "spell"], -11.0)
 
+# === Skill rite SFX director ===
+## One call at cast start: a shared gather shimmer plus the rite family's
+## signature cue, so every skill sounds distinct yet related.
+func play_skill_cast(skill_type: String) -> void:
+	play_cue("skill_charge")
+	match skill_type:
+		"whirl":
+			play_cue("skill_whirl_spin")
+		"dash_strike":
+			play_cue("skill_dash_zip")
+		_:
+			pass
+
+## One call at the payload moment (bolt launch, comet call, bloom pop).
+func play_skill_release(skill_type: String) -> void:
+	match skill_type:
+		"explosion":
+			play_cue("skill_hurl")
+		"comet":
+			play_cue("comet_fall")
+		"heal_bloom":
+			play_cue("heal_bloom_cue")
+		"aoe":
+			play_cue("skill_whirl_spin")
+		_:
+			pass
+
 func play_explosion() -> void:
 	play_cue("explosion")
 
 func play_heal() -> void:
-	play_chime(523.25, 0.0, 0.2, 0.06)
-	await get_tree().create_timer(0.05).timeout
-	play_chime(659.25, 0.0, 0.2, 0.05)
+	play_cue("heal_bloom_cue")
+	await get_tree().create_timer(0.30).timeout
+	play_chime(1046.5, 0.0, 0.22, 0.04)
 	play_fx(["spell"], -14.0)
 
 # === Recorded foley layer ("RPG Sound Pack", CC0 — opengameart.org) ===
@@ -413,6 +533,10 @@ func play_cue(cue_name: String) -> void:
 	var streams := _get_cue_streams(cue_name)
 	if streams.is_empty():
 		return
+	# Pool hygiene: cap concurrent one-shots so bursts never pile up voices
+	if _cue_live >= CUE_PLAYER_CAP:
+		return
+	_cue_live += 1
 	var stream: AudioStreamWAV = streams[randi() % streams.size()]
 	var cfg := _cue_cfg(cue_name)
 	var player := AudioStreamPlayer.new()
@@ -424,8 +548,12 @@ func play_cue(cue_name: String) -> void:
 	var bus := str(cfg.get("bus", "SFX"))
 	if AudioServer.get_bus_index(bus) >= 0:
 		player.bus = bus
-	player.finished.connect(player.queue_free)
+	player.finished.connect(_on_cue_finished.bind(player))
 	player.play()
+
+func _on_cue_finished(player: AudioStreamPlayer) -> void:
+	_cue_live = maxi(0, _cue_live - 1)
+	player.queue_free()
 
 ## Positional playback for world-space events (stomps, bursts, deaths).
 func play_synth_at(host: Node, cue_name: String, volume_db_offset := 0.0) -> void:
@@ -513,6 +641,50 @@ func _render_cue(name_: String, variant: int) -> PackedFloat32Array:
 			b.resize(int(0.11 * SYNTH_SR))
 			_noise(b, rng, 0.0, 0.03, 0.5, 55.0, 0.8)
 			_sweep_tone(b, 0.005, 0.09, 1450.0, 680.0, 0.30, 15.0)
+		# --- Skill rites (one signature cue per rite family) ---
+		"skill_charge":
+			# Rising gather: hum climbs while embers crackle at the hand
+			b.resize(int(0.50 * SYNTH_SR))
+			_hum(b, 0.0, 0.42, 96.0, 214.0, 0.24, 3)
+			_crackle(b, rng, 0.16, 0.26, 30.0, 0.11)
+			_sweep_tone(b, 0.36, 0.12, 520.0, 1240.0, 0.15, 9.0)
+		"skill_hurl":
+			# Throw: airy pass ending in a downward tonal drop
+			b.resize(int(0.34 * SYNTH_SR))
+			_whoosh(b, rng, 0.0, 0.22, 0.48, 0.16, 0.78)
+			_sweep_tone(b, 0.15, 0.15, 1020.0, 380.0, 0.20, 11.0)
+		"skill_whirl_spin":
+			# Three linked swishes around the body, closing on a low sweep
+			b.resize(int(0.64 * SYNTH_SR))
+			for k in 3:
+				_whoosh(b, rng, 0.02 + k * 0.19, 0.17,
+					0.42 - k * 0.06, 0.32, 0.82)
+			_sweep_tone(b, 0.46, 0.16, 640.0, 230.0, 0.22, 10.0)
+			_crackle(b, rng, 0.46, 0.14, 20.0, 0.14)
+		"skill_dash_zip":
+			# Sharp bright zip for the lunge
+			b.resize(int(0.26 * SYNTH_SR))
+			_whoosh(b, rng, 0.0, 0.14, 0.55, 0.88, 0.22)
+			_sweep_tone(b, 0.03, 0.10, 1650.0, 720.0, 0.17, 13.0)
+		"comet_fall":
+			# Descending sky-whistle into a rumble bed
+			b.resize(int(0.74 * SYNTH_SR))
+			_sweep_tone(b, 0.0, 0.58, 1480.0, 210.0, 0.23, 3.6)
+			_noise(b, rng, 0.12, 0.52, 0.16, 5.0, 0.5, 0.12)
+		"heal_bloom_cue":
+			# Warm arpeggio blooming under a petal-sparkle shimmer
+			b.resize(int(0.92 * SYNTH_SR))
+			_tone_at(b, 0.00, 0.30, 523.25, 0.15, 5.0, 3)
+			_tone_at(b, 0.12, 0.32, 659.25, 0.14, 5.0, 3)
+			_tone_at(b, 0.24, 0.40, 783.99, 0.14, 4.0, 3)
+			_tone_at(b, 0.40, 0.46, 1046.50, 0.11, 3.5, 2)
+			_crackle(b, rng, 0.08, 0.72, 26.0, 0.07)
+		"aura_rise":
+			# Shimmering rise for self-buffs
+			b.resize(int(0.82 * SYNTH_SR))
+			_hum(b, 0.0, 0.70, 132.0, 264.0, 0.21, 4)
+			_crackle(b, rng, 0.20, 0.50, 38.0, 0.08)
+			_sweep_tone(b, 0.52, 0.24, 690.0, 1420.0, 0.11, 8.0)
 		# --- Lantern ---
 		"lantern_hum":
 			b.resize(int(1.15 * SYNTH_SR))
@@ -572,6 +744,47 @@ func _render_cue(name_: String, variant: int) -> PackedFloat32Array:
 			b.resize(int(0.5 * SYNTH_SR))
 			_sweep_tone(b, 0.0, 0.34, 90.0, 40.0, 0.7, 8.0)
 			_noise(b, rng, 0.0, 0.4, 0.45, 14.0, 0.20)
+		# --- Impact director: material-aware strikes ---
+		"impact_thud":
+			b.resize(int(0.16 * SYNTH_SR))
+			_sweep_tone(b, 0.0, 0.10, 96.0, 44.0, 0.6, 12.0)
+			_noise(b, rng, 0.0, 0.09, 0.30, 18.0, 0.24)
+		"impact_plant":
+			b.resize(int(0.20 * SYNTH_SR))
+			_crackle(b, rng, 0.0, 0.14, 46.0, 0.34)      # fibers tearing
+			_noise(b, rng, 0.01, 0.11, 0.22, 22.0, 0.34)
+			_sweep_tone(b, 0.01, 0.08, 210.0, 90.0, 0.22, 16.0)
+		"impact_stone":
+			b.resize(int(0.15 * SYNTH_SR))
+			_noise(b, rng, 0.0, 0.02, 0.55, 70.0, 0.85)  # bright crack
+			_sweep_tone(b, 0.003, 0.10, 320.0, 70.0, 0.42, 13.0)
+			_crackle(b, rng, 0.03, 0.08, 26.0, 0.2)
+		"impact_claw":
+			b.resize(int(0.17 * SYNTH_SR))
+			_noise(b, rng, 0.02, 0.10, 0.36, 30.0, 0.8)  # raking scratch
+			_whoosh(b, rng, 0.0, 0.12, 0.4, 0.5, 0.7)
+			_sweep_tone(b, 0.04, 0.07, 180.0, 80.0, 0.26, 15.0)
+		# --- Relic element payloads ---
+		"elem_fire":
+			b.resize(int(0.55 * SYNTH_SR))
+			_noise(b, rng, 0.0, 0.42, 0.32, 6.0, 0.30, 0.10)  # whoomp roar
+			_sweep_tone(b, 0.0, 0.20, 140.0, 60.0, 0.4, 10.0)
+			_crackle(b, rng, 0.1, 0.35, 34.0, 0.16)
+		"elem_frost":
+			b.resize(int(0.45 * SYNTH_SR))
+			_sweep_tone(b, 0.0, 0.28, 1560.0, 880.0, 0.16, 9.0)  # crystalline
+			_crackle(b, rng, 0.05, 0.25, 40.0, 0.12)             # brittle snap
+			_noise(b, rng, 0.06, 0.22, 0.14, 26.0, 0.5)
+		"elem_shock":
+			b.resize(int(0.30 * SYNTH_SR))
+			_noise(b, rng, 0.0, 0.12, 0.5, 60.0, 0.9)     # sharp crack
+			_sweep_tone(b, 0.01, 0.14, 1900.0, 300.0, 0.3, 12.0)
+			_crackle(b, rng, 0.06, 0.16, 52.0, 0.18)      # arcing sputter
+		"elem_nature":
+			b.resize(int(0.50 * SYNTH_SR))
+			_hum(b, 0.0, 0.40, 98.0, 196.0, 0.22, 3)      # rising growth
+			_crackle(b, rng, 0.08, 0.30, 30.0, 0.12)      # unfurling leaves
+			_sweep_tone(b, 0.30, 0.16, 520.0, 1040.0, 0.10, 9.0)
 		_:
 			b.resize(int(0.1 * SYNTH_SR))
 	return b

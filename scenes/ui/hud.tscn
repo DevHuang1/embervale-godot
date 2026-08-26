@@ -1,12 +1,11 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/hud.gd" id="1_0"]
 [ext_resource type="Script" path="res://scripts/ui/virtual_joystick.gd" id="2_joystick"]
-[ext_resource type="FontFile" path="res://assets/fonts/PressStart2P-Regular.ttf" id="1_2"]
-[ext_resource type="FontFile" path="res://assets/fonts/VT323-Regular.ttf" id="1_3"]
 [ext_resource type="Script" path="res://scripts/ui/screen_fx.gd" id="4_fx"]
 [ext_resource type="Script" path="res://scripts/ui/fight_button.gd" id="5_fight"]
 [ext_resource type="Script" path="res://scripts/ui/minimap.gd" id="6_minimap"]
+[ext_resource type="Script" path="res://scripts/ui/ember_bar.gd" id="7_ember"]
 
 [node name="HUD" type="CanvasLayer"]
 layer = 10
@@ -19,6 +18,10 @@ script = ExtResource("4_fx")
 [node name="Root" type="Control" parent="."]
 layout_mode = 3
 anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 
 [node name="MoveJoystick" type="Control" parent="Root"]
 layout_mode = 0
@@ -27,24 +30,24 @@ anchor_top = 1.0
 anchor_right = 0.0
 anchor_bottom = 1.0
 offset_left = 24.0
-offset_top = -192.0
-offset_right = 192.0
+offset_top = -208.0
+offset_right = 208.0
 offset_bottom = -24.0
 grow_vertical = 0
 script = ExtResource("2_joystick")
 
 [node name="DodgeButton" type="Control" parent="Root"]
-custom_minimum_size = Vector2(88, 88)
+custom_minimum_size = Vector2(100, 100)
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -184.0
-offset_top = -316.0
+offset_left = -196.0
+offset_top = -360.0
 offset_right = -96.0
-offset_bottom = -228.0
+offset_bottom = -260.0
 grow_horizontal = 0
 grow_vertical = 0
 tooltip_text = "Dodge (Shift)"
@@ -61,22 +64,21 @@ grow_vertical = 2
 text = "ROLL"
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 9}
+theme_override_font_sizes = {"font_size": 13}
 theme_override_colors = {"font_color": Color(0.88, 0.94, 0.86, 1)}
 
 [node name="JumpButton" type="Control" parent="Root"]
-custom_minimum_size = Vector2(88, 88)
+custom_minimum_size = Vector2(100, 100)
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -184.0
-offset_top = -416.0
+offset_left = -196.0
+offset_top = -480.0
 offset_right = -96.0
-offset_bottom = -328.0
+offset_bottom = -380.0
 grow_horizontal = 0
 grow_vertical = 0
 tooltip_text = "Jump (C)"
@@ -93,8 +95,7 @@ grow_vertical = 2
 text = "JUMP"
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 9}
+theme_override_font_sizes = {"font_size": 13}
 theme_override_colors = {"font_color": Color(0.88, 0.91, 0.97, 1)}
 
 [node name="MinimapContainer" type="Control" parent="Root"]
@@ -102,45 +103,91 @@ layout_mode = 1
 anchors_preset = 0
 offset_left = 24.0
 offset_top = 20.0
-offset_right = 172.0
-offset_bottom = 190.0
+offset_right = 204.0
+offset_bottom = 220.0
 script = ExtResource("6_minimap")
+
+[node name="PlayerPlate" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 20.0
+offset_top = 232.0
+offset_right = 200.0
+offset_bottom = 336.0
+mouse_filter = 2
+theme_override_constants = {"panel_inset": 12}
+
+[node name="PlateVBox" type="VBoxContainer" parent="Root/PlayerPlate"]
+theme_override_constants = {"separation": 4}
+
+[node name="PlateHeader" type="HBoxContainer" parent="Root/PlayerPlate/PlateVBox"]
+
+[node name="LevelBadge" type="Label" parent="Root/PlayerPlate/PlateVBox/PlateHeader"]
+layout_mode = 2
+text = "LV 01"
+theme_override_font_sizes = {"font_size": 16}
+theme_override_colors = {"font_color": Color(0.961, 0.722, 0.255, 1)}
+
+[node name="WarmthText" type="Label" parent="Root/PlayerPlate/PlateVBox/PlateHeader"]
+layout_mode = 2
+size_flags_horizontal = 10
+text = "34/34"
+theme_override_font_sizes = {"font_size": 16}
+theme_override_colors = {"font_color": Color(0.95, 0.82, 0.62, 1)}
+
+[node name="WarmthBar" type="ProgressBar" parent="Root/PlayerPlate/PlateVBox"]
+custom_minimum_size = Vector2(0, 22)
+layout_mode = 2
+size_flags_vertical = 4
+max_value = 34.0
+value = 34.0
+show_percentage = false
+script = ExtResource("7_ember")
+accent = Color(0.85, 0.32, 0.18, 1)
+ghost_color = Color(1, 0.93, 0.8, 0.85)
+border_color = Color(0.42, 0.3, 0.14, 1)
+
+[node name="ExpBar" type="ProgressBar" parent="Root/PlayerPlate/PlateVBox"]
+custom_minimum_size = Vector2(0, 10)
+layout_mode = 2
+size_flags_vertical = 4
+max_value = 50.0
+value = 0.0
+show_percentage = false
+script = ExtResource("7_ember")
+accent = Color(0.93, 0.76, 0.35, 1)
+show_ticks = false
+ghost_lag = false
+border_color = Color(0.42, 0.3, 0.14, 1)
 
 [node name="QuestLedger" type="PanelContainer" parent="Root"]
 layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-anchor_bottom = 0.0
+anchors_preset = 0
 offset_left = 20.0
-offset_top = 204.0
-offset_right = -20.0
-offset_bottom = 320.0
-grow_horizontal = 2
-grow_vertical = 0
-theme_override_constants = {"panel_inset": 12}
+offset_top = 342.0
+offset_right = 340.0
+offset_bottom = 486.0
+theme_override_constants = {"panel_inset": 14}
 
 [node name="QuestLedgerVBox" type="VBoxContainer" parent="Root/QuestLedger"]
 
 [node name="ChapterLabel" type="Label" parent="Root/QuestLedger/QuestLedgerVBox"]
 text = "I. THE QUIET GROVE"
 horizontal_alignment = 0
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 12}
+theme_override_font_sizes = {"font_size": 16}
 theme_override_colors = {"font_color": Color(0.43, 0.27, 0.18, 1)}
 
 [node name="TitleLabel" type="Label" parent="Root/QuestLedger/QuestLedgerVBox"]
 text = "FIND THE HUSHLING"
 horizontal_alignment = 0
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 18}
+theme_override_font_sizes = {"font_size": 22}
 theme_override_colors = {"font_color": Color(0.09, 0.21, 0.17, 1)}
 
 [node name="InstructionLabel" type="Label" parent="Root/QuestLedger/QuestLedgerVBox"]
 text = "Follow the pale path until the bramble sprite stirs."
 horizontal_alignment = 0
 autowrap_mode = 2
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 14}
+theme_override_font_sizes = {"font_size": 17}
 theme_override_colors = {"font_color": Color(0.3, 0.27, 0.2, 1)}
 
 [node name="MetaRow" type="VBoxContainer" parent="Root"]
@@ -148,7 +195,7 @@ layout_mode = 1
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -560.0
+offset_left = -620.0
 offset_top = 16.0
 offset_right = -20.0
 offset_bottom = 150.0
@@ -156,175 +203,159 @@ grow_horizontal = 0
 
 [node name="TopRow" type="HBoxContainer" parent="Root/MetaRow"]
 alignment = 2
-custom_constants = {"separation": 10}
-
-[node name="LevelBadge" type="Label" parent="Root/MetaRow/TopRow"]
-text = "LV 01"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 14}
-theme_override_colors = {"font_color": Color(0.96, 0.72, 0.29, 1)}
+theme_override_constants/separation = 12
 
 [node name="GoldLabel" type="Label" parent="Root/MetaRow/TopRow"]
 text = "🪙 30"
 tooltip_text = "Gold — buy gear at the trader"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 12}
+theme_override_font_sizes = {"font_size": 16}
 theme_override_colors = {"font_color": Color(1, 0.84, 0.45, 1)}
 
 [node name="DiamondLabel" type="Label" parent="Root/MetaRow/TopRow"]
 text = "💎 0"
 tooltip_text = "Diamonds — cosmetic treasures only"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 12}
+theme_override_font_sizes = {"font_size": 16}
 theme_override_colors = {"font_color": Color(0.55, 0.85, 1, 1)}
+
+[node name="SettingsButton" type="Button" parent="Root/MetaRow/TopRow"]
+custom_minimum_size = Vector2(96, 44)
+text = "MENU"
+tooltip_text = "Settings"
+theme_override_font_sizes/font_size = 14
 
 [node name="ActionRow" type="HBoxContainer" parent="Root/MetaRow"]
 alignment = 2
-custom_constants = {"separation": 6}
+theme_override_constants/separation = 12
 
 [node name="StatsButton" type="Button" parent="Root/MetaRow/ActionRow"]
-custom_minimum_size = Vector2(78, 34)
+custom_minimum_size = Vector2(100, 48)
 text = "STATS"
 tooltip_text = "Allocate stat points"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 9}
 
 [node name="SatchelButton" type="Button" parent="Root/MetaRow/ActionRow"]
+custom_minimum_size = Vector2(118, 48)
 text = "SATCHEL"
 tooltip_text = "Field Satchel (I)"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 9}
 
 [node name="SatchelCount" type="Label" parent="Root/MetaRow/ActionRow/SatchelButton"]
 text = "0"
 horizontal_alignment = 2
 vertical_alignment = 2
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 11}
+theme_override_font_sizes = {"font_size": 14}
 theme_override_colors = {"font_color": Color(1, 1, 1, 1)}
 
 [node name="ScanButton" type="Button" parent="Root/MetaRow/ActionRow"]
+custom_minimum_size = Vector2(96, 48)
 text = "SCAN"
 tooltip_text = "Divining Lens (F)"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 9}
 
 [node name="ShopButton" type="Button" parent="Root/MetaRow/ActionRow"]
+custom_minimum_size = Vector2(96, 48)
 text = "SHOP"
 tooltip_text = "Ember Trader"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 9}
 
 [node name="GlintButton" type="Button" parent="Root/MetaRow/ActionRow"]
+custom_minimum_size = Vector2(100, 48)
 text = "GLINT"
 tooltip_text = "Diamond cosmetics — pretty, never stronger"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 9}
-
-[node name="SettingsButton" type="Button" parent="Root/MetaRow/TopRow"]
-text = "MENU"
-tooltip_text = "Settings"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 9}
-
-[node name="MidRow" type="HBoxContainer" parent="Root/MetaRow"]
-
-[node name="WarmthBar" type="ProgressBar" parent="Root/MetaRow/MidRow"]
-size_flags_horizontal = 3
-max_value = 34.0
-value = 34.0
-
-[node name="WarmthText" type="Label" parent="Root/MetaRow/MidRow"]
-text = "34/34"
-horizontal_alignment = 2
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 12}
-theme_override_colors = {"font_color": Color(0.56, 0.64, 0.45, 1)}
-
-[node name="ExpBar" type="ProgressBar" parent="Root/MetaRow"]
-max_value = 50.0
-value = 0.0
-show_percentage = false
-modulate = Color(1, 0.95, 0.8, 0.95)
 
 [node name="FieldNote" type="Label" parent="Root"]
-layout_mode = 2
-anchors_preset = 3
-offset_left = 20.0
-offset_top = -60.0
-offset_right = -20.0
-offset_bottom = -20.0
+layout_mode = 1
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -320.0
+offset_top = -86.0
+offset_right = 320.0
+offset_bottom = -42.0
+grow_horizontal = 2
+grow_vertical = 0
 text = "✦ The old path hums beneath your boots."
-horizontal_alignment = 0
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 13}
-theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
+horizontal_alignment = 1
+theme_override_font_sizes = {"font_size": 18}
+theme_override_colors = {"font_color": Color(0.62, 0.72, 0.52, 1)}
 
 [node name="CombatCard" type="PanelContainer" parent="Root"]
 visible = false
-layout_mode = 2
-anchors_preset = 3
-offset_left = 20.0
-offset_top = 220.0
-offset_right = -20.0
-offset_bottom = 100.0
-theme_override_constants = {"panel_inset": 10}
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -215.0
+offset_top = 170.0
+offset_right = 215.0
+offset_bottom = 290.0
+grow_horizontal = 2
+theme_override_constants = {"panel_inset": 14}
 
 [node name="CombatVBox" type="VBoxContainer" parent="Root/CombatCard"]
-
-[node name="CombatTitle" type="Label" parent="Root/CombatCard/CombatVBox"]
-text = "WILD ENCOUNTER"
-horizontal_alignment = 0
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 14}
-theme_override_colors = {"font_color": Color(0.09, 0.21, 0.17, 1)}
+theme_override_constants = {"separation": 6}
 
 [node name="EnemyName" type="Label" parent="Root/CombatCard/CombatVBox"]
 text = "The Hushling"
-horizontal_alignment = 0
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 16}
-theme_override_colors = {"font_color": Color(0.96, 0.72, 0.29, 1)}
+horizontal_alignment = 1
+theme_override_font_sizes = {"font_size": 20}
+theme_override_colors = {"font_color": Color(0.961, 0.722, 0.255, 1)}
 
 [node name="EnemyHPBar" type="ProgressBar" parent="Root/CombatCard/CombatVBox"]
+custom_minimum_size = Vector2(0, 22)
+layout_mode = 2
+size_flags_vertical = 4
 min_value = 0.0
 max_value = 28.0
 value = 28.0
+show_percentage = false
+script = ExtResource("7_ember")
+accent = Color(0.78, 0.26, 0.2, 1)
+border_color = Color(0.42, 0.3, 0.14, 1)
 
 [node name="CombatStatus" type="Label" parent="Root/CombatCard/CombatVBox"]
 text = "Target locked — Elian closes in"
-horizontal_alignment = 0
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 12}
-theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
+horizontal_alignment = 1
+theme_override_font_sizes = {"font_size": 17}
+theme_override_colors = {"font_color": Color(0.62, 0.72, 0.52, 1)}
 
 [node name="BossHealthBar" type="PanelContainer" parent="Root"]
 visible = false
-layout_mode = 2
-anchors_preset = 9
-offset_left = 20.0
-offset_top = 220.0
-offset_right = -20.0
-offset_bottom = 180.0
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -330.0
+offset_top = 170.0
+offset_right = 330.0
+offset_bottom = 285.0
+grow_horizontal = 2
+theme_override_constants = {"panel_inset": 12}
 
 [node name="BossName" type="Label" parent="Root/BossHealthBar"]
 text = "HUSHLING MATRIARCH"
 horizontal_alignment = 1
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 14}
-theme_override_colors = {"font_color": Color(1, 0.3, 0.2, 1)}
+vertical_alignment = 0
+theme_override_font_sizes = {"font_size": 24}
+theme_override_colors = {"font_color": Color(1, 0.3, 0.2, 1), "font_outline_color": Color(0, 0, 0, 0.7)}
+theme_override_constants = {"outline_size": 4}
 
 [node name="BossHPBar" type="ProgressBar" parent="Root/BossHealthBar"]
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_vertical = 4
 min_value = 0.0
 max_value = 800.0
 value = 800.0
+show_percentage = false
+script = ExtResource("7_ember")
+accent = Color(0.66, 0.16, 0.14, 1)
+border_color = Color(0.42, 0.3, 0.14, 1)
 
 [node name="PhaseIndicator" type="Label" parent="Root/BossHealthBar"]
 text = "PHASE 1"
 horizontal_alignment = 1
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 12}
-theme_override_colors = {"font_color": Color(1, 0.84, 0.47, 1)}
+vertical_alignment = 2
+theme_override_font_sizes = {"font_size": 16}
+theme_override_colors = {"font_color": Color(1, 0.84, 0.47, 1), "font_outline_color": Color(0, 0, 0, 0.7)}
+theme_override_constants = {"outline_size": 4}
 
 [node name="LevelToast" type="PanelContainer" parent="Root"]
 visible = false
@@ -332,60 +363,59 @@ layout_mode = 1
 anchors_preset = 5
 anchor_left = 0.5
 anchor_right = 0.5
-offset_left = -220.0
-offset_top = 120.0
-offset_right = 220.0
-offset_bottom = 200.0
-theme_override_constants = {"panel_inset": 12}
+offset_left = -190.0
+offset_top = 302.0
+offset_right = 190.0
+offset_bottom = 402.0
+theme_override_constants = {"panel_inset": 14}
 
 [node name="ToastVBox" type="VBoxContainer" parent="Root/LevelToast"]
 
 [node name="ToastTitle" type="Label" parent="Root/LevelToast/ToastVBox"]
 text = "⬆ LEVEL UP!"
 horizontal_alignment = 1
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 18}
+theme_override_font_sizes = {"font_size": 26}
 theme_override_colors = {"font_color": Color(1, 0.72, 0.29, 1)}
 
 [node name="ToastSub" type="Label" parent="Root/LevelToast/ToastVBox"]
 text = "LV 07 → LV 08 · +3 stat points"
 horizontal_alignment = 1
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 15}
-theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
+theme_override_font_sizes = {"font_size": 19}
+theme_override_colors = {"font_color": Color(0.62, 0.72, 0.52, 1)}
 
 [node name="LootToast" type="PanelContainer" parent="Root"]
 visible = false
-layout_mode = 2
-anchors_preset = 6
-offset_left = -240.0
-offset_top = 20.0
-offset_right = -20.0
-offset_bottom = 80.0
-theme_override_constants = {"panel_inset": 10}
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -320.0
+offset_top = 306.0
+offset_right = -24.0
+offset_bottom = 406.0
+grow_horizontal = 0
+theme_override_constants = {"panel_inset": 12}
 
 [node name="LootVBox" type="VBoxContainer" parent="Root/LootToast"]
 
 [node name="LootCount" type="Label" parent="Root/LootToast/LootVBox"]
 text = "+2"
 horizontal_alignment = 2
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 24}
+theme_override_font_sizes = {"font_size": 30}
 theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1)}
 
 [node name="LootTitle" type="Label" parent="Root/LootToast/LootVBox"]
 text = "LOOT SECURED"
 horizontal_alignment = 2
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 12}
-theme_override_colors = {"font_color": Color(0.43, 0.35, 0.18, 1)}
+theme_override_font_sizes = {"font_size": 15}
+theme_override_colors = {"font_color": Color(0.961, 0.722, 0.255, 1)}
 
 [node name="LootNotice" type="Label" parent="Root/LootToast/LootVBox"]
 text = "Hushling cache secured..."
 horizontal_alignment = 2
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 12}
-theme_override_colors = {"font_color": Color(0.3, 0.27, 0.2, 1)}
+autowrap_mode = 2
+theme_override_font_sizes = {"font_size": 15}
+theme_override_colors = {"font_color": Color(0.80, 0.77, 0.66, 1)}
 
 [node name="SkillBar" type="Control" parent="Root"]
 layout_mode = 1
@@ -394,7 +424,7 @@ anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -500.0
+offset_left = -580.0
 offset_top = -450.0
 offset_right = -12.0
 offset_bottom = -12.0
@@ -430,22 +460,21 @@ grow_vertical = 2
 text = "STRIKE"
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_fonts = {"font": ExtResource("1_2")}
 theme_override_font_sizes = {"font_size": 10}
 theme_override_colors = {"font_color": Color(1, 0.92, 0.72, 1)}
 
 [node name="Skill0Button" type="Control" parent="Root/SkillBar"]
-custom_minimum_size = Vector2(88, 88)
+custom_minimum_size = Vector2(96, 96)
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -286.0
-offset_top = -280.0
-offset_right = -198.0
-offset_bottom = -192.0
+offset_left = -300.0
+offset_top = -296.0
+offset_right = -204.0
+offset_bottom = -200.0
 grow_horizontal = 0
 grow_vertical = 0
 tooltip_text = "Skill 1 (Q)"
@@ -460,8 +489,7 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 34}
+theme_override_font_sizes = {"font_size": 40}
 theme_override_colors = {"font_color": Color(1, 0.95, 0.82, 1)}
 
 [node name="Skill0Cooldown" type="Label" parent="Root/SkillBar/Skill0Button"]
@@ -473,22 +501,21 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 2
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 9}
+theme_override_font_sizes = {"font_size": 14}
 theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1)}
 
 [node name="Skill1Button" type="Control" parent="Root/SkillBar"]
-custom_minimum_size = Vector2(88, 88)
+custom_minimum_size = Vector2(96, 96)
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -382.0
-offset_top = -280.0
-offset_right = -294.0
-offset_bottom = -192.0
+offset_left = -408.0
+offset_top = -296.0
+offset_right = -312.0
+offset_bottom = -200.0
 grow_horizontal = 0
 grow_vertical = 0
 tooltip_text = "Skill 2 (E)"
@@ -503,8 +530,7 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 34}
+theme_override_font_sizes = {"font_size": 40}
 theme_override_colors = {"font_color": Color(1, 0.95, 0.82, 1)}
 
 [node name="Skill1Cooldown" type="Label" parent="Root/SkillBar/Skill1Button"]
@@ -516,22 +542,21 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 2
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 9}
+theme_override_font_sizes = {"font_size": 14}
 theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1)}
 
 [node name="Skill2Button" type="Control" parent="Root/SkillBar"]
-custom_minimum_size = Vector2(88, 88)
+custom_minimum_size = Vector2(96, 96)
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -478.0
-offset_top = -280.0
-offset_right = -390.0
-offset_bottom = -192.0
+offset_left = -516.0
+offset_top = -296.0
+offset_right = -420.0
+offset_bottom = -200.0
 grow_horizontal = 0
 grow_vertical = 0
 tooltip_text = "Skill 3 (R)"
@@ -546,8 +571,7 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 34}
+theme_override_font_sizes = {"font_size": 40}
 theme_override_colors = {"font_color": Color(1, 0.95, 0.82, 1)}
 
 [node name="Skill2Cooldown" type="Label" parent="Root/SkillBar/Skill2Button"]
@@ -559,6 +583,5 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 2
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 9}
+theme_override_font_sizes = {"font_size": 14}
 theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1)}

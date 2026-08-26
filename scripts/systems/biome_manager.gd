@@ -46,7 +46,8 @@ func _fx_tint() -> Color:
 func _apply_realm_theme(_stage: int) -> void:
 	if day_night == null:
 		return
-	day_night.apply_realm(_realm_tint(), _fx_tint())
+	day_night.apply_realm(_realm_tint(), _fx_tint(),
+		Bestiary.REALMS.get(biome_id, {}).get("grade", {}))
 	var fog_mult := float(_biome_def.get("fog_energy", 1.0))
 	if world_environment != null and world_environment.environment != null and fog_mult != 1.0:
 		world_environment.environment.fog_density *= fog_mult

@@ -70,6 +70,13 @@ uniform float joint_ao_strength : hint_range(0.0, 1.0) = 0.0;
 uniform float joint_ao_low : hint_range(-2.0, 2.0) = -0.3;
 uniform float joint_ao_high : hint_range(-2.0, 2.0) = -0.08;
 
+// --- WorldState reactivity (strict superset: defaults keep prior looks) ---
+// Ambient magic lifts mask-gated emission at night (fireflies brighten with it).
+global uniform float world_magic_level;
+uniform float magic_glow_lift : hint_range(0.0, 1.0) = 0.25;
+// Battle wear: darkens and roughens the body as HP drops (0 = pristine).
+uniform float hp_wear : hint_range(0.0, 1.0) = 0.0;
+
 varying vec3 world_pos_v;
 varying float local_y_v;
 
@@ -135,7 +142,9 @@ void fragment() {
 	float rim = fresnel + rim_ambient_floor;
 
 	float em_mask = mix(1.0, texture(emission_mask, UV).r, emission_mask_mix);
-	EMISSION = emission_color * emission_energy * glow_intensity * em_mask
+	// Ambient magic breathes extra life into masked glow (night groves pulse).
+	float magic_lift = 1.0 + world_magic_level * magic_glow_lift * 0.35 * em_mask;
+	EMISSION = emission_color * emission_energy * glow_intensity * em_mask * magic_lift
 		+ rim_color * rim * rim_intensity
 		+ flash_color * flash_intensity * 1.6;
 
@@ -159,4 +168,10 @@ void fragment() {
 	// Joint/AO approximation: darken near capsule bottoms
 	float joint_shade = joint_ao_strength * (1.0 - smoothstep(joint_ao_low, joint_ao_high, local_y_v));
 	AO = clamp(1.0 - joint_shade, 0.0, 1.0);
+
+	// Battle wear: scuffed albedo and dulled roughness as the body breaks down
+	if (hp_wear > 0.001) {
+		ALBEDO *= mix(1.0, 0.62 + 0.1 * value_noise(world_pos_v.xz * 14.0), hp_wear);
+		ROUGHNESS = mix(ROUGHNESS, 0.95, hp_wear * 0.7);
+	}
 }

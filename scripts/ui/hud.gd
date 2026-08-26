@@ -11,14 +11,15 @@ class_name HUD
 @onready var chapter_label: Label = $Root/QuestLedger/QuestLedgerVBox/ChapterLabel
 @onready var title_label: Label = $Root/QuestLedger/QuestLedgerVBox/TitleLabel
 @onready var instruction_label: Label = $Root/QuestLedger/QuestLedgerVBox/InstructionLabel
-@onready var level_badge: Label = $Root/MetaRow/TopRow/LevelBadge
-@onready var exp_bar: ProgressBar = $Root/MetaRow/ExpBar
+@onready var player_plate: PanelContainer = $Root/PlayerPlate
+@onready var level_badge: Label = $Root/PlayerPlate/PlateVBox/PlateHeader/LevelBadge
+@onready var exp_bar: ProgressBar = $Root/PlayerPlate/PlateVBox/ExpBar
 @onready var gold_label: Label = $Root/MetaRow/TopRow/GoldLabel
 @onready var diamond_label: Label = $Root/MetaRow/TopRow/DiamondLabel
 @onready var stats_button: Button = $Root/MetaRow/ActionRow/StatsButton
 @onready var glint_button: Button = $Root/MetaRow/ActionRow/GlintButton
-@onready var warmth_bar: ProgressBar = $Root/MetaRow/MidRow/WarmthBar
-@onready var warmth_text: Label = $Root/MetaRow/MidRow/WarmthText
+@onready var warmth_bar: ProgressBar = $Root/PlayerPlate/PlateVBox/WarmthBar
+@onready var warmth_text: Label = $Root/PlayerPlate/PlateVBox/PlateHeader/WarmthText
 @onready var satchel_button: Button = $Root/MetaRow/ActionRow/SatchelButton
 @onready var satchel_count: Label = $Root/MetaRow/ActionRow/SatchelButton/SatchelCount
 @onready var scan_button: Button = $Root/MetaRow/ActionRow/ScanButton
@@ -64,6 +65,7 @@ const SKILL_KEYS := ["Q", "E", "R"]
 var _cooldown_poll := 0.0
 
 func _ready() -> void:
+	_apply_ui_theme()
 	_connect_signals()
 	_update_all()
 	
@@ -131,11 +133,22 @@ func _connect_signals() -> void:
 		hero.connect("combat_ended", _on_combat_ended)
 
 func _process(delta: float) -> void:
+	# Boss bar owns the upper band; the regular combat plate yields to it.
+	if boss_health_bar.visible and combat_card.visible:
+		combat_card.visible = false
 	# Cooldown labels poll lightly; skill names follow the equipped kit
 	_cooldown_poll -= delta
 	if _cooldown_poll <= 0.0:
 		_cooldown_poll = 0.15
 		_update_skill_cooldowns()
+		# Keep the engaged foe's plate honest while combat lasts
+		if combat_card.visible and game_state.enemy_target != null \
+				and is_instance_valid(game_state.enemy_target):
+			var e: Node3D = game_state.enemy_target
+			if e.has_method("get_hp"):
+				enemy_hp_bar.value = e.get_hp()
+			if e.has_method("is_dead") and e.is_dead():
+				combat_card.visible = false
 	_process_markers(delta)
 
 func _update_all() -> void:
@@ -169,6 +182,63 @@ func _update_warmth() -> void:
 	warmth_bar.max_value = game_state.max_hp
 	warmth_bar.value = game_state.hp
 	warmth_text.text = "%d/%d" % [game_state.hp, game_state.max_hp]
+	# Ember fill cools toward a hot alarm red as warmth runs out
+	if warmth_bar is EmberBar:
+		var pct := float(game_state.hp) / maxf(1.0, float(game_state.max_hp))
+		(warmth_bar as EmberBar).accent = Color(0.85, 0.32, 0.18).lerp(
+			Color(1.0, 0.16, 0.10), clampf(1.0 - pct * 2.4, 0.0, 1.0))
+
+# === HUD theme tokens live in UiKit; this screen only wires them ===
+
+func _panel_style(bg: Color, border: Color) -> StyleBoxFlat:
+	var sb := UiKit.glass_stylebox(false, border.a)
+	sb.bg_color = bg
+	sb.border_color = border
+	return sb
+
+func _style_button(b: Button) -> void:
+	UiKit.style_button(b)
+
+func _style_chip(lbl: Label, tint: Color) -> void:
+	UiKit.chip_style(lbl, tint)
+
+## Display face for headline chrome (ledger title, boss name, fanfares).
+var _cinzel_bold: FontVariation = null
+
+func _display_font() -> FontVariation:
+	if _cinzel_bold == null:
+		_cinzel_bold = FontVariation.new()
+		_cinzel_bold.base_font = load("res://assets/fonts/Cinzel-Variable.ttf")
+		_cinzel_bold.variation_opentype = {2003265652: 700}
+	return _cinzel_bold
+
+## One pass to restyle every panel, chip and action button.
+func _apply_ui_theme() -> void:
+	for panel in [player_plate, level_toast]:
+		panel.add_theme_stylebox_override("panel",
+			_panel_style(UiKit.GLASS_BG_RAISED, UiKit.BORDER_GOLD))
+	# The quest ledger keeps its ink-on-paper fiction: warm letter stock
+	# plus the generated fiber veil, so its sepia/ink label colors read.
+	UiKit.apply_parchment(quest_ledger)
+	combat_card.add_theme_stylebox_override("panel",
+		_panel_style(UiKit.GLASS_BG, UiKit.BORDER_GOLD))
+	boss_health_bar.add_theme_stylebox_override("panel",
+		_panel_style(Color(0.09, 0.06, 0.05, 0.93), Color(0.62, 0.20, 0.12)))
+	loot_toast.add_theme_stylebox_override("panel",
+		_panel_style(UiKit.GLASS_BG, UiKit.EMBER))
+	for panel in [quest_ledger, player_plate, combat_card,
+			boss_health_bar, loot_toast, level_toast]:
+		UiKit.apply_glass(panel)
+	for btn in [stats_button, satchel_button, scan_button, shop_button,
+			glint_button, settings_button]:
+		_style_button(btn)
+	_style_chip(gold_label, UiKit.EMBER_BRIGHT)
+	_style_chip(diamond_label, Color(0.55, 0.85, 1.0))
+	title_label.add_theme_font_override("font", _display_font())
+	boss_name.add_theme_font_override("font", _display_font())
+	toast_title.add_theme_font_override("font", _display_font())
+	chapter_label.add_theme_font_override("font", _display_font())
+	chapter_label.add_theme_font_size_override("font_size", 22)
 
 func _update_satchel_count() -> void:
 	var total = 0
@@ -270,10 +340,10 @@ func _set_key_badge(button: Control, key_text: String) -> void:
 		badge = Label.new()
 		badge.name = "KeyBadge"
 		badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		badge.add_theme_font_size_override("font_size", 12)
+		badge.add_theme_font_size_override("font_size", 14)
 		badge.add_theme_color_override("font_color", Color(1, 0.93, 0.78, 0.9))
 		badge.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
-		badge.add_theme_constant_override("outline_size", 4)
+		badge.add_theme_constant_override("outline_size", 5)
 		badge.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 		badge.position = Vector2(-30, 6)
 		button.add_child(badge)
@@ -384,10 +454,16 @@ func _on_quest_progress(message: String) -> void:
 
 func _on_combat_started(enemy: Node3D) -> void:
 	combat_card.visible = true
-	enemy_name.text = enemy.name
+	enemy_name.text = _display_enemy_name(enemy)
 	enemy_hp_bar.max_value = enemy.max_hp if enemy.has_method("get_max_hp") else 28
 	enemy_hp_bar.value = enemy.hp if enemy.has_method("get_hp") else 28
 	combat_status.text = "Target locked — Elian closes in"
+
+## "@Hushling@12" → "Hushling": scene-instanced nodes carry engine scaffolding.
+func _display_enemy_name(enemy: Node3D) -> String:
+	var parts := String(enemy.name).split("@", false)
+	var clean := parts[parts.size() - 1] if parts.size() > 0 else String(enemy.name)
+	return String(clean).rstrip("0123456789").capitalize()
 
 func _on_combat_ended() -> void:
 	combat_card.visible = false
@@ -429,7 +505,11 @@ func _on_settings_pressed() -> void:
 	if not settings:
 		var scene: PackedScene = load("res://scenes/ui/settings_menu.tscn")
 		settings = scene.instantiate()
-		get_tree().current_scene.add_child(settings)
+		# current_scene can be null early in boot — fall back to root.
+		var host := get_tree().current_scene
+		if host == null:
+			host = get_tree().root
+		host.add_child(settings)
 	settings.open()
 
 func _on_skill_pressed(slot: int) -> void:

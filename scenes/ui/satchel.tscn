@@ -1,8 +1,6 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=2 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/satchel.gd" id="1_0"]
-[ext_resource type="FontFile" path="res://assets/fonts/PressStart2P-Regular.ttf" id="1_2"]
-[ext_resource type="FontFile" path="res://assets/fonts/VT323-Regular.ttf" id="1_3"]
 
 [node name="SatchelUI" type="CanvasLayer"]
 layer = 20
@@ -10,91 +8,100 @@ script = ExtResource("1_0")
 
 [node name="Root" type="PanelContainer" parent="."]
 anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 offset_left = 40.0
 offset_top = 40.0
 offset_right = -40.0
 offset_bottom = -40.0
-theme_override_constants = {"panel_inset": 16}
 
 [node name="VBox" type="VBoxContainer" parent="Root"]
+theme_override_constants/separation = 14
 
 [node name="Header" type="HBoxContainer" parent="Root/VBox"]
+layout_mode = 2
 
 [node name="Title" type="Label" parent="Root/VBox/Header"]
+layout_mode = 2
+theme_type_variation = &"MenuTitle"
 text = "FIELD SATCHEL"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 20}
-theme_override_colors = {"font_color": Color(0.09, 0.21, 0.17, 1)}
 
 [node name="CountLabel" type="Label" parent="Root/VBox/Header"]
+layout_mode = 2
+theme_type_variation = &"Subtitle"
 text = "0 items carried"
 horizontal_alignment = 2
 size_flags_horizontal = 3
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 14}
-theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
 
 [node name="CloseButton" type="TextureButton" parent="Root/VBox/Header"]
+layout_mode = 2
 tooltip_text = "Close (Esc)"
 
 [node name="ItemsList" type="ScrollContainer" parent="Root/VBox"]
-size_flags_vertical = 2
+layout_mode = 2
+size_flags_vertical = 3
 
 [node name="ItemsVBox" type="VBoxContainer" parent="Root/VBox/ItemsList"]
+layout_mode = 2
+size_flags_horizontal = 3
 
 [node name="ForgedGear" type="PanelContainer" parent="Root/VBox"]
-theme_override_constants = {"panel_inset": 12}
+layout_mode = 2
 
 [node name="ForgedVBox" type="VBoxContainer" parent="Root/VBox/ForgedGear"]
+layout_mode = 2
+theme_override_constants/separation = 10
 
 [node name="ForgedTitle" type="Label" parent="Root/VBox/ForgedGear/ForgedVBox"]
+layout_mode = 2
+theme_type_variation = &"Eyebrow"
 text = "FORGED GEAR"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 14}
-theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
 
 [node name="CurrentWeapon" type="HBoxContainer" parent="Root/VBox/ForgedGear/ForgedVBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
 
 [node name="WeaponGlyph" type="Label" parent="Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon"]
+layout_mode = 2
+theme_type_variation = &"Title"
 text = "+"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 28}
+theme_override_font_sizes/font_size = 44
 
 [node name="WeaponInfo" type="VBoxContainer" parent="Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon"]
+layout_mode = 2
+size_flags_horizontal = 3
 
 [node name="WeaponName" type="Label" parent="Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon/WeaponInfo"]
+layout_mode = 2
+theme_type_variation = &"Title"
 text = "MUG MACE"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 16}
-theme_override_colors = {"font_color": Color(0.09, 0.21, 0.17, 1)}
+theme_override_font_sizes/font_size = 26
 
 [node name="WeaponStats" type="Label" parent="Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon/WeaponInfo"]
+layout_mode = 2
+theme_type_variation = &"Caption"
 text = "ATK 7 / REACH 8.2"
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 12}
-theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
 
 [node name="ForgeButton" type="Button" parent="Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon"]
+layout_mode = 2
 text = "FORGE NEW"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 12}
-theme_override_colors = {"font_color": Color(0.4, 0.72, 0.7, 1)}
 
 [node name="ClassFooter" type="PanelContainer" parent="Root/VBox"]
-theme_override_constants = {"panel_inset": 12}
+layout_mode = 2
 
 [node name="ClassVBox" type="VBoxContainer" parent="Root/VBox/ClassFooter"]
+layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="ClassTitle" type="Label" parent="Root/VBox/ClassFooter/ClassVBox"]
+layout_mode = 2
+theme_type_variation = &"Eyebrow"
 text = "ACTIVE CLASS: CINDER WARDEN"
-theme_override_fonts = {"font": ExtResource("1_2")}
-theme_override_font_sizes = {"font_size": 14}
-theme_override_colors = {"font_color": Color(0.09, 0.21, 0.17, 1)}
 
 [node name="PassiveText" type="Label" parent="Root/VBox/ClassFooter/ClassVBox"]
+layout_mode = 2
+theme_type_variation = &"Body"
 text = "Every third auto-strike blooms with 4 bonus ember damage."
-theme_override_fonts = {"font": ExtResource("1_3")}
-theme_override_font_sizes = {"font_size": 12}
-theme_override_colors = {"font_color": Color(0.56, 0.67, 0.45, 1)}
 
 [node name="SkillKit" type="HBoxContainer" parent="Root/VBox/ClassFooter/ClassVBox"]
+layout_mode = 2

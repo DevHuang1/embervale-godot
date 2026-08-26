@@ -48,6 +48,7 @@ var _busy := false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # the world is paused behind us
+	UiKit.apply_glass($Root)
 	var def := Bestiary.boss_def(BOSS_ID)
 	title_label.text = "SHAPE YOUR FOE"
 	locked_blurb.text = str(def.get("locked_blurb", ""))

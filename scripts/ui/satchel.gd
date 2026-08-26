@@ -17,12 +17,19 @@ class_name SatchelUI
 var _skill_cd_labels: Array[Label] = []
 
 func _ready() -> void:
+	UiKit.apply_glass($Root)
+	# Warm letter-stock interiors for the gear card and class footer so
+	# stat text reads against the dark glass frame.
+	UiKit.apply_parchment($Root/VBox/ForgedGear)
+	UiKit.apply_parchment($Root/VBox/ClassFooter)
+	UiKit.style_button(forge_button)
+	forge_button.add_theme_font_size_override("font_size", 13)
 	_connect_signals()
 	_rebuild_inventory()
 	_update_forged_gear()
 	_rebuild_skill_kit()
 	_rebuild_armor_row()
-	
+
 	close_button.pressed.connect(_on_close_pressed)
 	forge_button.pressed.connect(_on_forge_pressed)
 
@@ -53,14 +60,14 @@ func _rebuild_inventory() -> void:
 func _add_item_row(item: Dictionary) -> void:
 	var panel = PanelContainer.new()
 	panel.add_theme_constant_override("panel_inset", 10)
+	panel.add_theme_stylebox_override("panel", UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON))
 	
 	var hbox = HBoxContainer.new()
 	panel.add_child(hbox)
 	
 	var glyph = Label.new()
 	glyph.text = item.glyph
-	glyph.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-	glyph.add_theme_font_size_override("font_size", 24)
+	UiKit.style_label(glyph, "", 22)
 	hbox.add_child(glyph)
 	
 	var info = VBoxContainer.new()
@@ -68,9 +75,7 @@ func _add_item_row(item: Dictionary) -> void:
 	
 	var name_label = Label.new()
 	name_label.text = "%s ×%d" % [item.name, item.quantity]
-	name_label.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-	name_label.add_theme_font_size_override("font_size", 14)
-	name_label.add_theme_color_override("font_color", Color(0.09, 0.21, 0.17))
+	UiKit.style_label(name_label, &"MenuTitle", 14)
 	info.add_child(name_label)
 	
 	var rarity_colors = {
@@ -82,24 +87,19 @@ func _add_item_row(item: Dictionary) -> void:
 	
 	var meta_label = Label.new()
 	meta_label.text = "%s · %s" % [["Common", "Uncommon", "Rare"][item.rarity], ["Consumable", "Relic", "Quest"][item.kind]]
-	meta_label.add_theme_font_override("font", load("res://assets/fonts/VT323-Regular.ttf"))
-	meta_label.add_theme_font_size_override("font_size", 11)
+	UiKit.style_label(meta_label, &"Caption", 11)
 	meta_label.add_theme_color_override("font_color", rarity_color)
 	info.add_child(meta_label)
 	
 	var stats_label = Label.new()
 	stats_label.text = " · ".join(item.stats)
-	stats_label.add_theme_font_override("font", load("res://assets/fonts/VT323-Regular.ttf"))
-	stats_label.add_theme_font_size_override("font_size", 11)
-	stats_label.add_theme_color_override("font_color", Color(0.56, 0.67, 0.45))
+	UiKit.style_label(stats_label, &"Caption", 11)
 	info.add_child(stats_label)
 	
 	if item.kind == 0 and item.quantity > 0 and item.use_label:  # Consumable
 		var use_btn = Button.new()
 		use_btn.text = item.use_label
-		use_btn.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-		use_btn.add_theme_font_size_override("font_size", 10)
-		use_btn.add_theme_color_override("font_color", Color(0.96, 0.84, 0.47))
+		UiKit.style_secondary_button(use_btn)
 		use_btn.pressed.connect(_on_use_item.bind(item.id))
 		hbox.add_child(use_btn)
 	
@@ -146,24 +146,19 @@ func _rebuild_armor_row() -> void:
 	var armor: Dictionary = game_state.equipped_armor
 	var glyph := Label.new()
 	glyph.text = armor.get("glyph", "○") if not armor.is_empty() else "○"
-	glyph.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-	glyph.add_theme_font_size_override("font_size", 22)
+	UiKit.style_label(glyph, "", 22)
 	row.add_child(glyph)
-	
+
 	var info := VBoxContainer.new()
 	row.add_child(info)
 	var name_label := Label.new()
 	name_label.text = str(armor.get("name", "TRAVELING LIGHT"))
-	name_label.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-	name_label.add_theme_font_size_override("font_size", 13)
-	name_label.add_theme_color_override("font_color", Color(0.09, 0.21, 0.17))
+	UiKit.style_label(name_label, &"MenuTitle", 13)
 	info.add_child(name_label)
 	var desc := Label.new()
 	desc.text = str(armor.get("desc", "No armor equipped — visit the Ember Trader.")) \
 		if not armor.is_empty() else "No armor equipped — visit the Ember Trader."
-	desc.add_theme_font_override("font", load("res://assets/fonts/VT323-Regular.ttf"))
-	desc.add_theme_font_size_override("font_size", 11)
-	desc.add_theme_color_override("font_color", Color(0.56, 0.67, 0.45))
+	UiKit.style_label(desc, &"Caption", 11)
 	info.add_child(desc)
 
 ## One panel per skill in the equipped weapon's kit (1..3 slots)
@@ -186,30 +181,26 @@ func _rebuild_skill_kit() -> void:
 		vbox.add_child(header)
 		var rune := Label.new()
 		rune.text = "%d. %s" % [i + 1, sk.get("name", "?")]
-		rune.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-		rune.add_theme_font_size_override("font_size", 12)
-		rune.add_theme_color_override("font_color",
-			Color(0.62, 0.55, 0.96) if str(game_state.equipped_weapon.get("style")) == "magic" \
-			else Color(0.96, 0.84, 0.47))
+		var rune_tint := Color(0.62, 0.55, 0.96) \
+			if str(game_state.equipped_weapon.get("style")) == "magic" \
+			else Color(0.96, 0.84, 0.47)
+		UiKit.style_label(rune, "", 12)
+		rune.add_theme_color_override("font_color", rune_tint)
 		header.add_child(rune)
 		var cd := Label.new()
 		cd.text = game_state.get_slot_cooldown_text(i)
 		cd.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		cd.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		cd.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-		cd.add_theme_font_size_override("font_size", 10)
-		cd.add_theme_color_override("font_color", Color(0.56, 0.67, 0.45))
+		UiKit.style_label(cd, &"Caption", 10)
 		header.add_child(cd)
 		_skill_cd_labels.append(cd)
-		
+
 		var desc := Label.new()
 		var fallback := "Cooldown %ds." % int(sk.get("cooldown", 0))
 		desc.text = str(sk.get("desc", fallback))
 		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		desc.custom_minimum_size = Vector2(180, 0)
-		desc.add_theme_font_override("font", load("res://assets/fonts/VT323-Regular.ttf"))
-		desc.add_theme_font_size_override("font_size", 11)
-		desc.add_theme_color_override("font_color", Color(0.56, 0.67, 0.45))
+		UiKit.style_label(desc, &"Caption", 11)
 		vbox.add_child(desc)
 
 func _on_close_pressed() -> void:

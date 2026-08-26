@@ -16,6 +16,8 @@ extends Resource
 @export var rarity: int = 0
 @export var mesh: Mesh
 @export var texture: ImageTexture
+## Elemental identity for payload FX (fire/frost/shock/nature; "" = inert).
+@export var element: String = ""
 
 const NAME_LIMIT := 22
 
@@ -56,6 +58,16 @@ static func style_for(item_name: String) -> String:
 	return ["slash", "blunt", "magic"][int(abs(item_name.hash())) % 3]
 
 
+## Elemental identity: explicit base field wins, else deterministic per item
+## name so a named kit keeps the same payload flavor across sessions.
+static func element_for(item_name: String, base: Dictionary = {}) -> String:
+	var explicit := str(base.get("element", ""))
+	if explicit in ["fire", "frost", "shock", "nature"]:
+		return explicit
+	return ["fire", "frost", "shock", "nature"][
+		int(abs(item_name.hash())) % 4]
+
+
 ## Builds a WEAPON_DEFS-compatible kit from the detected class base stats.
 ## `base` comes from ScanManager.CLASS_TO_WEAPON; `skill_names` holds the
 ## player's three rite names in slot order (Skill 1, Skill 2, Ultimate).
@@ -65,6 +77,7 @@ static func build_weapon_def(base: Dictionary, rarity: int, item_name: String,
 	var mult := float(RARITY_MULTS[tier])
 	var name := sanitize_name(item_name, str(base.get("name", DEFAULT_ITEM_NAME)))
 	var style := style_for(name)
+	var element := element_for(name, base)
 
 	var skills := []
 	for i in KIT_TEMPLATE.size():
@@ -90,6 +103,7 @@ static func build_weapon_def(base: Dictionary, rarity: int, item_name: String,
 		"name": name,
 		"glyph": str(base.get("glyph", "✦")),
 		"style": style,
+		"element": element,
 		"atk": int(round(float(base.get("atk", 6)) * mult)),
 		"swing_time": float(base.get("swing_time", 0.38)),
 		"range": float(base.get("range", 8.0)),

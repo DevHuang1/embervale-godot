@@ -13,7 +13,9 @@ class_name ShopMenu
 @onready var message_label: Label = $Root/VBox/MessageLabel
 
 func _ready() -> void:
-	close_button.pressed.connect(close)
+	UiKit.apply_glass($Root)
+	UiKit.style_button(close_button, UiKit.SAGE)
+	close_button.add_theme_font_size_override("font_size", 14)
 	game_state.gold_changed.connect(_on_gold_changed)
 	_refresh()
 
@@ -42,60 +44,56 @@ func _build_row(stock: Dictionary) -> Control:
 	panel.add_theme_constant_override("panel_inset", 10)
 	var hbox := HBoxContainer.new()
 	panel.add_child(hbox)
-	
+		# Tint rows so equipped gear reads as warm amber.
+	var equipped: bool = game_state.equipped_weapon.get("id", "") == stock.id \
+		or game_state.equipped_armor.get("id", "") == stock.id
+	var row_sb := UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON)
+	if equipped:
+		row_sb.bg_color = Color(0.52, 0.44, 0.24, 0.86)
+	panel.add_theme_stylebox_override("panel", row_sb)
+
 	var def: Dictionary = GameState.WEAPON_DEFS.get(stock.id, {}) \
 		if stock.kind == "weapon" else GameState.ARMOR_DEFS.get(stock.id, {})
 	var glyph := Label.new()
 	glyph.text = str(def.get("glyph", "?"))
-	glyph.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-	glyph.add_theme_font_size_override("font_size", 26)
+	UiKit.style_label(glyph, "", 22)
 	hbox.add_child(glyph)
-	
+
 	var info := VBoxContainer.new()
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hbox.add_child(info)
-	
+
 	var name_label := Label.new()
 	name_label.text = str(def.get("name", stock.id))
-	name_label.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-	name_label.add_theme_font_size_override("font_size", 14)
-	name_label.add_theme_color_override("font_color", Color(0.09, 0.21, 0.17))
+	UiKit.style_label(name_label, &"MenuTitle", 15)
 	info.add_child(name_label)
-	
-	var statline := _stat_line(stock.kind, def)
+
 	var stat_label := Label.new()
-	stat_label.text = statline
-	stat_label.add_theme_font_override("font", load("res://assets/fonts/VT323-Regular.ttf"))
-	stat_label.add_theme_font_size_override("font_size", 12)
-	stat_label.add_theme_color_override("font_color", Color(0.4, 0.72, 0.7))
+	stat_label.text = _stat_line(stock.kind, def)
+	UiKit.style_label(stat_label, &"Caption", 12)
 	info.add_child(stat_label)
-	
+
 	var desc := Label.new()
 	desc.text = str(def.get("desc", ""))
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc.add_theme_font_override("font", load("res://assets/fonts/VT323-Regular.ttf"))
-	desc.add_theme_font_size_override("font_size", 11)
-	desc.add_theme_color_override("font_color", Color(0.56, 0.67, 0.45))
+	UiKit.style_label(desc, &"Caption", 11)
 	info.add_child(desc)
-	
+
 	var price := int(stock.price)
 	var button := Button.new()
 	button.custom_minimum_size = Vector2(150, 0)
-	button.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-	button.add_theme_font_size_override("font_size", 10)
-	
-	var equipped: bool = game_state.equipped_weapon.get("id", "") == stock.id \
-		or game_state.equipped_armor.get("id", "") == stock.id
 	var owned: bool = game_state.owns_shop_item(str(stock.id))
-	
 	if equipped:
 		button.text = "EQUIPPED"
 		button.disabled = true
+		UiKit.style_secondary_button(button)
 	elif owned:
 		button.text = "EQUIP"
+		UiKit.style_button(button)
 		button.pressed.connect(_on_equip_pressed.bind(str(stock.id), stock.kind))
 	else:
 		button.text = "BUY %d🪙" % price
+		UiKit.style_primary_button(button)
 		button.pressed.connect(_on_buy_pressed.bind(str(stock.id)))
 	hbox.add_child(button)
 	return panel

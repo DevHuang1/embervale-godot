@@ -235,6 +235,7 @@ func _on_phase_transition() -> void:
 	if sfx_profile != "vanilla":
 		audio.play_profile_cue(sfx_profile, "stomp")
 	print("Boss entered phase: %s" % current_phase)
+	_evolve_for_phase(int(current_phase))
 	if boss_phase_label:
 		var phase_names = {
 			BossPhase.PHASE_1: "PHASE 1",
@@ -366,6 +367,11 @@ func take_damage(amount: int, knockback_dir: Vector3) -> void:
 	var tween = create_tween()
 	tween.tween_property(body, "material_override:shader_parameter/flash_intensity", 1.0, 0.05)
 	tween.tween_property(body, "material_override:shader_parameter/flash_intensity", 0.0, 0.2)
+	# Battle wear: bark dulls and darkens as the boss breaks down
+	if body.material_override is ShaderMaterial:
+		var ratio := clampf(float(hp) / float(maxi(max_hp, 1)), 0.0, 1.0)
+		body.material_override.set_shader_parameter("hp_wear",
+			clampf((0.45 - ratio) / 0.45, 0.0, 1.0) * 0.75)
 	
 	if boss_hp_bar:
 		boss_hp_bar.value = max(hp, 0)
@@ -374,6 +380,47 @@ func take_damage(amount: int, knockback_dir: Vector3) -> void:
 	
 	if hp <= 0:
 		die()
+
+## === Cosmetic-first evolution: each phase visibly changes the body ===
+## Heart core flares hotter, growth attachments sprout, and the transition
+## lands with a shockwave + camera rumble (no combat-stat changes).
+func _evolve_for_phase(phase: int) -> void:
+	# Molten core burns brighter with every phase
+	if _boss_core_mat != null:
+		_boss_core_mat.emission_energy_multiplier = 2.4 + float(phase) * 1.2
+	# Sprout growths at deterministic anchor points on the torso
+	var rng := RandomNumberGenerator.new()
+	rng.seed = get_instance_id() + phase * 131
+	var growth_count := mini(phase + 1, 4)
+	for i in growth_count:
+		var pod := MeshInstance3D.new()
+		var mesh := SphereMesh.new()
+		mesh.radius = 0.16 + 0.05 * float(i % 3)
+		mesh.height = mesh.radius * 2.0
+		mesh.radial_segments = 10
+		mesh.rings = 6
+		pod.mesh = mesh
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.32, 0.16, 0.10)
+		mat.emission_enabled = true
+		mat.emission = Color(1.0, 0.45, 0.12)
+		mat.emission_energy_multiplier = 1.1
+		pod.material_override = mat
+		pod.position = Vector3(
+			rng.randf_range(-0.7, 0.7),
+			crit_zone_center.y - rng.randf_range(1.0, 2.2),
+			rng.randf_range(-0.5, 0.9))
+		body.add_child(pod)
+		var pop := pod.create_tween()
+		pod.scale = Vector3.ONE * 0.05
+		pop.tween_property(pod, "scale", Vector3.ONE, 0.5) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# Transition shockwave + rumble sells the shift physically
+	CombatFx.spawn_shockwave(self, global_position - Vector3(0, 0.3, 0), 4.2,
+		Color(1.0, 0.42, 0.15, 0.8), 0.8)
+	CombatFx.spawn_motes(self, global_position + Vector3(0, 1.2, 0),
+		Color(1.0, 0.55, 0.25, 0.7), 18, 1.4, 1.1, 2.4)
+	CombatFx.impact(self, 0.55, 0.08, 0.06, 0.65)
 
 func die() -> void:
 	is_defeated = true
@@ -386,16 +433,44 @@ func die() -> void:
 	
 	_hide_boss_health_bar()
 	
-	# Death: topple backward while collapsing
-	if animator:
+	# Death: physical collapse — ragdoll when the authored rig allows,
+	# otherwise a heavy tumble corpse. Deferred: die() can fire inside a
+	# physics callback where reparenting is illegal.
+	if animator != null \
+			and (animator.visual_root == null or not is_instance_valid(animator.visual_root)):
 		animator.trigger_death(-1.0)
+	else:
+		_launch_death_physics.call_deferred()
 	var tween = create_tween()
-	tween.tween_property(self, "scale", Vector3(0.1, 0.1, 0.1), 1.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.tween_interval(2.6)
 	tween.tween_callback(_on_death_finished)
 	
 	# Crumbling bark groan under the locked victory sting
 	audio.play_boss_death()
 	audio.play_victory()
+	var ws := get_node_or_null("/root/WorldState")
+	if ws != null and ws.has_method("gust"):
+		ws.gust(1.0)   # the grove recoils as the Matriarch falls
+
+## Ragdoll-or-tumble for the boss body (deferred context).
+func _launch_death_physics() -> void:
+	var visual := animator.visual_root if animator != null else null
+	if visual == null or not is_instance_valid(visual) or not is_inside_tree():
+		return
+	TumbleCorpse.max_corpses = maxi(_corpse_budget(), 2)
+	var killer := get_tree().get_first_node_in_group("player")
+	var dir := Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)).normalized()
+	if killer is Node3D:
+		dir = global_position.direction_to((killer as Node3D).global_position)
+		dir.y = 0.0
+	var shove := dir * randf_range(4.0, 5.5) + Vector3.UP * randf_range(3.0, 4.0)
+	if TumbleCorpse.try_ragdoll(visual, shove):
+		return
+	TumbleCorpse.launch(visual, shove, 3.4)
+
+func _corpse_budget() -> int:
+	var qs := get_node_or_null("/root/WorldState/QualityScaler")
+	return qs.corpse_pool_size if qs != null else 6
 
 func _on_death_finished() -> void:
 	if not is_practice:

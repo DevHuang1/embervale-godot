@@ -116,7 +116,8 @@ func _apply_realm_theme(stage: int) -> void:
 		return
 	var realm := Bestiary.realm_for_stage(stage)
 	day_night.apply_realm(realm.get("mist_tint", Color(0.65, 0.75, 0.72)),
-		realm.get("firefly_tint", Color(1.0, 0.86, 0.45)))
+		realm.get("firefly_tint", Color(1.0, 0.86, 0.45)),
+		realm.get("grade", {}))
 
 ## === Tiered encounter packs (normal / hard per realm) ===
 func _spawn_wave(stage: int) -> void:
@@ -185,14 +186,24 @@ func _spawn_relic_trophy(relic) -> void:
 	var mi := MeshInstance3D.new()
 	mi.mesh = relic.mesh
 	_relic_trophy.add_child(mi)
+	# Elemental relics tint their pedestal light and shed matching motes
+	var element := str(relic.get("element") if relic is Dictionary \
+		else relic.element)
+	var glow_color: Color = ImpactDirector.ELEMENT_COLORS.get(element,
+		Color(1.0, 0.72, 0.29))
 	var glow := OmniLight3D.new()
-	glow.light_color = Color(1.0, 0.72, 0.29)
+	glow.light_color = glow_color
 	glow.light_energy = 0.9
 	glow.omni_range = 3.5
 	glow.omni_attenuation = 1.6
 	_relic_trophy.add_child(glow)
 	add_child(_relic_trophy)
 	_relic_trophy.global_position = relic_pedestal.global_position + Vector3(0, 1.15, 0)
+	if element != "":
+		CombatFx.spawn_motes(self,
+			relic_pedestal.global_position + Vector3(0, 1.2, 0),
+			Color(glow_color.r, glow_color.g, glow_color.b, 0.7),
+			12, 0.5, 1.2, 1.4)
 	set_process(true)
 
 func _process(delta: float) -> void:
@@ -451,6 +462,11 @@ func _light_beacon() -> void:
 	game_state.beacon_lit = true
 	game_state.advance_stage(GameState.QuestStage.COMPLETE)
 	audio.play_victory()
+	# The lit beacon calms the sky: weather locks to a warm stillness
+	var ws := get_node_or_null("/root/WorldState")
+	if ws != null:
+		ws.weather_locked = true
+		ws.set_rain(0.0)
 
 func _on_hero_interact() -> void:
 	# Handle interactions based on nearby objects

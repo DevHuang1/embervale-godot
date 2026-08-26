@@ -33,6 +33,11 @@ var pending_base: Dictionary = {}
 var pending_rarity: int = 0
 
 func _ready() -> void:
+	UiKit.apply_glass($Root)
+	# The revealed relic reads on warm letter stock; actions carry roles.
+	UiKit.apply_parchment(result_panel, UiKit.RADIUS_BUTTON)
+	UiKit.style_primary_button(scan_button)
+	UiKit.style_primary_button(equip_button)
 	_connect_signals()
 	
 	close_button.pressed.connect(_on_close_pressed)
@@ -99,6 +104,8 @@ func _show_result(weapon_id: String, rarity: int) -> void:
 	]
 	
 	weapon_glyph.text = str(base.get("glyph", "✦"))
+	UiKit.style_label(weapon_glyph, &"Title", 56)
+	UiKit.style_label(rarity_label, &"RowLabel")
 	rarity_label.text = "RARITY: %s" % rarity_names[pending_rarity]
 	rarity_label.add_theme_color_override("font_color", rarity_colors[pending_rarity])
 	

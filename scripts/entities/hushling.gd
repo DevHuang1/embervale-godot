@@ -16,7 +16,7 @@ signal died
 @onready var hitbox: Area3D = $Hitbox
 @onready var attack_area: Area3D = $AttackArea
 
-enum Pattern { ORBIT, FEINT, LUNGE, RECOVER, BRAMBLE_BURST }
+enum Pattern { ORBIT, FEINT, LUNGE, WINDUP, RECOVER, BRAMBLE_BURST }
 
 @export var max_hp: int = 28
 @export var base_atk: int = 3
@@ -31,6 +31,13 @@ enum Pattern { ORBIT, FEINT, LUNGE, RECOVER, BRAMBLE_BURST }
 @export var burst_damage: int = 6
 # Hard-tier flag: bursts become a tracking 3-spike thorn volley.
 @export var thorn_volley: bool = false
+
+# Telegraphed counter-strike: after being struck in melee range the sprite
+# winds up visibly before answering. Dodging through the strike is rewarded.
+@export var counter_windup: float = 0.55
+@export var counter_range: float = 2.3
+@export var counter_cooldown: float = 2.5
+var counter_timer: float = 0.0
 
 # Realm/boss SFX preset id ("vanilla" keeps the original cues).
 var sfx_profile: String = "vanilla"
@@ -187,6 +194,9 @@ func _update_timers(delta: float) -> void:
 	if burst_timer > 0:
 		burst_timer -= delta
 	
+	if counter_timer > 0:
+		counter_timer -= delta
+	
 	if stun_timer > 0:
 		stun_timer -= delta
 	
@@ -226,6 +236,9 @@ func _update_pattern(delta: float) -> void:
 			Pattern.FEINT, Pattern.LUNGE:
 				current_pattern = Pattern.RECOVER
 				pattern_timer = 0.56
+
+			Pattern.WINDUP:
+				_resolve_counter_strike()
 				
 			Pattern.BRAMBLE_BURST:
 				_perform_bramble_burst(player)
@@ -333,6 +346,9 @@ func _update_movement(delta: float) -> void:
 			dir_z = to_player.z
 			speed = lunge_speed
 			
+		Pattern.WINDUP:
+			pass  # planted feet while the strike charges
+			
 		Pattern.RECOVER:
 			dir_x = side.x * 0.45 + to_player.x * ((dist - orbit_distance) * 0.03)
 			dir_z = side.z * 0.45 + to_player.z * ((dist - orbit_distance) * 0.03)
@@ -407,6 +423,11 @@ func take_damage(amount: int, knockback_dir: Vector3) -> void:
 	var tween = create_tween()
 	tween.tween_property(body, "material_override:shader_parameter/flash_intensity", 1.0, 0.05)
 	tween.tween_property(body, "material_override:shader_parameter/flash_intensity", 0.0, 0.15)
+	# Battle wear: the creature visibly scuffs as it breaks down
+	if body.material_override is ShaderMaterial:
+		var ratio := clampf(float(hp) / float(maxi(max_hp, 1)), 0.0, 1.0)
+		body.material_override.set_shader_parameter("hp_wear",
+			clampf((0.45 - ratio) / 0.45, 0.0, 1.0) * 0.8)
 	
 	# Knockback
 	knockback_velocity = knockback_dir * (amount * 10.0)
@@ -415,12 +436,62 @@ func take_damage(amount: int, knockback_dir: Vector3) -> void:
 	if current_pattern == Pattern.LUNGE:
 		current_pattern = Pattern.RECOVER
 		pattern_timer = 0.56
-	else:
+	elif current_pattern == Pattern.WINDUP:
+		# Striking a winding-up sprite cancels its answer — aggression
+		# suppresses counters but never stunlock-repeats them.
 		current_pattern = Pattern.RECOVER
-		pattern_timer = 0.32
+		pattern_timer = 0.4
+	else:
+		var hero = get_parent().get_node_or_null("Hero")
+		var can_counter := counter_timer <= 0.0 and hp > 0 \
+				and hero != null and is_instance_valid(hero) \
+				and global_position.distance_to(hero.global_position) \
+						<= counter_range * 1.4
+		if can_counter:
+			_begin_counter_windup()
+		else:
+			current_pattern = Pattern.RECOVER
+			pattern_timer = 0.32
 	
 	if hp <= 0:
 		die()
+
+## Telegraphed answer to a melee strike: eyes flash red, a ground ring marks
+## the blast radius, then a claw swipe resolves. Dodge through it for a
+## perfect-dodge reward; leave the ring or stay airborne to whiff it.
+func _begin_counter_windup() -> void:
+	current_pattern = Pattern.WINDUP
+	pattern_timer = counter_windup
+	counter_timer = counter_cooldown
+	lunge_hit = false
+	burst_active = false
+	_modulate_eyes(Color(1, 0.25, 0.15))
+	animator.trigger_attack()
+	if sfx_profile == "vanilla":
+		audio.play_enemy_telegraph()
+	else:
+		audio.play_profile_cue(sfx_profile, "telegraph")
+	CombatFx.spawn_telegraph(self, global_position + Vector3(0, 0.35, 0),
+		Color(1.0, 0.32, 0.18))
+	CombatFx.spawn_ring(self, global_position, counter_range,
+		Color(1.0, 0.45, 0.18, 0.55), counter_windup)
+
+func _resolve_counter_strike() -> void:
+	current_pattern = Pattern.RECOVER
+	pattern_timer = 0.56
+	var player = get_parent().get_node_or_null("Hero")
+	if is_defeated or player == null or not is_instance_valid(player):
+		return
+	CombatFx.spawn_slash(self, global_position + Vector3(0, 0.5, 0),
+		Color(1.0, 0.4, 0.2, 0.9))
+	audio.play_hit()
+	var dist := global_position.distance_to(player.global_position)
+	if dist > counter_range + 0.8:
+		return  # dodged out of reach — strike whiffs
+	if player.has_method("is_airborne") and player.is_airborne():
+		return
+	if player.has_method("notify_enemy_strike"):
+		player.notify_enemy_strike(self, base_atk + 1)
 
 func die() -> void:
 	is_defeated = true
@@ -430,13 +501,15 @@ func die() -> void:
 	# physics state changes must be deferred there.
 	hitbox.set_deferred("monitoring", false)
 	attack_area.set_deferred("monitoring", false)
-	
-	# Death: topple over while collapsing
-	animator.trigger_death(1.0 if randf() > 0.5 else -1.0)
+
+	# Death: the husk becomes a physical tumble corpse right away — the
+	# killing shove sends it bouncing while the kill flow completes.
+	animator.anim_state = EntityAnimator.AnimState.DEAD
+	_launch_death_corpse()
 	var tween = create_tween()
-	tween.tween_property(self, "scale", Vector3(0.1, 0.1, 0.1), 0.72).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.tween_interval(0.72)
 	tween.tween_callback(_on_death_animation_finished)
-	
+
 	audio.play_cue("hushling_death")
 	audio.play_defeat()
 	# Rare elite glint: diamonds stay luck-independent by design
@@ -444,6 +517,28 @@ func die() -> void:
 		CombatFx.spawn_burst(self, global_position + Vector3(0, 0.6, 0),
 			Color(0.55, 0.85, 1.0, 0.95), 18, 4.5, 0.7, 0.14)
 		GameState.add_diamonds(1, "💎 +1 diamond — a rare glint settles in your palm.")
+
+## Hand the bramble husk to the pooled tumble-corpse system: a killing
+## shove away from the hero plus spin; the husk bounces, settles, sinks.
+func _launch_death_corpse() -> void:
+	_do_launch_death_corpse.call_deferred()
+
+func _do_launch_death_corpse() -> void:
+	var visual := get_node_or_null("Visual") as Node3D
+	if visual == null or not is_inside_tree():
+		return
+	var killer := get_parent().get_node_or_null("Hero")
+	var dir := Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)).normalized()
+	if killer is Node3D:
+		dir = killer.global_position.direction_to(global_position)
+		dir.y = 0.0
+	TumbleCorpse.max_corpses = _corpse_budget()
+	TumbleCorpse.launch(visual,
+		dir * randf_range(3.0, 4.6) + Vector3.UP * randf_range(2.2, 3.2))
+
+func _corpse_budget() -> int:
+	var qs := get_node_or_null("/root/WorldState/QualityScaler")
+	return qs.corpse_pool_size if qs != null else 6
 
 func _on_death_animation_finished() -> void:
 	died.emit()

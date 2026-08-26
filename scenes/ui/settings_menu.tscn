@@ -1,8 +1,6 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=2 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/settings_menu.gd" id="1_scr"]
-[ext_resource type="FontFile" path="res://assets/fonts/PressStart2P-Regular.ttf" id="1_2"]
-[ext_resource type="FontFile" path="res://assets/fonts/VT323-Regular.ttf" id="1_3"]
 
 [node name="SettingsMenu" type="CanvasLayer"]
 layer = 40
@@ -15,11 +13,11 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 
 [node name="Dim" type="ColorRect" parent="Root"]
-layout_mode = 2
+layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-color = Color(0.01, 0.03, 0.02, 0.6)
+color = Color(0.008, 0.02, 0.014, 0.66)
 
 [node name="Panel" type="PanelContainer" parent="Root"]
 layout_mode = 2
@@ -28,37 +26,32 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -200.0
-offset_top = -170.0
-offset_right = 200.0
-offset_bottom = 170.0
+offset_left = -280.0
+offset_top = -250.0
+offset_right = 280.0
+offset_bottom = 250.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/panel_inset = 22
 
 [node name="VBox" type="VBoxContainer" parent="Root/Panel"]
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 20
 
 [node name="Title" type="Label" parent="Root/Panel/VBox"]
 layout_mode = 2
+theme_type_variation = &"MenuTitle"
 text = "SETTINGS"
 horizontal_alignment = 1
-theme_override_fonts/font = ExtResource("1_2")
-theme_override_font_sizes/font_size = 16
-theme_override_colors/font_color = Color(0.96, 0.72, 0.29, 1)
 
 [node name="MasterRow" type="HBoxContainer" parent="Root/Panel/VBox"]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 16
 
 [node name="MasterLabel" type="Label" parent="Root/Panel/VBox/MasterRow"]
 layout_mode = 2
-custom_minimum_size = Vector2(110, 0)
+custom_minimum_size = Vector2(150, 0)
+theme_type_variation = &"RowLabel"
 text = "MASTER"
-theme_override_fonts/font = ExtResource("1_2")
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.56, 0.67, 0.45, 1)
 
 [node name="MasterSlider" type="HSlider" parent="Root/Panel/VBox/MasterRow"]
 layout_mode = 2
@@ -71,15 +64,13 @@ value = 1.0
 
 [node name="MusicRow" type="HBoxContainer" parent="Root/Panel/VBox"]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 16
 
 [node name="MusicLabel" type="Label" parent="Root/Panel/VBox/MusicRow"]
 layout_mode = 2
-custom_minimum_size = Vector2(110, 0)
+custom_minimum_size = Vector2(150, 0)
+theme_type_variation = &"RowLabel"
 text = "MUSIC"
-theme_override_fonts/font = ExtResource("1_2")
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.56, 0.67, 0.45, 1)
 
 [node name="MusicSlider" type="HSlider" parent="Root/Panel/VBox/MusicRow"]
 layout_mode = 2
@@ -92,15 +83,13 @@ value = 0.6
 
 [node name="SfxRow" type="HBoxContainer" parent="Root/Panel/VBox"]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 16
 
 [node name="SfxLabel" type="Label" parent="Root/Panel/VBox/SfxRow"]
 layout_mode = 2
-custom_minimum_size = Vector2(110, 0)
+custom_minimum_size = Vector2(150, 0)
+theme_type_variation = &"RowLabel"
 text = "SOUND FX"
-theme_override_fonts/font = ExtResource("1_2")
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.56, 0.67, 0.45, 1)
 
 [node name="SfxSlider" type="HSlider" parent="Root/Panel/VBox/SfxRow"]
 layout_mode = 2
@@ -113,16 +102,16 @@ value = 0.8
 
 [node name="HintLabel" type="Label" parent="Root/Panel/VBox"]
 layout_mode = 2
+theme_type_variation = &"Caption"
 text = "Camera: drag right-mouse / two fingers to orbit, wheel / pinch to zoom."
 horizontal_alignment = 1
 autowrap_mode = 2
-theme_override_fonts/font = ExtResource("1_3")
-theme_override_font_sizes/font_size = 13
-theme_override_colors/font_color = Color(0.3, 0.27, 0.2, 1)
 
 [node name="BackButton" type="Button" parent="Root/Panel/VBox"]
 layout_mode = 2
 text = "BACK"
-theme_override_fonts/font = ExtResource("1_2")
-theme_override_font_sizes/font_size = 11
-theme_override_colors/font_color = Color(0.4, 0.72, 0.7, 1)
+
+[node name="QuitGameButton" type="Button" parent="Root/Panel/VBox"]
+layout_mode = 2
+text = "QUIT GAME"
+tooltip_text = "Exit Embervale. Progress saves automatically."
