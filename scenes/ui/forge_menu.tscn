@@ -26,9 +26,12 @@ layout_mode = 2
 theme_type_variation = &"MenuTitle"
 text = "DIVINING LENS"
 
-[node name="CloseButton" type="TextureButton" parent="Root/VBox/Header"]
+[node name="CloseButton" type="Button" parent="Root/VBox/Header"]
+custom_minimum_size = Vector2(150, 56)
 layout_mode = 2
 tooltip_text = "Close (Esc)"
+text = "✕  CLOSE"
+theme_override_font_sizes/font_size = 19
 
 [node name="Pipeline" type="PanelContainer" parent="Root/VBox"]
 layout_mode = 2
@@ -176,10 +179,13 @@ text = "The lens fixes every number — names are yours alone."
 autowrap_mode = 2
 
 [node name="EquipButton" type="Button" parent="Root/VBox/Result/ResultVBox"]
+custom_minimum_size = Vector2(0, 70)
 layout_mode = 2
 text = "EQUIP"
+theme_override_font_sizes/font_size = 22
 
 [node name="ScanButton" type="Button" parent="Root/VBox"]
+custom_minimum_size = Vector2(0, 80)
 layout_mode = 2
-theme_override_font_sizes/font_size = 21
+theme_override_font_sizes/font_size = 24
 text = "BEGIN DIVINATION"

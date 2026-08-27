@@ -14,10 +14,10 @@ const WEAPON_DEFS := {
 		"id": "mug_mace", "name": "MUG MACE", "glyph": "☕", "style": "blunt",
 		"atk": 7, "swing_time": 0.38, "range": 8.2,
 		"skills": [
-			{"name": "MUG SLAM", "type": "aoe", "cooldown": 4.0, "radius": 13.0, "dmg_mult": 1.5},
-			{"name": "EMBER FLIGHT", "type": "explosion", "cooldown": 5.0, "radius": 2.6, "dmg_mult": 1.7,
+			{"name": "MUG SLAM", "type": "aoe", "cooldown": 2.0, "radius": 13.0, "dmg_mult": 1.5},
+			{"name": "EMBER FLIGHT", "type": "explosion", "cooldown": 2.5, "radius": 2.6, "dmg_mult": 1.7,
 				"desc": "Hurl a cinder that bursts on the marked target."},
-			{"name": "SIP OF STRENGTH", "type": "heal_bloom", "cooldown": 9.0, "heal": 14,
+			{"name": "SIP OF STRENGTH", "type": "heal_bloom", "cooldown": 4.5, "heal": 14,
 				"desc": "Restores warmth in a verdant bloom."}
 		]
 	},
@@ -25,11 +25,11 @@ const WEAPON_DEFS := {
 		"id": "ember_sword", "name": "EMBERFANG", "glyph": "🗡", "style": "slash",
 		"atk": 8, "swing_time": 0.30, "range": 8.6,
 		"skills": [
-			{"name": "CRESCENT CUT", "type": "strike", "cooldown": 3.0, "dmg_mult": 2.2,
+			{"name": "CRESCENT CUT", "type": "strike", "cooldown": 1.5, "dmg_mult": 2.2,
 				"desc": "A heavy crescent slash through the marked target."},
-			{"name": "THORN WHIRL", "type": "whirl", "cooldown": 5.0, "radius": 3.6, "dmg_mult": 1.6,
+			{"name": "THORN WHIRL", "type": "whirl", "cooldown": 2.5, "radius": 3.6, "dmg_mult": 1.6,
 				"desc": "Spin a ring of bramble slashes around you."},
-			{"name": "SUNDER DASH", "type": "dash_strike", "cooldown": 6.0, "dmg_mult": 1.8,
+			{"name": "SUNDER DASH", "type": "dash_strike", "cooldown": 3.0, "dmg_mult": 1.8,
 				"desc": "Dash through the target, blade leading."}
 		]
 	},
@@ -37,11 +37,11 @@ const WEAPON_DEFS := {
 		"id": "arcane_staff", "name": "MOONBOUGH", "glyph": "🪄", "style": "magic",
 		"atk": 6, "swing_time": 0.44, "range": 10.5,
 		"skills": [
-			{"name": "EMBER NOVA", "type": "explosion", "cooldown": 4.0, "radius": 3.0, "dmg_mult": 1.9,
+			{"name": "EMBER NOVA", "type": "explosion", "cooldown": 2.0, "radius": 3.0, "dmg_mult": 1.9,
 				"desc": "Detonate an ember burst on the marked target."},
-			{"name": "STAR COMET", "type": "comet", "cooldown": 8.0, "radius": 4.0, "dmg_mult": 2.8,
+			{"name": "STAR COMET", "type": "comet", "cooldown": 4.0, "radius": 4.0, "dmg_mult": 2.8,
 				"desc": "Call down a slow comet; a wide explosion follows."},
-			{"name": "VERDANT BLOOM", "type": "heal_bloom", "cooldown": 9.0, "heal": 14,
+			{"name": "VERDANT BLOOM", "type": "heal_bloom", "cooldown": 4.5, "heal": 14,
 				"desc": "Bloom verdant light, restoring warmth."}
 		]
 	}
@@ -74,8 +74,8 @@ const SHOP_STOCK := [
 @export var combat_state: CombatState = CombatState.EXPLORING
 
 # Player stats
-@export var hp: int = 34
-@export var max_hp: int = 34
+@export var hp: int = 60
+@export var max_hp: int = 60
 @export var level: int = 1
 @export var xp: int = 0
 
@@ -178,7 +178,7 @@ signal defeated
 signal victory
 
 # Constants
-const MAX_HP_BASE = 34
+const MAX_HP_BASE = 60
 const FIRST_KILL_XP = 35
 const SUBSEQUENT_KILL_XP = 10
 const MOSS_TONIC_HEAL = 12
@@ -892,7 +892,10 @@ func load_game() -> bool:
 		stat_luk = int(saved_stats.get("luk", 0))
 		stat_end = int(saved_stats.get("end", 0))
 	max_hp = max_hp_total()
-	hp = clampi(hp, 0, max_hp)
+	# Rebalance heal: bring HP up to the (possibly larger) capacity so the
+	# bigger health pool reads immediately after the base-HP change.
+	hp = max_hp
+	hp_changed.emit(0, hp)
 	current_realm = _normalize_realm(str(cfg.get_value("progress", "current_realm", "bramblewood")))
 	unlocked_realms.clear()
 	var saved_realms = cfg.get_value("progress", "unlocked_realms", [])
@@ -926,6 +929,22 @@ func delete_save() -> void:
 	if has_save():
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
 
+
+# === Interface world-freeze (ref-counted) ===
+var _ui_freeze_count := 0
+
+## Freeze the world behind an open interface. Ref-counted so stacked or
+## hand-off menus (satchel -> forge -> satchel) pause and resume cleanly.
+func push_world_freeze() -> void:
+	_ui_freeze_count += 1
+	get_tree().paused = true
+
+## Release one interface's hold on the world; play resumes only when every
+## open interface has released its hold.
+func pop_world_freeze() -> void:
+	_ui_freeze_count = maxi(_ui_freeze_count - 1, 0)
+	if _ui_freeze_count == 0:
+		get_tree().paused = false
 
 ## Active owned id for a cosmetic kind ("" when vanilla).
 func active_cosmetic_id_for(kind: String) -> String:

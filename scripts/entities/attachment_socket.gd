@@ -41,6 +41,12 @@ func is_occupied() -> bool:
 	return _attached != null and is_instance_valid(_attached)
 
 
+## The currently attached node (or null). Used by the hero to swing the
+## held weapon visibly without walking the socket tree.
+func get_attachment() -> Node3D:
+	return _attached if is_occupied() else null
+
+
 static func find_socket(root: Node, id: String) -> AttachmentSocket:
 	for child in root.find_children("*", "AttachmentSocket", true, false):
 		if child.socket_id == id:

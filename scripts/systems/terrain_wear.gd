@@ -9,8 +9,8 @@ extends Node
 
 const RES := 256
 const UPLOAD_MIN_INTERVAL := 0.12
-const BOUNDS_MIN := -76.0
-const BOUNDS_SIZE := 152.0
+const BOUNDS_MIN := -300.0
+const BOUNDS_SIZE := 600.0
 
 var image: Image = null
 var texture: ImageTexture = null

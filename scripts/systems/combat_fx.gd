@@ -43,14 +43,14 @@ static func spawn_burst(context: Node, pos: Vector3, color: Color, amount: int =
 		fx.transform_align = GPUParticles3D.TRANSFORM_ALIGN_DISABLED
 	var mat := ParticleProcessMaterial.new()
 	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	mat.emission_sphere_radius = 0.12
+	mat.emission_sphere_radius = 0.17
 	mat.direction = Vector3.UP
 	mat.spread = 70.0 if not stretch else 34.0
 	mat.initial_velocity_min = speed * 0.4
 	mat.initial_velocity_max = speed
 	mat.gravity = gravity
-	mat.scale_min = 0.55
-	mat.scale_max = 1.15
+	mat.scale_min = 0.75
+	mat.scale_max = 1.5
 	mat.color = color
 	mat.color_ramp = _fade_ramp(color)
 	fx.process_material = mat
@@ -88,7 +88,7 @@ static func spawn_slash(context: Node, pos: Vector3,
 	if context == null or not context.is_inside_tree():
 		return
 	var quad := QuadMesh.new()
-	quad.size = Vector2(1.15, 0.17)
+	quad.size = Vector2(1.8, 0.26)
 	var material := StandardMaterial3D.new()
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
@@ -109,8 +109,8 @@ static func spawn_slash(context: Node, pos: Vector3,
 	mi.rotate_object_local(Vector3(0, 0, 1), randf_range(-0.7, 0.7) + (PI * 0.25 if randf() < 0.5 else -PI * 0.25))
 	var tween := mi.create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(mi, "scale", Vector3(1.25, 1.4, 1.0), 0.18)
-	tween.tween_property(material, "albedo_color:a", 0.0, 0.22)
+	tween.tween_property(mi, "scale", Vector3(1.7, 1.8, 1.0), 0.20)
+	tween.tween_property(material, "albedo_color:a", 0.0, 0.3)
 	tween.chain().tween_callback(mi.queue_free)
 
 ## Pre-impact telegraph: an additive glow shimmer that flares at the strike
@@ -120,7 +120,7 @@ static func spawn_telegraph(context: Node, pos: Vector3,
 	if context == null or not context.is_inside_tree():
 		return
 	var quad := QuadMesh.new()
-	quad.size = Vector2(0.55, 0.55)
+	quad.size = Vector2(0.85, 0.85)
 	var material := StandardMaterial3D.new()
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
@@ -137,9 +137,9 @@ static func spawn_telegraph(context: Node, pos: Vector3,
 	mi.global_position = pos
 	var tween := mi.create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(mi, "scale", Vector3.ONE * 1.45, 0.12) \
+	tween.tween_property(mi, "scale", Vector3.ONE * 1.9, 0.15) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(material, "albedo_color:a", 0.0, 0.25) \
+	tween.tween_property(material, "albedo_color:a", 0.0, 0.32) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tween.chain().tween_callback(mi.queue_free)
 
@@ -150,7 +150,7 @@ static func spawn_arc_trail(context: Node, pos: Vector3,
 	if context == null or not context.is_inside_tree():
 		return
 	var quad := QuadMesh.new()
-	quad.size = Vector2(1.3, 0.42)
+	quad.size = Vector2(2.0, 0.6)
 	var material := StandardMaterial3D.new()
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
@@ -168,12 +168,12 @@ static func spawn_arc_trail(context: Node, pos: Vector3,
 	if cam:
 		mi.look_at(cam.global_position)
 	mi.rotate_object_local(Vector3(0, 0, 1), randf_range(-0.9, 0.9))
-	mi.scale = Vector3(0.4, 0.4, 1.0)
+	mi.scale = Vector3(0.5, 0.5, 1.0)
 	var tween := mi.create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(mi, "scale", Vector3(1.2, 1.2, 1.0), 0.2) \
+	tween.tween_property(mi, "scale", Vector3(1.6, 1.6, 1.0), 0.24) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(material, "albedo_color:a", 0.0, 0.2)
+	tween.tween_property(material, "albedo_color:a", 0.0, 0.28)
 	tween.chain().tween_callback(mi.queue_free)
 
 # === Magic bolt: a glowing orb that flies from→to with a spark trail ===
@@ -295,8 +295,8 @@ static func spawn_motes(context: Node, pos: Vector3, color: Color,
 	fx.emitting = true
 
 ## Expanding shockwave: a ground-hugging ring of light that races outward.
-static func spawn_shockwave(context: Node, pos: Vector3, radius: float = 3.0,
-		color: Color = Color(1.0, 0.84, 0.47, 0.9), duration: float = 0.45) -> void:
+static func spawn_shockwave(context: Node, pos: Vector3, radius: float = 4.0,
+		color: Color = Color(1.0, 0.84, 0.47, 0.9), duration: float = 0.5) -> void:
 	if context == null or not context.is_inside_tree():
 		return
 	var inner := TorusMesh.new()
@@ -366,6 +366,19 @@ static func spawn_explosion(context: Node, pos: Vector3, color: Color,
 	spawn_burst(context, pos + Vector3(0, 0.6, 0), color, 26, radius * 2.2, 0.45, 0.18)
 	spawn_ring(context, pos, radius, Color(color.r, color.g, color.b, 0.8), 0.9)
 
+## Spawn portal: a flat churning glyph (double ring) with a quick vertical
+## light pillar, so an enemy materializing in reads clearly before it acts.
+static func spawn_spawn_portal(context: Node, pos: Vector3, color: Color,
+		duration: float = 0.6, height: float = 2.2) -> void:
+	if context == null or not context.is_inside_tree():
+		return
+	spawn_ring(context, pos, 1.5, Color(color.r, color.g, color.b, 0.85), duration)
+	spawn_ring(context, pos, 0.55, Color(color.r, color.g, color.b, 0.9), duration * 0.5)
+	spawn_pillar(context, pos, height, Color(color.r, color.g, color.b, 0.4),
+		duration * 0.7, 1.0)
+	spawn_burst(context, pos + Vector3(0, 0.3, 0),
+		Color(color.r, color.g, color.b, 0.7), 16, 3.2, duration, 0.16)
+
 # === Impact director: coordinates shake + hit-stop + screen chroma ===
 static func impact(context: Node, shake: float = 0.0, hitstop_duration: float = 0.0,
 		hitstop_scale: float = 0.08, chroma: float = 0.0) -> void:
@@ -412,13 +425,43 @@ static func spawn_ring(context: Node, pos: Vector3, radius: float, color: Color,
 	mat.initial_velocity_max = 0.0
 	mat.gravity = Vector3.ZERO
 	mat.scale_min = 0.7
-	mat.scale_max = 1.3
+	mat.scale_max = 1.5
 	mat.color = color
 	mat.color_ramp = _fade_ramp(color)
 	fx.process_material = mat
 	fx.global_position = pos + Vector3(0, 0.08, 0)
 	fx.restart()
 	fx.emitting = true
+
+# === Core flash: a white-hot pop at the payload point so EVERY rite's
+# moment-of-execution reads instantly, even at the zoomed-out camera ===
+static func spawn_core_flash(context: Node, pos: Vector3,
+		color: Color = Color(1.0, 0.97, 0.90), size: float = 1.6) -> void:
+	if context == null or not context.is_inside_tree():
+		return
+	var quad := QuadMesh.new()
+	quad.size = Vector2(size, size)
+	var material := StandardMaterial3D.new()
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	material.albedo_texture = radial_glow_texture()
+	material.albedo_color = color
+	material.disable_receive_shadows = true
+	quad.material = material
+	var mi := MeshInstance3D.new()
+	mi.mesh = quad
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_fx_root(context).add_child(mi)
+	mi.global_position = pos
+	var tween := mi.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(mi, "scale", Vector3.ONE * 2.3, 0.16) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(material, "albedo_color:a", 0.0, 0.30) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.chain().tween_callback(mi.queue_free)
 
 static func _acquire_particle(context: Node) -> GPUParticles3D:
 	_pool = _pool.filter(func(p): return is_instance_valid(p))

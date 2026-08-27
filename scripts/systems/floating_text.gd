@@ -9,11 +9,13 @@ const LIFETIME := 0.75
 
 static var _pool: Array[Label3D] = []
 
-static func spawn(parent: Node, world_pos: Vector3, text: String, color: Color) -> void:
+static func spawn(parent: Node, world_pos: Vector3, text: String, color: Color, size_scale: float = 1.0) -> void:
 	if parent == null or not parent.is_inside_tree():
 		return
 	var label := _acquire(parent)
 	label.text = text
+	label.font_size = int(64 * size_scale)
+	label.outline_size = int(12 * maxf(size_scale, 1.0))
 	label.modulate = color
 	label.modulate.a = 1.0
 	label.outline_modulate = Color(0.02, 0.03, 0.02, 0.9)
@@ -26,10 +28,10 @@ static func spawn(parent: Node, world_pos: Vector3, text: String, color: Color) 
 	tween.tween_property(label, "modulate:a", 0.0, LIFETIME - 0.15).set_delay(0.15)
 	tween.chain().tween_callback(func(): label.visible = false)
 
-static func spawn_on_entity(entity: Node3D, text: String, color: Color) -> void:
+static func spawn_on_entity(entity: Node3D, text: String, color: Color, size_scale: float = 1.0) -> void:
 	if entity == null or not is_instance_valid(entity) or not entity.is_inside_tree():
 		return
-	spawn(entity.get_tree().current_scene, entity.global_position, text, color)
+	spawn(entity.get_tree().current_scene, entity.global_position, text, color, size_scale)
 
 static func _acquire(parent: Node) -> Label3D:
 	_pool = _pool.filter(func(l): return is_instance_valid(l))

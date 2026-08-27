@@ -62,26 +62,30 @@ const ENEMY_VARIANTS := {
 	},
 	REALM_MISTFEN: {
 		"normal": {
+			"kind": "hushling",
 			"display": "Fenwick Hushling", "scale": 0.92, "hp": 34, "atk_bonus": 1,
 			"speed": 1.05, "volley": false,
 			"tint": Color(0.16, 0.22, 0.26), "eye": Color(0.62, 0.80, 0.96),
 		},
 		"hard": {
-			"display": "Drowned Elder", "scale": 1.19, "hp": 58, "atk_bonus": 3,
-			"speed": 0.95, "volley": true,
-			"tint": Color(0.10, 0.16, 0.22), "eye": Color(0.45, 0.85, 1.0),
+			"kind": "spitter",
+			"display": "Fen Spitter", "scale": 1.05, "hp": 46, "atk_bonus": 3,
+			"speed": 0.95, "volley": false,
+			"tint": Color(0.12, 0.20, 0.20), "eye": Color(0.45, 0.85, 1.0),
 		},
 	},
 	REALM_HEARTWOOD: {
 		"normal": {
+			"kind": "hushling",
 			"display": "Ember Hushling", "scale": 0.95, "hp": 38, "atk_bonus": 1,
 			"speed": 1.08, "volley": false,
 			"tint": Color(0.24, 0.14, 0.10), "eye": Color(1.0, 0.55, 0.30),
 		},
 		"hard": {
-			"display": "Cinder Elder", "scale": 1.24, "hp": 64, "atk_bonus": 4,
-			"speed": 1.0, "volley": true,
-			"tint": Color(0.20, 0.09, 0.06), "eye": Color(1.0, 0.30, 0.12),
+			"kind": "spitter",
+			"display": "Cinder Spitter", "scale": 1.1, "hp": 52, "atk_bonus": 4,
+			"speed": 1.0, "volley": false,
+			"tint": Color(0.22, 0.10, 0.07), "eye": Color(1.0, 0.30, 0.12),
 		},
 	},
 }
@@ -181,14 +185,14 @@ const WORLD_REALMS := {
 		"name": "Whispergrove",
 		"scene": "res://scenes/world/grove.tscn",
 		"unlock": "",
-		"bounds": Rect2(-76, -76, 152, 152),
+		"bounds": Rect2(-300, -300, 600, 600),
 		"map_color": Color(0.14, 0.22, 0.18),
 	},
 	"bramblewood": {
 		"name": "Bramblewood",
 		"scene": "res://scenes/world/grove.tscn",
 		"unlock": "",
-		"bounds": Rect2(-76, -76, 152, 152),
+		"bounds": Rect2(-300, -300, 600, 600),
 		"map_color": Color(0.14, 0.22, 0.18),
 	},
 	"mistfen": {

@@ -52,6 +52,22 @@ const ELEMENT_CUES := {
 	"nature": "elem_nature",
 }
 
+## Tiered camera/hit-stop contract shared by combat, the camera, and benchmarks.
+## Shake values are camera-local world units; caps are enforced by CameraRig.
+const FEEDBACK_TIERS := {
+	"light": {"shake": 0.10, "hitstop": 0.035, "time_scale": 0.18,
+		"chroma": 0.08, "fov": 0.0, "priority": 10, "decay": 12.0},
+	"medium": {"shake": 0.18, "hitstop": 0.060, "time_scale": 0.12,
+		"chroma": 0.14, "fov": 0.0, "priority": 20, "decay": 10.0},
+	"heavy": {"shake": 0.32, "hitstop": 0.100, "time_scale": 0.08,
+		"chroma": 0.24, "fov": 1.5, "priority": 30, "decay": 8.0},
+	"major": {"shake": 0.52, "hitstop": 0.150, "time_scale": 0.06,
+		"chroma": 0.38, "fov": 4.0, "priority": 40, "decay": 6.0},
+	"perfect_dodge": {"shake": 0.16, "hitstop": 0.050, "time_scale": 0.16,
+		"chroma": 0.0, "fov": 0.0, "priority": 25, "decay": 11.0},
+}
+const FEEDBACK_TIER_NAMES := ["light", "medium", "heavy", "major", "perfect_dodge"]
+
 
 ## Resolve a full profile dict for a strike. Unknown keys fall back safely.
 static func resolve(style: String, surface: String = "plant") -> Dictionary:
@@ -94,17 +110,40 @@ static func apply_strike(context: Node, style: String, surface: String,
 	var profile := resolve(style, surface)
 	if audio != null and not str(profile.cue).is_empty():
 		audio.play_cue(str(profile.cue))
-	var mult := 1.6 if heavy else 1.0
-	CombatFx.impact(context,
-		float(profile.shake) * mult,
-		float(profile.hitstop) * mult if heavy else float(profile.hitstop),
-		0.22 if heavy else 0.08,
-		minf(float(profile.chroma) * mult, 0.9))
+	var tier := "heavy" if heavy else "light"
+	apply_feedback(context, tier, hit_pos,
+		context.global_position.direction_to(hit_pos) if context is Node3D else Vector3.ZERO)
 	CombatFx.spawn_burst(context, hit_pos, profile.color,
 		int(10 * float(profile.burst)) + (4 if heavy else 0), 5.5, 0.3)
 	_spawn_debris(context, style, surface, hit_pos, heavy)
 	if element in ELEMENTS:
 		apply_element(context, element, hit_pos)
+
+
+## Dispatch a named feedback tier through CameraRig. This is the native
+## translation of the C# reference contract; existing VFX/audio remain below it.
+static func apply_feedback(context: Node, tier: String, hit_pos: Vector3 = Vector3.ZERO,
+		direction: Vector3 = Vector3.ZERO, weight: float = 1.0) -> void:
+	if context == null or not context.is_inside_tree():
+		return
+	var camera := context.get_tree().get_first_node_in_group("camera_rig")
+	if camera == null:
+		camera = context.get_tree().current_scene.get_node_or_null("CameraRig") \
+			if context.get_tree().current_scene else null
+	if camera != null and camera.has_method("request_feedback"):
+		camera.request_feedback(tier, direction, weight)
+	else:
+		# Legacy scenes without the upgraded CameraRig still receive a bounded
+		# shake through the old API.
+		if camera != null and camera.has_method("add_shake"):
+			var profile: Dictionary = FEEDBACK_TIERS.get(tier, FEEDBACK_TIERS["light"])
+			camera.add_shake(float(profile.shake) * weight)
+	if hit_pos != Vector3.ZERO:
+		var screen_fx := context.get_tree().get_first_node_in_group("screen_fx")
+		var profile: Dictionary = FEEDBACK_TIERS.get(tier, FEEDBACK_TIERS["light"])
+		if screen_fx != null and screen_fx.has_method("punch_chroma") \
+			and float(profile.chroma) > 0.0:
+			screen_fx.punch_chroma(float(profile.chroma))
 
 
 ## Physical shard burst through the pooled DebrisSystem (tier-capped).

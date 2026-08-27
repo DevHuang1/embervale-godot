@@ -20,12 +20,12 @@ enum Pattern { ORBIT, FEINT, LUNGE, WINDUP, RECOVER, BRAMBLE_BURST }
 
 @export var max_hp: int = 28
 @export var base_atk: int = 3
-@export var move_speed: float = 6.5
+@export var move_speed: float = 5.0
 @export var orbit_distance: float = 72.0 / 10.0  # 7.2 units (STANDOFF converted)
-@export var lunge_speed: float = 20.8
-@export var feint_speed: float = 12.8
-@export var orbit_speed: float = 5.0
-@export var recover_speed: float = 6.2
+@export var lunge_speed: float = 16.5
+@export var feint_speed: float = 10.0
+@export var orbit_speed: float = 4.0
+@export var recover_speed: float = 5.0
 @export var burst_cooldown: float = 5.5
 @export var burst_radius: float = 3.8
 @export var burst_damage: int = 6
@@ -184,6 +184,18 @@ func _physics_process(delta: float) -> void:
 	_update_visuals(delta)
 	
 	move_and_slide()
+	_snap_to_ground(delta)
+
+## The rendered ground is heightmapped (TerrainRelief) while the collision
+## floor stays flat, so follow the visible surface to stop the sprite
+## hovering above dips and hollows in close 3rd-person framing.
+func _snap_to_ground(delta: float) -> void:
+	var terrain = get_parent().get_node_or_null("Terrain")
+	if terrain == null or not terrain.has_method("height_at"):
+		return
+	var ground: float = terrain.height_at(global_position.x, global_position.z)
+	var weight := 1.0 - exp(-delta * 14.0)
+	global_position.y = lerpf(global_position.y, ground, weight)
 
 func _update_timers(delta: float) -> void:
 	if pattern_timer > 0:
@@ -406,10 +418,18 @@ func _on_attack_area_entered(area: Area3D) -> void:
 	if area.is_in_group("player") and current_pattern == Pattern.LUNGE and not lunge_hit:
 		lunge_hit = true
 		var dmg = base_atk + 1
-		if area.has_method("take_damage"):
-			area.take_damage(dmg, global_position.direction_to(area.global_position))
+		var target := area.get_parent() as Node3D
+		if target != null and target.has_method("notify_enemy_strike"):
+			target.notify_enemy_strike(self, dmg)
+			var hit_pos := target.global_position + Vector3(0, 0.65, 0)
+			CombatFx.spawn_slash(self, hit_pos, Color(1.0, 0.30, 0.16, 0.9))
+			CombatFx.spawn_burst(self, hit_pos, Color(1.0, 0.48, 0.18, 0.75), 10, 4.2, 0.28, 0.12)
+			CombatFx.impact(self, 0.16, 0.035, 0.16, 0.18)
 			print("Bramble Skitter catches your flank for %d warmth." % dmg)
-			audio.play_hit()
+			if sfx_profile == "vanilla":
+				audio.play_hit()
+			else:
+				audio.play_profile_cue(sfx_profile, "stomp")
 
 func take_damage(amount: int, knockback_dir: Vector3) -> void:
 	if is_defeated:
@@ -429,8 +449,8 @@ func take_damage(amount: int, knockback_dir: Vector3) -> void:
 		body.material_override.set_shader_parameter("hp_wear",
 			clampf((0.45 - ratio) / 0.45, 0.0, 1.0) * 0.8)
 	
-	# Knockback
-	knockback_velocity = knockback_dir * (amount * 10.0)
+	# Knockback — a firm nudge so the blob doesn't rocket across the arena
+	knockback_velocity = knockback_dir * (amount * 3.5)
 	
 	# Pattern interrupt
 	if current_pattern == Pattern.LUNGE:
@@ -484,7 +504,6 @@ func _resolve_counter_strike() -> void:
 		return
 	CombatFx.spawn_slash(self, global_position + Vector3(0, 0.5, 0),
 		Color(1.0, 0.4, 0.2, 0.9))
-	audio.play_hit()
 	var dist := global_position.distance_to(player.global_position)
 	if dist > counter_range + 0.8:
 		return  # dodged out of reach — strike whiffs
@@ -492,6 +511,11 @@ func _resolve_counter_strike() -> void:
 		return
 	if player.has_method("notify_enemy_strike"):
 		player.notify_enemy_strike(self, base_atk + 1)
+		CombatFx.impact(self, 0.20, 0.045, 0.14, 0.22)
+		if sfx_profile == "vanilla":
+			audio.play_hit()
+		else:
+			audio.play_profile_cue(sfx_profile, "stomp")
 
 func die() -> void:
 	is_defeated = true

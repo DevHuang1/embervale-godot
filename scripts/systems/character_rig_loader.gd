@@ -71,6 +71,8 @@ static func try_if_wire(entity: Node3D, profile: String) -> bool:
 		bridge.name = "AnimBridge"
 		rig.add_child(bridge)
 		bridge.bind(rig)
+		if entity.has_method("_on_authored_impact"):
+			bridge.cue_impact.connect(Callable(entity, "_on_authored_impact"))
 		# Self-driving clips: poll the host entity each frame and pick the
 		# matching cue (death > attack > move > idle) without any rewiring.
 		# Captures are weakrefs: after death the Visual reparents into a
@@ -139,6 +141,7 @@ static func _fit_rig(rig: Node3D, target_height: float) -> void:
 const _KEEP_PREFIXES := [
 	"Lantern", "HandSocket", "BackSocket", "WeaponSocket",
 	"SwingTrail", "DrawnBlade", "EmberTrail", "MovementDust",
+	"ArmorGear",
 ]
 
 static func _hide_procedural(root: Node3D) -> void:
@@ -148,10 +151,13 @@ static func _hide_procedural(root: Node3D) -> void:
 static func _hide_procedural_recursive(node: Node) -> void:
 	if node is Node3D:
 		var n3 := node as Node3D
+		# Keep-prefixed containers (sockets, armor gear, lantern) preserve
+		# their ENTIRE subtree — gear and wielded weapons mount under these
+		# and must survive an authored-rig mount.
+		for p in _KEEP_PREFIXES:
+			if str(n3.name).begins_with(p):
+				return
 		if node is MeshInstance3D or node is GPUParticles3D:
-			for p in _KEEP_PREFIXES:
-				if str(n3.name).begins_with(p):
-					return
 			if not n3.visible:
 				return
 			n3.visible = false

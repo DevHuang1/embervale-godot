@@ -26,7 +26,7 @@ signal interact_pressed
 ## Visual-only shrink applied to the Rig wrapper — never collision, ranges
 ## or camera. Characters read smaller; bosses keep their authored size.
 @export var visual_scale: float = 0.78
-@export var move_speed: float = 6.5
+@export var move_speed: float = 5.0
 @export var turn_speed: float = 12.0
 @export var accel_rate: float = 11.0
 @export var decel_rate: float = 15.0
@@ -54,6 +54,12 @@ var _blade: MeshInstance3D = null
 var _blade_mat: StandardMaterial3D = null
 var _attack_holding := false
 var _has_hand_weapon := false
+# Drive-hand tracking so the held weapon can be swung visibly on strikes,
+# independent of whether the authored rig animates its bones.
+var _drive_socket: AttachmentSocket = null
+var _drive_swing: Node3D = null
+var _swing_base_rot := Vector3.ZERO
+var _swing_tween: Tween = null
 # Instance id of the enemy we glide toward after pressing attack; -1 = none
 var _attack_run_target := -1
 var auto_strike_cooldown: float = 0.92
@@ -93,7 +99,7 @@ var hand_socket_l: AttachmentSocket = null
 var hand_socket_r: AttachmentSocket = null
 var _base_body_shader := {}   # original entity shader params for armor restore
 var _aura_base_energy: float = 0.18   # cosmetics baseline; magic pulses it
-var _base_move_speed: float = 6.5
+var _base_move_speed: float = 5.0
 
 # Ground normal cache for slope-aware movement
 var _ground_normal := Vector3.UP
@@ -130,6 +136,7 @@ var _cloak_base_mat: Material = null
 var _slope_pitch := 0.0
 var _slope_roll := 0.0
 var _prev_phase_sin := 0.0
+var _anim_impact_serial := 0
 
 func _ready() -> void:
 	target_position = global_position
@@ -198,6 +205,7 @@ func _ready() -> void:
 
 	# Combo finisher feedback (slash kits only; casts never combo)
 	animator.attack_impact.connect(_on_attack_impact)
+	animator.attack_impact.connect(_on_animator_impact)
 	animator.anim_event.connect(_on_anim_event)
 
 	# Authored-model drop-in (silent no-op until assets/models/hero.glb ships)
@@ -210,6 +218,9 @@ func _ready() -> void:
 		"hand_r": "Palm.R",
 		"back": "Hips",
 	})
+	# The rig mounted after the initial armor pass, so re-apply body tint to
+	# the authored silhouette (armor gear survives the mount via keep-prefix).
+	_apply_armor_visual()
 	if CharacterRigLoader.has_model("hero"):
 		var pr := "none"
 		var pl := "none"
@@ -1088,6 +1099,31 @@ func _begin_attack_target(enemy: Node3D) -> void:
 	desired_direction = Vector3.ZERO
 	is_moving = true
 
+## Swing the held weapon visibly through a slash arc. Works on the authored
+## rig too (sockets sit on the model bones), so a strike always reads even
+## when the rig's own bones don't animate a combat clip.
+func _animate_weapon_swing() -> void:
+	if _drive_swing == null or not is_instance_valid(_drive_swing):
+		return
+	var style := weapon_style()
+	var total := float(current_weapon.get("swing_time", 0.36))
+	var amp := 1.0 if style == "slash" else (0.9 if style != "magic" else 0.5)
+	var base := _swing_base_rot
+	if _swing_tween and _swing_tween.is_valid():
+		_swing_tween.kill()
+	# Snap home first so rapid taps never accumulate drift.
+	_drive_swing.rotation = base
+	_swing_tween = create_tween()
+	# Draw back, then whip through to the opposite side, then settle home.
+	_swing_tween.tween_property(_drive_swing, "rotation",
+		base + Vector3(0, -0.65 * amp, 0.25 * amp), total * 0.35) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_swing_tween.tween_property(_drive_swing, "rotation",
+		base + Vector3(0.15, 0.85 * amp, -0.15 * amp), total * 0.30) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	_swing_tween.tween_property(_drive_swing, "rotation", base, total * 0.35) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
 func _perform_auto_strike(enemy: Node3D) -> void:
 	var strike_data = game_state.perform_auto_strike()
 	if strike_data.is_empty():
@@ -1096,6 +1132,9 @@ func _perform_auto_strike(enemy: Node3D) -> void:
 	auto_strike_timer = auto_strike_cooldown / game_state.attack_speed_mult()
 	animator.attack_style = weapon_style()
 	animator.trigger_attack()
+	# Swing the held weapon through a visible slash arc (melee reads even on
+	# rigs whose bones don't animate combat; magic gets a smaller gesture).
+	_animate_weapon_swing()
 	# Commit forward — the strike visibly lunges into the target even the
 	# instant a press lands, so the swing reads without any glide-in wait.
 	if enemy != null and is_instance_valid(enemy):
@@ -1127,9 +1166,11 @@ func _perform_auto_strike(enemy: Node3D) -> void:
 			Color(1.0, 0.84, 0.47))
 		CombatFx.spawn_burst(self, lantern.global_position,
 			Color(1, 0.84, 0.47, 0.55), 6, 2.5, 0.22, 0.09)
-	await get_tree().create_timer(0.14 if magic else 0.10).timeout
-	if not is_instance_valid(enemy) or enemy.is_dead():
-		return
+		# Resolve the payload on the animator’s actual contact frame. This keeps
+		# authored FBX swings, proxy swings, VFX, SFX, and damage together.
+		await _wait_for_animator_impact()
+		if not is_instance_valid(enemy) or enemy.is_dead():
+			return
 	
 	# Impact director: surface-aware cue + coordinated shake/hitstop/chroma.
 	# Bloom strikes route through the heavy path so they read heavier.
@@ -1143,7 +1184,7 @@ func _perform_auto_strike(enemy: Node3D) -> void:
 		# Magic basic attack: a small detonation blooms on the target
 		audio.play_explosion()
 		CombatFx.spawn_explosion(self, enemy.global_position,
-			Color(0.62, 0.55, 0.96), 1.9)
+			Color(0.62, 0.55, 0.96), 2.4)
 		CombatFx.spawn_burst(self, hit_pos,
 			Color(0.72, 0.62, 1.0, 0.85), 12, 5.5, 0.32)
 	else:
@@ -1209,16 +1250,19 @@ func _fire_magic_bolt(from_pos: Vector3, to_pos: Vector3) -> void:
 	var orb := MeshInstance3D.new()
 	orb.name = "MagicBolt"
 	var sphere := SphereMesh.new()
-	sphere.radius = 0.11
-	sphere.height = 0.22
+	sphere.radius = 0.16
+	sphere.height = 0.32
 	sphere.radial_segments = 10
 	sphere.rings = 5
 	orb.mesh = sphere
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.72, 0.62, 1.0)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.emission_enabled = true
 	mat.emission = Color(0.62, 0.55, 0.96)
-	mat.emission_energy_multiplier = 2.8
+	mat.emission_energy_multiplier = 3.4
 	orb.material_override = mat
 	orb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(orb)
@@ -1231,6 +1275,26 @@ func _fire_magic_bolt(from_pos: Vector3, to_pos: Vector3) -> void:
 			CombatFx.spawn_burst(self, orb.global_position,
 				Color(0.72, 0.62, 1.0, 0.8), 6, 2.4, 0.2, 0.1)
 			orb.queue_free())
+
+func _on_animator_impact() -> void:
+	_anim_impact_serial += 1
+
+func _on_authored_impact(_cue: String) -> void:
+	# Authored FBX clips share the same gameplay payload timing as the
+	# procedural animator, so skills need only listen to one serial.
+	_anim_impact_serial += 1
+
+## Wait for the animator’s authoritative impact frame. The serial check prevents
+## a late-await race, while the timeout keeps old/custom rigs playable.
+func _wait_for_animator_impact(max_wait: float = 1.25, baseline: int = -1) -> bool:
+	var serial := _anim_impact_serial if baseline < 0 else baseline
+	var elapsed := 0.0
+	while elapsed < max_wait:
+		if _anim_impact_serial != serial:
+			return true
+		await get_tree().process_frame
+		elapsed += get_process_delta_time()
+	return false
 
 ## Finisher feedback: the third chained slash lands with a shockwave ring,
 ## heavier coordinated impact and a committed physical lunge.
@@ -1443,7 +1507,8 @@ func _on_attack_released() -> void:
 	auto_strike_timer = 1.35
 	animator.attack_style = weapon_style()
 	animator.trigger_attack("heavy")
-	await get_tree().create_timer(0.44).timeout
+	_animate_weapon_swing()
+	await _wait_for_animator_impact()
 	if not is_instance_valid(enemy) or (enemy.has_method("is_dead") and enemy.is_dead()):
 		return
 	audio.play_slash()
@@ -1489,8 +1554,8 @@ func _use_skill_slot(slot: int) -> void:
 
 ## Wind-up seconds per rite family — charge glow + audio sync to these.
 const SKILL_WINDUP := {
-	"strike": 0.16, "whirl": 0.20, "dash_strike": 0.16,
-	"explosion": 0.30, "comet": 0.55, "heal_bloom": 0.50, "aoe": 0.32,
+	"strike": 0.10, "whirl": 0.12, "dash_strike": 0.10,
+	"explosion": 0.16, "comet": 0.26, "heal_bloom": 0.26, "aoe": 0.16,
 }
 
 ## Rite-family charge tints (match the payload palette).
@@ -1511,6 +1576,10 @@ func _skill_tint(kind: String) -> Color:
 ## lands, even on rigs whose only combat clips are swings.
 func _begin_skill_cast(sk: Dictionary, target: Node3D) -> void:
 	var kind := str(sk.get("type", ""))
+	# Every rite announces itself over the HERO, enlarged — eyes are usually
+	# on your own character mid-fight, so the cast reads at a glance.
+	FloatingText.spawn_on_entity(self, "✦ %s" % str(sk.get("name", "RITE")),
+		Color(1, 0.9, 0.72), 1.6)
 	# Melee rites keep their weapon swings but still get their signature cue.
 	if kind in ["strike", "whirl"]:
 		animator.attack_style = weapon_style()
@@ -1518,16 +1587,11 @@ func _begin_skill_cast(sk: Dictionary, target: Node3D) -> void:
 		return
 	animator.attack_style = "magic"
 	audio.play_skill_cast(kind)
-	var name_str := str(sk.get("name", "RITE"))
-	if target != null and is_instance_valid(target) and kind != "heal_bloom":
-		FloatingText.spawn_on_entity(target, "✦ %s" % name_str, Color(1, 0.9, 0.72))
-	else:
-		FloatingText.spawn_on_entity(self, "✦ %s" % name_str, Color(1, 0.9, 0.72))
 	var hand_pos := hand_socket_r.global_position if hand_socket_r else lantern.global_position
 	var tint := _skill_tint(kind)
 	# Sustained charge orb that swells through the wind-up and pops at release
 	CombatFx.spawn_charge_glow(self, hand_pos, tint,
-		float(SKILL_WINDUP.get(kind, 0.3)), 1.7)
+		float(SKILL_WINDUP.get(kind, 0.3)), 2.6)
 	CombatFx.spawn_motes(self, hand_pos, Color(tint.r, tint.g, tint.b, 0.45),
 		8, 0.35, 0.5, 1.2)
 	if target != null and is_instance_valid(target) and kind != "heal_bloom":
@@ -1541,7 +1605,7 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 		"strike":
 			animator.attack_style = weapon_style()
 			animator.trigger_attack()
-			await get_tree().create_timer(0.16).timeout
+			await _wait_for_animator_impact(0.30)
 			if enemy == null or not is_instance_valid(enemy):
 				return
 			audio.play_slash()
@@ -1551,35 +1615,40 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 			CombatFx.spawn_slash(self, hit_pos + Vector3(0, 0.25, 0))
 			CombatFx.spawn_stretched_burst(self, hit_pos,
 				Color(1.0, 0.84, 0.47, 0.85), 10, 7.5, 0.26)
+			CombatFx.spawn_core_flash(self, hit_pos)
 			_deal_skill_damage(enemy, float(sk.get("dmg_mult", 1.5)))
-			CombatFx.impact(self, 0.24, 0.05, 0.12, 0.6)
+			CombatFx.impact(self, 0.32, 0.06, 0.10, 0.65)
 		"whirl":
 			animator.attack_style = weapon_style()
 			animator.trigger_attack("spin")
+			_animate_weapon_swing()
 			var radius := float(sk.get("radius", 3.5))
-			# Slash petals ring out through the spin; damage lands at its end
-			await get_tree().create_timer(0.20).timeout
+			# One short readable wind-up; petals, damage, sound and screen
+			# feedback all resolve together right after it.
+			await get_tree().create_timer(0.12, false).timeout
+			CombatFx.spawn_telegraph(self, global_position,
+				Color(1.0, 0.78, 0.35))
 			for i in 5:
 				var ang := TAU * i / 5.0
 				CombatFx.spawn_slash(self,
 					global_position + Vector3(cos(ang) * radius * 0.55, 0.9,
-						sin(ang) * radius * 0.55),
+					sin(ang) * radius * 0.55),
 					Color(1.0, 0.78, 0.35, 0.9))
-				await get_tree().create_timer(0.08).timeout
 			audio.play_slash()
-			CombatFx.spawn_ring(self, global_position, radius * 0.8,
+			CombatFx.spawn_ring(self, global_position, radius,
 				Color(1.0, 0.78, 0.35, 0.7), 0.7)
-			CombatFx.spawn_shockwave(self, global_position, radius * 0.85,
+			CombatFx.spawn_shockwave(self, global_position, radius,
 				Color(1.0, 0.84, 0.47, 0.75), 0.4)
 			CombatFx.spawn_motes(self, global_position + Vector3(0, 0.3, 0),
 				Color(1.0, 0.78, 0.35, 0.6), 14, radius * 0.5, 0.7, 2.2)
+			CombatFx.spawn_core_flash(self, global_position + Vector3(0, 0.9, 0))
 			for foe in get_tree().get_nodes_in_group("enemy"):
 				if foe is Node3D and is_instance_valid(foe) \
 						and global_position.distance_to(foe.global_position) <= radius:
 					if foe.has_method("is_dead") and foe.is_dead():
 						continue
 					_deal_skill_damage(foe, float(sk.get("dmg_mult", 1.5)), true)
-			CombatFx.impact(self, 0.22, 0.05, 0.12, 0.5)
+			CombatFx.impact(self, 0.30, 0.06, 0.10, 0.6)
 		"dash_strike":
 			# A real dash — iframe the lunge, rain after-image sparks along
 			# the path, strike at the moment of arrival.
@@ -1596,7 +1665,7 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 						0.18 + 0.2 * k) + Vector3(0, 0.45, 0)
 					CombatFx.spawn_stretched_burst(self, trail_pos,
 						Color(1, 0.84, 0.47, 0.55), 4, 3.0, 0.3)
-			await get_tree().create_timer(0.16).timeout
+			await _wait_for_animator_impact(0.35)
 			if enemy == null or not is_instance_valid(enemy):
 				return
 			audio.play_slash()
@@ -1606,28 +1675,30 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 				Color(1, 0.84, 0.47, 0.9), 16, 9.0, 0.32)
 			CombatFx.spawn_shockwave(self, enemy.global_position, 1.6,
 				Color(1, 0.84, 0.47, 0.7), 0.35)
+			CombatFx.spawn_core_flash(self,
+				enemy.global_position + Vector3(0, 0.85, 0))
 			_deal_skill_damage(enemy, float(sk.get("dmg_mult", 1.8)))
-			CombatFx.impact(self, 0.26, 0.06, 0.10, 0.6)
+			CombatFx.impact(self, 0.34, 0.07, 0.10, 0.65)
 		"explosion":
 			animator.attack_style = "magic"
 			animator.trigger_attack("hurl")
 			if enemy == null or not is_instance_valid(enemy):
 				return
-			# Launch a burning bolt on the whip frame; detonation on arrival
-			await get_tree().create_timer(0.30).timeout
-			if enemy == null or not is_instance_valid(enemy):
-				return
+			# Launch the burning bolt as soon as the charge orb pops.
+			await get_tree().create_timer(
+				float(SKILL_WINDUP.get("explosion", 0.16)), false).timeout
 			audio.play_skill_release("explosion")
 			var from_pos: Vector3 = hand_socket_r.global_position \
 				if hand_socket_r else global_position + Vector3(0, 1.2, 0)
 			var to_pos: Vector3 = enemy.global_position + Vector3(0, 0.6, 0)
 			CombatFx.spawn_bolt(self, from_pos, to_pos,
 				Color(0.98, 0.60, 0.20), 0.26, 0.34)
-			await get_tree().create_timer(0.27).timeout
+			await get_tree().create_timer(0.12, false).timeout
 			audio.play_explosion()
 			var color := Color(0.96, 0.62, 0.22)
 			CombatFx.spawn_explosion(self, to_pos, color,
 				float(sk.get("radius", 3.0)))
+			CombatFx.spawn_core_flash(self, to_pos, Color(1.0, 0.9, 0.75), 2.2)
 			CombatFx.spawn_shockwave(self, to_pos, float(sk.get("radius", 3.0)),
 				Color(color.r, color.g, color.b, 0.85), 0.45)
 			CombatFx.spawn_decal(self, to_pos, 1.3)
@@ -1651,13 +1722,18 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 				Color(0.62, 0.55, 0.96, 0.9), 0.5)
 			CombatFx.spawn_pillar(self, ground_pos, 9.0,
 				Color(0.72, 0.60, 1.0, 0.35), 0.6, 1.4)
+			# Release the meteor the instant the charge orb pops.
+			await get_tree().create_timer(
+				float(SKILL_WINDUP.get("comet", 0.26)), false).timeout
 			audio.play_skill_release("comet")
 			CombatFx.spawn_bolt(self, ground_pos + Vector3(0, 15.0, -2.0),
-				ground_pos, Color(0.72, 0.60, 1.0), 0.58, 0.72)
-			await get_tree().create_timer(0.58).timeout
+				ground_pos, Color(0.72, 0.60, 1.0), 0.30, 0.55)
+			await get_tree().create_timer(0.30, false).timeout
 			audio.play_explosion()
 			CombatFx.spawn_explosion(self, ground_pos, Color(0.72, 0.60, 1.0),
 				float(sk.get("radius", 4.0)))
+			CombatFx.spawn_core_flash(self, ground_pos,
+				Color(0.92, 0.88, 1.0), 2.4)
 			CombatFx.spawn_shockwave(self, ground_pos, float(sk.get("radius", 4.0)),
 				Color(0.80, 0.70, 1.0, 0.85), 0.5)
 			CombatFx.spawn_burst(self, ground_pos + Vector3(0, 1.2, 0),
@@ -1674,11 +1750,14 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 		"heal_bloom":
 			animator.attack_style = "magic"
 			animator.trigger_attack("buff")
-			await get_tree().create_timer(0.55).timeout
+			await get_tree().create_timer(
+				float(SKILL_WINDUP.get("heal_bloom", 0.26)), false).timeout
 			audio.play_heal()
 			var restored: int = game_state.heal(int(sk.get("heal", 14)))
 			FloatingText.spawn_on_entity(self, "+%d" % restored,
-				Color(0.62, 0.85, 0.45))
+				Color(0.62, 0.85, 0.45), 1.6)
+			CombatFx.spawn_core_flash(self, global_position + Vector3(0, 1.0, 0),
+				Color(0.80, 0.95, 0.65), 1.8)
 			# Bloom: light pillar + rising petal motes + soft pulse rings
 			CombatFx.spawn_pillar(self, global_position, 3.2,
 				Color(0.75, 0.95, 0.55, 0.55), 0.8, 1.1)
@@ -1694,10 +1773,12 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 			# a committed spin with a shockwave carrying the payload.
 			animator.attack_style = "magic"
 			animator.trigger_attack("spin")
-			await get_tree().create_timer(0.32).timeout
+			await get_tree().create_timer(
+				float(SKILL_WINDUP.get("aoe", 0.16)), false).timeout
 			audio.play_skill_release("aoe")
 			audio.play_explosion()
 			var slam_radius := float(sk.get("radius", 13.0)) * 0.35
+			CombatFx.spawn_core_flash(self, global_position + Vector3(0, 0.8, 0))
 			CombatFx.spawn_shockwave(self, global_position, slam_radius,
 				Color(1.0, 0.84, 0.47, 0.85), 0.45)
 			CombatFx.spawn_ring(self, global_position, slam_radius * 0.9,
@@ -1835,7 +1916,7 @@ func _refresh_weapon_visual() -> void:
 		mi.mesh = current_relic.mesh
 		holder.add_child(mi)
 		holder.rotation_degrees = Vector3(6.0, 180.0, -8.0)
-		holder.scale = Vector3.ONE * 0.55
+		holder.scale = Vector3.ONE * 0.75
 		weapon_socket.attach_node(holder)
 	else:
 		var rarity := int(current_weapon.get("rarity", 0))
@@ -1888,38 +1969,54 @@ func _refresh_hand_weapon() -> void:
 		"mug_mace":
 			hand_socket_l.detach()
 			hand_socket_r.attach_node(_build_mug_mace_visual())
+			_drive_socket = hand_socket_r
 			_has_hand_weapon = true
 		"ember_sword":
 			hand_socket_r.detach()
 			hand_socket_l.attach_node(_build_sword_visual())
+			_drive_socket = hand_socket_l
 			_has_hand_weapon = true
 		"arcane_staff":
 			hand_socket_l.detach()
 			hand_socket_r.attach_node(_build_staff_visual())
+			_drive_socket = hand_socket_r
 			_has_hand_weapon = true
 		"pocket_blade":
 			hand_socket_r.detach()
 			hand_socket_l.attach_node(_build_pocket_blade_visual())
+			_drive_socket = hand_socket_l
 			_has_hand_weapon = true
 		"snip_twins":
 			hand_socket_l.detach()
 			hand_socket_r.attach_node(_build_snip_twins_visual())
+			_drive_socket = hand_socket_r
 			_has_hand_weapon = true
 		"soda_cannon":
 			hand_socket_l.detach()
 			hand_socket_r.attach_node(_build_soda_cannon_visual())
+			_drive_socket = hand_socket_r
 			_has_hand_weapon = true
 		"slab_hammer":
 			hand_socket_l.detach()
 			hand_socket_r.attach_node(_build_slab_hammer_visual())
+			_drive_socket = hand_socket_r
 			_has_hand_weapon = true
 		_:
 			hand_socket_l.detach()
 			hand_socket_r.detach()
+			_drive_socket = null
 			_has_hand_weapon = bool(current_weapon.get("relic", false)) \
 				and current_relic != null and current_relic.mesh != null
 			if _has_hand_weapon:
 				hand_socket_r.attach_node(_build_relic_hand_visual())
+				_drive_socket = hand_socket_r
+	# Track the attached holder so strikes can swing it (works on the FBX
+	# rig too — sockets get re-parented to the model bones, not rebuilt).
+	if _drive_socket != null and _drive_socket.is_occupied():
+		_drive_swing = _drive_socket.get_attachment()
+		_swing_base_rot = _drive_swing.rotation if _drive_swing else Vector3.ZERO
+	else:
+		_drive_swing = null
 
 ## Weapon-derived strike reach (also drives glide distance and FX scale):
 ## slash = short and fast, blunt = medium, magic staves reach farthest.
@@ -1940,6 +2037,7 @@ func _build_mug_mace_visual() -> Node3D:
 	var rig := Node3D.new()
 	rig.name = "MugMaceVisual"
 	rig.rotation_degrees = Vector3(-84, 0, 0)
+	rig.scale = Vector3.ONE * 0.9
 
 	var wood := StandardMaterial3D.new()
 	wood.albedo_color = Color(0.30, 0.20, 0.11)
@@ -2026,7 +2124,7 @@ func _build_relic_hand_visual() -> Node3D:
 	rig.add_child(mi)
 	# Tip the flat extrusion forward out of the fist like a blade
 	rig.rotation_degrees = Vector3(-90, 0, -10)
-	rig.scale = Vector3.ONE * 0.5
+	rig.scale = Vector3.ONE * 0.75
 	return rig
 
 ## CC0 weapon models dropped into assets/models/weapons override the
@@ -2056,13 +2154,13 @@ func _mount_weapon_model(weapon_id: String) -> Node3D:
 	match weapon_id:
 		"ember_sword":
 			model.rotation_degrees = Vector3(90, 0, 0)
-			holder.scale = Vector3.ONE * 0.6
+			holder.scale = Vector3.ONE * 0.95
 		"arcane_staff":
 			model.position = Vector3(0, 0.4, 0)
-			holder.scale = Vector3.ONE * 0.75
+			holder.scale = Vector3.ONE * 1.0
 		"mug_mace":
 			model.rotation_degrees = Vector3(90, 0, 0)
-			holder.scale = Vector3.ONE * 0.6
+			holder.scale = Vector3.ONE * 0.9
 	return holder
 
 func _build_sword_visual() -> Node3D:
@@ -2180,6 +2278,7 @@ func _build_pocket_blade_visual() -> Node3D:
 	var rig := Node3D.new()
 	rig.name = "PocketBladeVisual"
 	rig.rotation_degrees = Vector3(-84, 0, 0)
+	rig.scale = Vector3.ONE * 0.9
 	var slab := StandardMaterial3D.new()
 	slab.albedo_color = Color(0.10, 0.11, 0.13)
 	slab.metallic = 0.6
@@ -2239,6 +2338,7 @@ func _build_snip_twins_visual() -> Node3D:
 	var rig := Node3D.new()
 	rig.name = "SnipTwinsVisual"
 	rig.rotation_degrees = Vector3(-84, 0, 0)
+	rig.scale = Vector3.ONE * 0.9
 	var steel := StandardMaterial3D.new()
 	steel.albedo_color = Color(0.66, 0.70, 0.74)
 	steel.metallic = 0.85
@@ -2297,6 +2397,7 @@ func _build_soda_cannon_visual() -> Node3D:
 	var rig := Node3D.new()
 	rig.name = "SodaCannonVisual"
 	rig.rotation_degrees = Vector3(-78, 0, 0)
+	rig.scale = Vector3.ONE * 0.9
 	var glass := StandardMaterial3D.new()
 	glass.albedo_color = Color(0.16, 0.38, 0.18)
 	glass.roughness = 0.15
@@ -2346,6 +2447,7 @@ func _build_slab_hammer_visual() -> Node3D:
 	var rig := Node3D.new()
 	rig.name = "SlabHammerVisual"
 	rig.rotation_degrees = Vector3(-84, 0, 0)
+	rig.scale = Vector3.ONE * 0.9
 	var wood := StandardMaterial3D.new()
 	wood.albedo_color = Color(0.28, 0.19, 0.11)
 	wood.roughness = 0.85
@@ -2413,25 +2515,35 @@ func _apply_armor_visual() -> void:
 		* game_state.move_speed_mult()
 	_apply_cosmetics()
 	_refresh_armor_gear()
-	if body == null or not (body.material_override is ShaderMaterial):
+	_apply_armor_tint()
+
+## Tint every body mesh (the procedural ghost and, when mounted, the
+## authored rig) to the equipped armor palette, or restore the defaults.
+func _apply_armor_tint() -> void:
+	if visual == null or not is_instance_valid(visual):
 		return
-	var mat: ShaderMaterial = body.material_override
 	var armor: Dictionary = game_state.equipped_armor
-	if armor.is_empty():
-		mat.set_shader_parameter("base_color",
-			_base_body_shader.get("base_color", Color(0.086, 0.23, 0.165)))
-		mat.set_shader_parameter("roughness",
-			_base_body_shader.get("roughness", 0.66))
-		mat.set_shader_parameter("metallic",
-			_base_body_shader.get("metallic", 0.0))
-		return
-	# Restyle the whole kit to the armor's palette
+	var use_default := armor.is_empty()
 	var tint: Color = armor.get("tint", Color(0.2, 0.2, 0.2))
-	mat.set_shader_parameter("base_color", tint)
-	mat.set_shader_parameter("roughness",
-		float(armor.get("roughness", 0.66)))
-	mat.set_shader_parameter("metallic",
-		float(armor.get("metallic", 0.0)))
+	var rough := float(armor.get("roughness", 0.66))
+	var metal := float(armor.get("metallic", 0.0))
+	for mi in visual.find_children("*", "MeshInstance3D", true, false):
+		var mat: Material = mi.material_override
+		if mat is ShaderMaterial and mat.shader != null \
+				and mat.shader.resource_path.ends_with("entity_body.gdshader"):
+			mat = mat.duplicate()
+			mi.material_override = mat
+			if use_default:
+				mat.set_shader_parameter("base_color",
+					_base_body_shader.get("base_color", Color(0.086, 0.23, 0.165)))
+				mat.set_shader_parameter("roughness",
+					_base_body_shader.get("roughness", 0.66))
+				mat.set_shader_parameter("metallic",
+					_base_body_shader.get("metallic", 0.0))
+			else:
+				mat.set_shader_parameter("base_color", tint)
+				mat.set_shader_parameter("roughness", rough)
+				mat.set_shader_parameter("metallic", metal)
 
 ## Armor gear beyond the shader tint: additive geometry rebuilt on every
 ## change, so equipping/unequipping never leaves stale meshes behind.
@@ -2466,33 +2578,49 @@ func _build_warden_plate_gear() -> void:
 	trim.albedo_color = Color(0.72, 0.55, 0.24)
 	trim.metallic = 0.8
 	trim.roughness = 0.42
+	var trim_glow := StandardMaterial3D.new()
+	trim_glow.albedo_color = Color(1.0, 0.72, 0.29)
+	trim_glow.emission_enabled = true
+	trim_glow.emission = Color(1.0, 0.55, 0.15)
+	trim_glow.emission_energy_multiplier = 2.2
 
 	var chest := MeshInstance3D.new()
 	var cm := BoxMesh.new()
-	cm.size = Vector3(0.46, 0.52, 0.07)
+	cm.size = Vector3(0.62, 0.62, 0.10)
 	chest.mesh = cm
 	chest.material_override = iron
 	chest.position = Vector3(0, 1.0, 0.32)
 	_armor_gear_root.add_child(chest)
 
+	# Glowing brass emblem so the plate reads at a distance.
 	var emblem := MeshInstance3D.new()
 	var em := BoxMesh.new()
-	em.size = Vector3(0.10, 0.10, 0.02)
+	em.size = Vector3(0.14, 0.14, 0.02)
 	emblem.mesh = em
-	emblem.material_override = trim
-	emblem.position = Vector3(0, 1.06, 0.37)
+	emblem.material_override = trim_glow
+	emblem.position = Vector3(0, 1.08, 0.385)
 	_armor_gear_root.add_child(emblem)
 
 	for side in [-1.0, 1.0]:
 		var pad := MeshInstance3D.new()
 		var pm := SphereMesh.new()
-		pm.radius = 0.175
-		pm.height = 0.25
+		pm.radius = 0.24
+		pm.height = 0.34
 		pad.mesh = pm
 		pad.material_override = iron
-		pad.position = Vector3(0.29 * side, 1.32, 0)
+		pad.position = Vector3(0.34 * side, 1.38, 0)
 		pad.scale = Vector3(1.0, 0.7, 1.15)
 		_armor_gear_root.add_child(pad)
+		# Emissive pauldron trim — iron catches the grove light.
+		var trim_pad := MeshInstance3D.new()
+		var tp := SphereMesh.new()
+		tp.radius = 0.16
+		tp.height = 0.24
+		trim_pad.mesh = tp
+		trim_pad.material_override = trim_glow
+		trim_pad.position = Vector3(0.44 * side, 1.44, 0)
+		trim_pad.scale = Vector3(1.0, 0.3, 1.0)
+		_armor_gear_root.add_child(trim_pad)
 
 ## EMBERWEAVE CLOAK: recolored mantle with a glowing ember hem.
 func _build_emberweave_gear() -> void:
@@ -2507,15 +2635,25 @@ func _build_emberweave_gear() -> void:
 	ember.albedo_color = Color(1.0, 0.45, 0.15)
 	ember.emission_enabled = true
 	ember.emission = Color(1.0, 0.35, 0.08)
-	ember.emission_energy_multiplier = 1.4
+	ember.emission_energy_multiplier = 2.2
 	var hem := MeshInstance3D.new()
 	var hm := TorusMesh.new()
-	hm.inner_radius = 0.47
-	hm.outer_radius = 0.53
+	hm.inner_radius = 0.58
+	hm.outer_radius = 0.68
 	hem.mesh = hm
 	hem.position = Vector3(0, 0.16, 0)
 	hem.material_override = ember
 	_armor_gear_root.add_child(hem)
+	# A second brighter collar ring so the cloak silhouette reads head-on.
+	var collar := MeshInstance3D.new()
+	var cm := TorusMesh.new()
+	cm.inner_radius = 0.30
+	cm.outer_radius = 0.36
+	collar.mesh = cm
+	collar.position = Vector3(0, 1.30, 0.12)
+	collar.rotation.x = 1.4
+	collar.material_override = ember
+	_armor_gear_root.add_child(collar)
 
 func _on_relic_forged(relic: RelicData) -> void:
 	current_relic = relic

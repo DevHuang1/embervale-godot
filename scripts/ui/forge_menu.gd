@@ -26,18 +26,37 @@ class_name ForgeMenu
 @onready var kit_preview: Label = $Root/VBox/Result/ResultVBox/KitPreview
 @onready var equip_button: Button = $Root/VBox/Result/ResultVBox/EquipButton
 @onready var scan_button: Button = $Root/VBox/ScanButton
-@onready var close_button: TextureButton = $Root/VBox/Header/CloseButton
+@onready var close_button: Button = $Root/VBox/Header/CloseButton
 
 var is_scanning: bool = false
 var pending_base: Dictionary = {}
 var pending_rarity: int = 0
 
+var _freeze_was_visible := false
+
+## Freeze/resume the world whenever this interface toggles, whichever
+## code path opened or closed it.
+func _poll_world_freeze() -> void:
+	if visible == _freeze_was_visible:
+		return
+	_freeze_was_visible = visible
+	if visible:
+		game_state.push_world_freeze()
+	else:
+		game_state.pop_world_freeze()
+
+func _process(_delta: float) -> void:
+	_poll_world_freeze()
+
 func _ready() -> void:
 	UiKit.apply_glass($Root)
+	process_mode = Node.PROCESS_MODE_ALWAYS  # stay interactive while the world is frozen
+	_freeze_was_visible = visible
 	# The revealed relic reads on warm letter stock; actions carry roles.
 	UiKit.apply_parchment(result_panel, UiKit.RADIUS_BUTTON)
 	UiKit.style_primary_button(scan_button)
 	UiKit.style_primary_button(equip_button)
+	UiKit.style_button(close_button, UiKit.SAGE)
 	_connect_signals()
 	
 	close_button.pressed.connect(_on_close_pressed)

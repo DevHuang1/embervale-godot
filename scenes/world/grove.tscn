@@ -28,7 +28,7 @@ subdivide_width = 64
 subdivide_height = 64
 
 [sub_resource type="BoxShape3D" id="BoxShape_terrain"]
-size = Vector3(152, 1, 152)
+size = Vector3(624, 1, 624)
 
 [sub_resource type="SphereShape3D" id="SphereShape_shard"]
 radius = 1.2
@@ -52,7 +52,7 @@ gradient = SubResource("Grad_fireflies")
 
 [sub_resource type="ParticleProcessMaterial" id="Proc_fireflies"]
 emission_shape = 3
-emission_box_extents = Vector3(70, 2.5, 70)
+emission_box_extents = Vector3(300, 2.5, 300)
 direction = Vector3(0, 1, 0)
 spread = 90.0
 initial_velocity_min = 0.15
@@ -84,7 +84,7 @@ gradient = SubResource("Grad_mist")
 
 [sub_resource type="ParticleProcessMaterial" id="Proc_mist"]
 emission_shape = 3
-emission_box_extents = Vector3(74, 1.2, 74)
+emission_box_extents = Vector3(300, 1.2, 300)
 direction = Vector3(0, 1, 0)
 spread = 180.0
 initial_velocity_min = 0.05
@@ -144,10 +144,10 @@ shader_parameter/rock_normal_tex = ExtResource("stone_normal")
 shader_parameter/rock_rough_tex = ExtResource("stone_rough")
 
 [sub_resource type="BoxShape3D" id="BoxShape_wall_ew"]
-size = Vector3(152, 4, 2)
+size = Vector3(600, 4, 2)
 
 [sub_resource type="BoxShape3D" id="BoxShape_wall_ns"]
-size = Vector3(2, 4, 152)
+size = Vector3(2, 4, 600)
 
 [node name="Grove" type="Node3D"]
 script = ExtResource("1_wm")
@@ -177,11 +177,10 @@ light_color = Color(1.0, 0.93, 0.78, 1)
 light_energy = 1.55
 light_angular_distance = 0.45
 shadow_enabled = true
-directional_shadow_max_distance = 96.0
+directional_shadow_max_distance = 260.0
 shadow_bias = 0.05
 shadow_normal_bias = 0.3
 shadow_blur = 0.8
-
 [node name="WarmLights" type="Node3D" parent="."]
 
 [node name="WarmLight1" type="OmniLight3D" parent="WarmLights"]
@@ -255,7 +254,7 @@ lifetime = 10.0
 preprocess = 2.0
 speed_scale = 0.5
 local_coords = false
-visibility_aabb = AABB(-32, -4, -32, 64, 16, 64)
+visibility_aabb = AABB(-300, -2, -300, 600, 12, 600)
 process_material = SubResource("Proc_fireflies")
 draw_pass_1 = SubResource("Quad_firefly")
 
@@ -267,7 +266,7 @@ lifetime = 8.0
 preprocess = 1.0
 speed_scale = 0.3
 local_coords = false
-visibility_aabb = AABB(-32, -2, -32, 64, 12, 64)
+visibility_aabb = AABB(-300, -2, -300, 600, 12, 600)
 process_material = SubResource("Proc_mist")
 draw_pass_1 = SubResource("Quad_mist")
 
@@ -279,19 +278,19 @@ collision_layer = 32
 collision_mask = 0
 
 [node name="WallEast" type="CollisionShape3D" parent="WorldBounds"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 75, 2, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 301, 2, 0)
 shape = SubResource("BoxShape_wall_ns")
 
 [node name="WallWest" type="CollisionShape3D" parent="WorldBounds"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -75, 2, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -301, 2, 0)
 shape = SubResource("BoxShape_wall_ns")
 
 [node name="WallNorth" type="CollisionShape3D" parent="WorldBounds"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, -75)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, -301)
 shape = SubResource("BoxShape_wall_ew")
 
 [node name="WallSouth" type="CollisionShape3D" parent="WorldBounds"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 75)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 301)
 shape = SubResource("BoxShape_wall_ew")
 
 [node name="SummonPoint1" type="Marker3D" parent="."]
@@ -315,9 +314,9 @@ spring_length = 16.0
 margin = 0.5
 
 [node name="Camera3D" type="Camera3D" parent="CameraRig/SpringArm"]
-fov = 40.0
+fov = 55.0
 near = 0.1
-far = 220.0
+far = 700.0
 current = true
 
 [node name="PlayerSpawn" type="Marker3D" parent="."]

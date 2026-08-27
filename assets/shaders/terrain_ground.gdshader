@@ -24,6 +24,11 @@ uniform float patch_scale : hint_range(0.5, 32.0) = 6.0;
 uniform float dirt_amount : hint_range(0.0, 1.0) = 0.45;
 uniform float speckle_strength : hint_range(0.0, 1.0) = 0.35;
 uniform float roughness : hint_range(0.0, 1.0) = 1.0;
+uniform vec3 realm_tint : source_color = vec3(1.0);
+uniform float realm_tint_strength : hint_range(0.0, 1.0) = 0.0;
+uniform float moisture_strength : hint_range(0.0, 1.0) = 0.0;
+uniform vec3 moss_color : source_color = vec3(0.22, 0.42, 0.24);
+uniform float moss_strength : hint_range(0.0, 1.0) = 0.0;
 
 // --- Scanned PBR layers (CC0 sets from assets/textures/pbr/) ---
 uniform sampler2D grass_tex : source_color, hint_default_white;
@@ -40,9 +45,9 @@ uniform sampler2D sand_rough : hint_default_white;
 uniform sampler2D rock_rough : hint_default_white;
 
 // World units per texture tile
-uniform float uv_world_scale : hint_range(0.02, 1.0) = 0.115;
+uniform float uv_world_scale : hint_range(0.02, 3.0) = 0.9;
 // How strongly detail textures modulate the tint colors (0 = flat colors)
-uniform float tex_blend : hint_range(0.0, 1.0) = 0.82;
+uniform float tex_blend : hint_range(0.0, 1.0) = 0.95;
 // Sandy dry patches on flat open ground
 uniform float sand_amount : hint_range(0.0, 1.0) = 0.34;
 
@@ -62,7 +67,7 @@ uniform float pom_near : hint_range(4.0, 48.0) = 15.0;
 uniform int debug_view = 0;
 
 // Close-range micro relief from the blended per-layer normal maps
-uniform float normal_strength : hint_range(0.0, 2.0) = 0.95;
+uniform float normal_strength : hint_range(0.0, 3.0) = 1.4;
 // Broad geometric relief from the analytic height field
 uniform float bump_strength : hint_range(0.0, 2.0) = 0.42;
 uniform float detail_scale : hint_range(0.05, 8.0) = 0.85;
@@ -70,6 +75,12 @@ uniform float detail_scale : hint_range(0.05, 8.0) = 0.85;
 // Realm accent: sparse glowing flecks (ember, fen-light, moonmoss).
 uniform vec3 accent_color : source_color = vec3(0.96, 0.72, 0.29);
 uniform float accent_strength : hint_range(0.0, 1.0) = 0.0;
+
+// Visual richness: brightness boost + domain-warped speckle + ember flecks
+uniform float terrain_brightness : hint_range(0.5, 2.0) = 1.28;
+uniform float detail_warp_amount : hint_range(0.0, 4.0) = 0.9;
+uniform float ember_fleck_density : hint_range(0.0, 0.5) = 0.045;
+uniform float ember_fleck_intensity : hint_range(0.0, 4.0) = 0.85;
 
 // --- Persistent ground wear (TerrainWear splats via WorldState global) ---
 global uniform sampler2D world_wear_map;
@@ -256,7 +267,18 @@ void fragment() {
 	col = mix(col, stone_color * 1.22,
 		pebble * speckle_strength * 0.8 * (1.0 - wr));
 
-	ALBEDO = col;
+		float realm_field = fbm(wp * 0.024 + vec2(31.7, 11.4));
+		float moisture_field = fbm(wp * 0.080 + vec2(8.3, 19.1));
+		float moisture_mask = smoothstep(0.44, 0.80, moisture_field);
+		vec3 tint_mix = mix(vec3(1.0), realm_tint, realm_tint_strength);
+		col *= tint_mix;
+		float moss_mask = moss_strength * mix(0.35, 1.0, moisture_strength)
+			* moisture_mask * (1.0 - wr) * flatness;
+		col = mix(col, moss_color * (0.78 + realm_field * 0.22), clamp(moss_mask, 0.0, 1.0));
+		// Moist realms get a restrained darkening/wet sheen without flattening PBR layers.
+		float wet_response = moisture_strength * moisture_mask * (1.0 - wr) * 0.18;
+		col = mix(col, col * 0.90 + moss_color * 0.04, clamp(wet_response, 0.0, 1.0));
+		ALBEDO = col;
 
 	if (debug_view == 1) {
 		ALBEDO = vec3(wg, wd, ws + wrr);
@@ -269,7 +291,8 @@ void fragment() {
 	float rs = texture(sand_rough, uvs).r;
 	float rk = texture(rock_rough, uvr).r;
 	float r_out = (wg * rg + wd * rd + ws * rs + wrr * rk) * roughness;
-	r_out *= mix(1.0, 0.82, wr);
+		r_out *= mix(1.0, 0.82, wr);
+		r_out *= mix(1.0, 0.78, clamp(moisture_strength * moisture_mask, 0.0, 1.0));
 
 	// --- Relief stack ---
 	// 1) Broad geometric swell from the analytic height field
@@ -320,6 +343,20 @@ void fragment() {
 		ROUGHNESS = mix(ROUGHNESS, 1.0, wear * 0.6);
 	}
 
+	// Domain-warped speckle: breaks up grain repetition like terrain_moss
+	// Uses 46.0 for fine speckle grain (detail_scale is 0.85 for PBR UVs)
+	float speckle_ds = 46.0;
+	vec2 warp = vec2(
+		vnoise(wp * speckle_ds * 0.37 + vec2(7.7, 3.1)),
+		vnoise(wp * speckle_ds * 0.41 + vec2(91.2, 61.9)));
+	float warped_speckle = vnoise(
+		wp * speckle_ds * 2.13 + vec2(31.4, 61.8) + warp * detail_warp_amount);
+	float speckle = (warped_speckle - 0.5) * 0.16;
+
+	// Apply brightness boost and speckle detail
+	ALBEDO = clamp(ALBEDO * terrain_brightness * (1.0 + speckle),
+		vec3(0.0), vec3(1.0));
+
 	// Realm accent flecks: sparse emissive speckles keyed to world space
 	if (accent_strength > 0.001) {
 		float fn = hash21(floor(world_pos.xz * 4.0) + vec2(7.7, 3.3));
@@ -327,4 +364,13 @@ void fragment() {
 		ALBEDO = mix(ALBEDO, accent_color, band * 0.8);
 		EMISSION += accent_color * band;
 	}
+
+	// Ember flecks: twinkling warm sparks scattered across grassy ground
+	float fleck_ds = 46.0;
+	float fleck_n = vnoise(wp * fleck_ds * 3.17 + vec2(91.7, 41.3));
+	float fleck_threshold = 1.0 - ember_fleck_density;
+	float fleck = smoothstep(fleck_threshold, fleck_threshold + 0.012, fleck_n);
+	fleck *= step(0.35, flatness) * (1.0 - rock_mask);
+	float twinkle = 0.75 + 0.25 * sin(TIME * 2.1 + fleck_n * 47.0);
+	EMISSION += accent_color * fleck * ember_fleck_intensity * twinkle;
 }

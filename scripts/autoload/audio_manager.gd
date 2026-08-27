@@ -32,6 +32,7 @@ var _cue_streams: Dictionary = {}   # cue name -> Array[AudioStreamWAV]
 const SETTINGS_PATH := "user://embervale_settings.cfg"
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS  # keep music/UI sounds alive behind frozen-world interfaces
 	_load_settings()
 	_apply_volumes()
 	_load_cue_config()
@@ -714,6 +715,26 @@ func _render_cue(name_: String, variant: int) -> PackedFloat32Array:
 			_hum(b, 0.13, 0.12, 165.0, 150.0, 0.18, 2)
 			_hum(b, 0.26, 0.14, 112.0, 96.0, 0.16, 2)      # wilting creaks
 			_noise(b, rng, 0.36, 0.18, 0.16, 18.0, 0.30)   # soft spore puff
+		# --- Spitter (ranged venom caster) ---
+		"venom_lob":
+			# Wet gurgle climb into a spit — fleshy, unnerving
+			b.resize(int(0.28 * SYNTH_SR))
+			_sweep_tone(b, 0.0, 0.10, 240.0, 120.0, 0.40, 9.0)
+			_hum(b, 0.03, 0.10, 150.0, 96.0, 0.22, 2)
+			_noise(b, rng, 0.12, 0.10, 0.5, 38.0, 0.9)     # spit pop
+			_whoosh(b, rng, 0.10, 0.16, 0.42, 0.5, 0.35)
+		"venom_hit":
+			# Slick splash: bright spatter over a low tonal drop
+			b.resize(int(0.22 * SYNTH_SR))
+			_noise(b, rng, 0.0, 0.06, 0.5, 46.0, 0.85)
+			_sweep_tone(b, 0.004, 0.16, 640.0, 180.0, 0.34, 13.0)
+			_crackle(b, rng, 0.02, 0.12, 36.0, 0.2)
+		"enemy_spawn":
+			# Rising portal shimmer that resolves into a materializing thud
+			b.resize(int(0.42 * SYNTH_SR))
+			_hum(b, 0.0, 0.22, 200.0, 520.0, 0.20, 3)
+			_sweep_tone(b, 0.16, 0.14, 880.0, 1400.0, 0.18, 10.0)
+			_sweep_tone(b, 0.30, 0.10, 300.0, 120.0, 0.4, 14.0)  # landing thud
 		# --- Boss ---
 		"boss_stomp":
 			b.resize(int(0.5 * SYNTH_SR))

@@ -14,10 +14,29 @@ class_name ShopMenu
 
 func _ready() -> void:
 	UiKit.apply_glass($Root)
+	process_mode = Node.PROCESS_MODE_ALWAYS  # stay interactive while the world is frozen
+	_freeze_was_visible = visible
 	UiKit.style_button(close_button, UiKit.SAGE)
-	close_button.add_theme_font_size_override("font_size", 14)
+	close_button.add_theme_font_size_override("font_size", 16)
+	close_button.pressed.connect(close)
 	game_state.gold_changed.connect(_on_gold_changed)
 	_refresh()
+
+var _freeze_was_visible := false
+
+## Freeze/resume the world whenever this interface toggles, whichever
+## code path opened or closed it.
+func _poll_world_freeze() -> void:
+	if visible == _freeze_was_visible:
+		return
+	_freeze_was_visible = visible
+	if visible:
+		game_state.push_world_freeze()
+	else:
+		game_state.pop_world_freeze()
+
+func _process(_delta: float) -> void:
+	_poll_world_freeze()
 
 func open() -> void:
 	visible = true
@@ -56,7 +75,7 @@ func _build_row(stock: Dictionary) -> Control:
 		if stock.kind == "weapon" else GameState.ARMOR_DEFS.get(stock.id, {})
 	var glyph := Label.new()
 	glyph.text = str(def.get("glyph", "?"))
-	UiKit.style_label(glyph, "", 22)
+	UiKit.style_label(glyph, "", 26)
 	hbox.add_child(glyph)
 
 	var info := VBoxContainer.new()
@@ -65,23 +84,23 @@ func _build_row(stock: Dictionary) -> Control:
 
 	var name_label := Label.new()
 	name_label.text = str(def.get("name", stock.id))
-	UiKit.style_label(name_label, &"MenuTitle", 15)
+	UiKit.style_label(name_label, &"MenuTitle", 19)
 	info.add_child(name_label)
 
 	var stat_label := Label.new()
 	stat_label.text = _stat_line(stock.kind, def)
-	UiKit.style_label(stat_label, &"Caption", 12)
+	UiKit.style_label(stat_label, &"Caption", 15)
 	info.add_child(stat_label)
 
 	var desc := Label.new()
 	desc.text = str(def.get("desc", ""))
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(desc, &"Caption", 11)
+	UiKit.style_label(desc, &"Caption", 14)
 	info.add_child(desc)
 
 	var price := int(stock.price)
 	var button := Button.new()
-	button.custom_minimum_size = Vector2(150, 0)
+	button.custom_minimum_size = Vector2(200, 0)
 	var owned: bool = game_state.owns_shop_item(str(stock.id))
 	if equipped:
 		button.text = "EQUIPPED"

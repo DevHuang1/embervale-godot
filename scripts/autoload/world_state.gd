@@ -16,7 +16,7 @@ const INTENSITY_RISE := 0.55      # per second while in combat
 const INTENSITY_DECAY := 0.22     # per second while exploring
 const IMPACT_BUMP := 0.16         # per registered hit
 const CORRUPTION_DECAY := 0.03    # per second; corruption has no source yet
-const WEAR_BOUNDS := Rect2(-76, -76, 152, 152)
+const WEAR_BOUNDS := Rect2(-300, -300, 600, 600)
 const HERO_PUSH_RADIUS := 2.4
 
 # --- Mood state (all session-only by design) ---

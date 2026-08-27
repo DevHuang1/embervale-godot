@@ -7,7 +7,7 @@ class_name SatchelUI
 @onready var game_state: GameState = GameState
 @onready var items_vbox: VBoxContainer = $Root/VBox/ItemsList/ItemsVBox
 @onready var count_label: Label = $Root/VBox/Header/CountLabel
-@onready var close_button: TextureButton = $Root/VBox/Header/CloseButton
+@onready var close_button: Button = $Root/VBox/Header/CloseButton
 @onready var weapon_name: Label = $Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon/WeaponInfo/WeaponName
 @onready var weapon_stats: Label = $Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon/WeaponInfo/WeaponStats
 @onready var forge_button: Button = $Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon/ForgeButton
@@ -18,12 +18,15 @@ var _skill_cd_labels: Array[Label] = []
 
 func _ready() -> void:
 	UiKit.apply_glass($Root)
+	process_mode = Node.PROCESS_MODE_ALWAYS  # stay interactive while the world is frozen
+	_freeze_was_visible = visible
 	# Warm letter-stock interiors for the gear card and class footer so
 	# stat text reads against the dark glass frame.
 	UiKit.apply_parchment($Root/VBox/ForgedGear)
 	UiKit.apply_parchment($Root/VBox/ClassFooter)
 	UiKit.style_button(forge_button)
-	forge_button.add_theme_font_size_override("font_size", 13)
+	forge_button.add_theme_font_size_override("font_size", 18)
+	UiKit.style_button(close_button, UiKit.SAGE)
 	_connect_signals()
 	_rebuild_inventory()
 	_update_forged_gear()
@@ -33,7 +36,21 @@ func _ready() -> void:
 	close_button.pressed.connect(_on_close_pressed)
 	forge_button.pressed.connect(_on_forge_pressed)
 
+var _freeze_was_visible := false
+
+## Freeze/resume the world whenever this interface toggles, whichever
+## code path opened or closed it.
+func _poll_world_freeze() -> void:
+	if visible == _freeze_was_visible:
+		return
+	_freeze_was_visible = visible
+	if visible:
+		game_state.push_world_freeze()
+	else:
+		game_state.pop_world_freeze()
+
 func _process(_delta: float) -> void:
+	_poll_world_freeze()
 	for slot in _skill_cd_labels.size():
 		if slot < 3:
 			_skill_cd_labels[slot].text = game_state.get_slot_cooldown_text(slot)
@@ -59,7 +76,7 @@ func _rebuild_inventory() -> void:
 
 func _add_item_row(item: Dictionary) -> void:
 	var panel = PanelContainer.new()
-	panel.add_theme_constant_override("panel_inset", 10)
+	panel.add_theme_constant_override("panel_inset", 14)
 	panel.add_theme_stylebox_override("panel", UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON))
 	
 	var hbox = HBoxContainer.new()
@@ -67,7 +84,7 @@ func _add_item_row(item: Dictionary) -> void:
 	
 	var glyph = Label.new()
 	glyph.text = item.glyph
-	UiKit.style_label(glyph, "", 22)
+	UiKit.style_label(glyph, "", 26)
 	hbox.add_child(glyph)
 	
 	var info = VBoxContainer.new()
@@ -75,7 +92,7 @@ func _add_item_row(item: Dictionary) -> void:
 	
 	var name_label = Label.new()
 	name_label.text = "%s ×%d" % [item.name, item.quantity]
-	UiKit.style_label(name_label, &"MenuTitle", 14)
+	UiKit.style_label(name_label, &"MenuTitle", 18)
 	info.add_child(name_label)
 	
 	var rarity_colors = {
@@ -87,18 +104,19 @@ func _add_item_row(item: Dictionary) -> void:
 	
 	var meta_label = Label.new()
 	meta_label.text = "%s · %s" % [["Common", "Uncommon", "Rare"][item.rarity], ["Consumable", "Relic", "Quest"][item.kind]]
-	UiKit.style_label(meta_label, &"Caption", 11)
+	UiKit.style_label(meta_label, &"Caption", 15)
 	meta_label.add_theme_color_override("font_color", rarity_color)
 	info.add_child(meta_label)
 	
 	var stats_label = Label.new()
 	stats_label.text = " · ".join(item.stats)
-	UiKit.style_label(stats_label, &"Caption", 11)
+	UiKit.style_label(stats_label, &"Caption", 15)
 	info.add_child(stats_label)
 	
 	if item.kind == 0 and item.quantity > 0 and item.use_label:  # Consumable
 		var use_btn = Button.new()
 		use_btn.text = item.use_label
+		use_btn.custom_minimum_size = Vector2(150, 0)
 		UiKit.style_secondary_button(use_btn)
 		use_btn.pressed.connect(_on_use_item.bind(item.id))
 		hbox.add_child(use_btn)
@@ -146,19 +164,19 @@ func _rebuild_armor_row() -> void:
 	var armor: Dictionary = game_state.equipped_armor
 	var glyph := Label.new()
 	glyph.text = armor.get("glyph", "○") if not armor.is_empty() else "○"
-	UiKit.style_label(glyph, "", 22)
+	UiKit.style_label(glyph, "", 26)
 	row.add_child(glyph)
 
 	var info := VBoxContainer.new()
 	row.add_child(info)
 	var name_label := Label.new()
 	name_label.text = str(armor.get("name", "TRAVELING LIGHT"))
-	UiKit.style_label(name_label, &"MenuTitle", 13)
+	UiKit.style_label(name_label, &"MenuTitle", 18)
 	info.add_child(name_label)
 	var desc := Label.new()
 	desc.text = str(armor.get("desc", "No armor equipped — visit the Ember Trader.")) \
 		if not armor.is_empty() else "No armor equipped — visit the Ember Trader."
-	UiKit.style_label(desc, &"Caption", 11)
+	UiKit.style_label(desc, &"Caption", 15)
 	info.add_child(desc)
 
 ## One panel per skill in the equipped weapon's kit (1..3 slots)
@@ -184,14 +202,14 @@ func _rebuild_skill_kit() -> void:
 		var rune_tint := Color(0.62, 0.55, 0.96) \
 			if str(game_state.equipped_weapon.get("style")) == "magic" \
 			else Color(0.96, 0.84, 0.47)
-		UiKit.style_label(rune, "", 12)
+		UiKit.style_label(rune, "", 16)
 		rune.add_theme_color_override("font_color", rune_tint)
 		header.add_child(rune)
 		var cd := Label.new()
 		cd.text = game_state.get_slot_cooldown_text(i)
 		cd.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		cd.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		UiKit.style_label(cd, &"Caption", 10)
+		UiKit.style_label(cd, &"Caption", 14)
 		header.add_child(cd)
 		_skill_cd_labels.append(cd)
 
@@ -200,7 +218,7 @@ func _rebuild_skill_kit() -> void:
 		desc.text = str(sk.get("desc", fallback))
 		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		desc.custom_minimum_size = Vector2(180, 0)
-		UiKit.style_label(desc, &"Caption", 11)
+		UiKit.style_label(desc, &"Caption", 15)
 		vbox.add_child(desc)
 
 func _on_close_pressed() -> void:

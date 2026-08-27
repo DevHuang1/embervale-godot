@@ -29,6 +29,8 @@ var _points_at_open := 0
 
 func _ready() -> void:
 	visible = false
+	process_mode = Node.PROCESS_MODE_ALWAYS  # stay interactive while the world is frozen
+	_freeze_was_visible = visible
 	UiKit.apply_parchment($Root/Center/Panel)
 	UiKit.style_primary_button(confirm_button)
 	UiKit.style_secondary_button(reset_button)
@@ -48,6 +50,22 @@ func open() -> void:
 	_pending.clear()
 	visible = true
 	_refresh()
+
+var _freeze_was_visible := false
+
+## Freeze/resume the world whenever this interface toggles, whichever
+## code path opened or closed it.
+func _poll_world_freeze() -> void:
+	if visible == _freeze_was_visible:
+		return
+	_freeze_was_visible = visible
+	if visible:
+		game_state.push_world_freeze()
+	else:
+		game_state.pop_world_freeze()
+
+func _process(_delta: float) -> void:
+	_poll_world_freeze()
 
 func close() -> void:
 	if not _pending.is_empty():
@@ -77,7 +95,7 @@ func _refresh() -> void:
 			Color(0.56, 0.67, 0.45)))
 		rows_grid.add_child(_value_label(cur, cur + pend))
 		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(52, 34)
+		btn.custom_minimum_size = Vector2(64, 48)
 		btn.text = "+"
 		UiKit.style_secondary_button(btn)
 		btn.disabled = game_state.stat_points - _pending_total() <= 0
@@ -90,7 +108,7 @@ func _tag(txt: String) -> Label:
 	var l := Label.new()
 	l.text = txt
 	l.add_theme_font_override("font", load("res://assets/fonts/PressStart2P-Regular.ttf"))
-	l.add_theme_font_size_override("font_size", 14)
+	l.add_theme_font_size_override("font_size", 18)
 	l.add_theme_color_override("font_color", UiKit.EMBER)
 	return l
 
@@ -98,7 +116,7 @@ func _label(txt: String, col: Color) -> Label:
 	var l := Label.new()
 	l.text = txt
 	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	UiKit.style_label(l, &"Caption", 12)
+	UiKit.style_label(l, &"Caption", 15)
 	l.add_theme_color_override("font_color", col)
 	return l
 

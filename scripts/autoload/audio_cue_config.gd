@@ -36,6 +36,11 @@ extends Resource
 	"spore_burst": {"volume_db": -6.5, "pitch_min": 0.9, "pitch_max": 1.12, "bus": "SFX", "variants": 2},
 	"hushling_death": {"volume_db": -8.0, "pitch_min": 0.95, "pitch_max": 1.05, "bus": "SFX", "variants": 2},
 
+	# --- Spitter (ranged venom caster) ---
+	"venom_lob": {"volume_db": -7.0, "pitch_min": 0.92, "pitch_max": 1.08, "bus": "SFX", "variants": 2},
+	"venom_hit": {"volume_db": -6.0, "pitch_min": 0.9, "pitch_max": 1.1, "bus": "SFX", "variants": 2},
+	"enemy_spawn": {"volume_db": -7.5, "pitch_min": 0.95, "pitch_max": 1.05, "bus": "SFX", "variants": 2},
+
 	# --- Boss ---
 	"boss_stomp": {"volume_db": -4.5, "pitch_min": 0.94, "pitch_max": 1.06, "bus": "SFX", "variants": 2},
 	"boss_death": {"volume_db": -4.0, "pitch_min": 0.97, "pitch_max": 1.03, "bus": "SFX", "variants": 2},

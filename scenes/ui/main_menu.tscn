@@ -151,15 +151,15 @@ alignment = 1
 theme_override_constants/separation = 16
 
 [node name="ConfirmYes" type="Button" parent="Root/HeroCard/HeroVBox/ConfirmCard/ConfirmVBox/ConfirmRow"]
-custom_minimum_size = Vector2(0, 64)
+custom_minimum_size = Vector2(0, 72)
 layout_mode = 2
-theme_override_font_sizes/font_size = 17
+theme_override_font_sizes/font_size = 20
 text = "BEGIN ANEW"
 
 [node name="ConfirmNo" type="Button" parent="Root/HeroCard/HeroVBox/ConfirmCard/ConfirmVBox/ConfirmRow"]
-custom_minimum_size = Vector2(0, 64)
+custom_minimum_size = Vector2(0, 72)
 layout_mode = 2
-theme_override_font_sizes/font_size = 17
+theme_override_font_sizes/font_size = 20
 text = "NOT YET"
 
 [node name="SecondaryRow" type="HBoxContainer" parent="Root/HeroCard/HeroVBox"]
@@ -168,20 +168,23 @@ alignment = 1
 theme_override_constants/separation = 14
 
 [node name="ContinueButton" type="Button" parent="Root/HeroCard/HeroVBox/SecondaryRow"]
-custom_minimum_size = Vector2(172, 56)
+custom_minimum_size = Vector2(190, 64)
 layout_mode = 2
 disabled = true
 text = "CONTINUE"
+theme_override_font_sizes/font_size = 21
 
 [node name="SettingsButton" type="Button" parent="Root/HeroCard/HeroVBox/SecondaryRow"]
-custom_minimum_size = Vector2(172, 56)
+custom_minimum_size = Vector2(190, 64)
 layout_mode = 2
 text = "SETTINGS"
+theme_override_font_sizes/font_size = 21
 
 [node name="QuitButton" type="Button" parent="Root/HeroCard/HeroVBox/SecondaryRow"]
-custom_minimum_size = Vector2(172, 56)
+custom_minimum_size = Vector2(190, 64)
 layout_mode = 2
 text = "QUIT"
+theme_override_font_sizes/font_size = 21
 
 [node name="FooterHint" type="Label" parent="Root"]
 layout_mode = 1

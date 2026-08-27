@@ -19,7 +19,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 
 [node name="Panel" type="PanelContainer" parent="Root/Center"]
-custom_minimum_size = Vector2(680, 460)
+custom_minimum_size = Vector2(740, 560)
 
 [node name="VBox" type="VBoxContainer" parent="Root/Center/Panel"]
 theme_override_constants/separation = 12
@@ -54,18 +54,21 @@ alignment = 1
 theme_override_constants/separation = 18
 
 [node name="Confirm" type="Button" parent="Root/Center/Panel/VBox/Footer"]
-custom_minimum_size = Vector2(170, 52)
+custom_minimum_size = Vector2(190, 60)
 layout_mode = 2
 text = "CONFIRM"
 disabled = true
+theme_override_font_sizes/font_size = 20
 
 [node name="Reset" type="Button" parent="Root/Center/Panel/VBox/Footer"]
-custom_minimum_size = Vector2(140, 52)
+custom_minimum_size = Vector2(160, 60)
 layout_mode = 2
 text = "RESET"
 disabled = true
+theme_override_font_sizes/font_size = 20
 
 [node name="Close" type="Button" parent="Root/Center/Panel/VBox/Footer"]
-custom_minimum_size = Vector2(140, 52)
+custom_minimum_size = Vector2(160, 60)
 layout_mode = 2
 text = "CLOSE"
+theme_override_font_sizes/font_size = 20

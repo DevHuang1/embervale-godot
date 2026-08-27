@@ -143,15 +143,20 @@ func _spawn_wave(stage: int) -> void:
 
 func _spawn_pack_enemy(origin: Vector3, realm_id: String, hard: bool,
 		idx: int, total: int) -> void:
-	var scene: PackedScene = load("res://scenes/entities/hushling.tscn")
+	var v := Bestiary.variant_for(realm_id, "hard" if hard else "normal")
+	if v.is_empty():
+		return
+	# Ranged "spitter" kin get their own rigged scene; everything else is
+	# the classic hushling (recolored per realm by CharacterModelData).
+	var kind := str(v.get("kind", "hushling"))
+	var scene_path := "res://scenes/entities/spitter.tscn" \
+		if kind == "spitter" else "res://scenes/entities/hushling.tscn"
+	var scene: PackedScene = load(scene_path)
 	if scene == null:
 		return
 	var enemy: Node3D = scene.instantiate()
 	add_child(enemy)
 	enemy.global_position = _pack_spot(origin, idx, total)
-	var v := Bestiary.variant_for(realm_id, "hard" if hard else "normal")
-	if v.is_empty():
-		return
 	var md := CharacterModelData.new()
 	md.display_name = str(v.get("display", "Hushling"))
 	md.model_scale = float(v.get("scale", 1.0))
@@ -163,6 +168,14 @@ func _spawn_pack_enemy(origin: Vector3, realm_id: String, hard: bool,
 	md.configure_entity(enemy)
 	if bool(v.get("volley", false)) and "thorn_volley" in enemy:
 		enemy.thorn_volley = true
+	# Spawn read: realm-tinted portal + positional cue so the pack materializes
+	# with clear audio/visual feedback instead of silently popping in.
+	var realm: Dictionary = Bestiary.REALMS.get(realm_id, {})
+	var portal_color: Color = Color(realm.get("mist_tint",
+		Color(0.65, 0.75, 0.72)))
+	CombatFx.spawn_spawn_portal(self, enemy.global_position, portal_color)
+	if AudioManager.has_method("play_synth_at"):
+		AudioManager.play_synth_at(enemy, "enemy_spawn", 0.0)
 	_pack.append(enemy)
 
 func _pack_spot(origin: Vector3, idx: int, total: int) -> Vector3:
@@ -345,10 +358,10 @@ func _show_altar(practice: bool) -> void:
 	add_child(_altar)
 	_altar.practice = practice
 	_altar.resolved.connect(_on_altar_resolved.bind(practice))
-	get_tree().paused = true
+	game_state.push_world_freeze()
 
 func _on_altar_resolved(customized: bool, practice: bool) -> void:
-	get_tree().paused = false
+	game_state.pop_world_freeze()
 	if is_instance_valid(_altar):
 		_altar.queue_free()
 	_altar = null

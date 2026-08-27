@@ -8,9 +8,14 @@ extends Node3D
 ## when clips exist it plays them; when they don't, gameplay code keeps
 ## using the procedural animator untouched (see CharacterRigLoader).
 
+signal cue_impact(cue: String)
+
 var player: AnimationPlayer = null
 var tree: AnimationTree = null
 var _current_cue := ""
+var _current_clip := ""
+var _cue_elapsed := 0.0
+var _cue_impact_fired := false
 
 ## Gameplay cue -> likely clip names in imported packs (Quaternius and
 ## friends name clips "Idle", "Walk_01", "Attack", ... not our cue ids).
@@ -73,6 +78,9 @@ func play_cue(cue: String, cross: float = 0.22) -> bool:
 		_current_cue = ""
 		return false
 	_current_cue = cue
+	_current_clip = clip
+	_cue_elapsed = 0.0
+	_cue_impact_fired = false
 	# Locomotion/idle clips must loop; one-shots (attack/death) hold last frame.
 	if cue in _LOOPING_CUES:
 		player.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
@@ -90,6 +98,9 @@ func stop() -> void:
 	if player != null:
 		player.stop()
 	_current_cue = ""
+	_current_clip = ""
+	_cue_elapsed = 0.0
+	_cue_impact_fired = false
 
 func current_cue() -> String:
 	return _current_cue
@@ -106,7 +117,35 @@ var state_provider: Callable = Callable()
 var _last_cue := ""
 const _LOOPING_CUES := ["idle", "walk", "run"]
 
-func _process(_delta: float) -> void:
+func _impact_fraction(cue: String) -> float:
+	match cue:
+		"heavy":
+			return 0.52
+		"buff":
+			return 0.42
+		"cast":
+			return 0.46
+		"light_1", "light_2", "light_3":
+			return 0.48
+		_:
+			return -1.0
+
+func _update_authored_impact(delta: float) -> void:
+	if player == null or _current_clip == "" or _cue_impact_fired:
+		return
+	var fraction := _impact_fraction(_current_cue)
+	if fraction < 0.0:
+		return
+	var animation := player.get_animation(_current_clip)
+	if animation == null:
+		return
+	_cue_elapsed += delta
+	if _cue_elapsed >= animation.length * fraction:
+		_cue_impact_fired = true
+		cue_impact.emit(_current_cue)
+
+func _process(delta: float) -> void:
+	_update_authored_impact(delta)
 	if player == null or not state_provider.is_valid():
 		return
 	var st: Dictionary = state_provider.call()

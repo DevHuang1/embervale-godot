@@ -19,7 +19,7 @@ enum BossPhase { PHASE_1, PHASE_2, PHASE_3, ENRAGE }
 @export var max_hp: int = 500
 @export var phase_thresholds: Array = [0.7, 0.3, 0.1]  # HP percentages for phase transitions
 @export var base_atk: int = 12
-@export var move_speed: float = 5.0
+@export var move_speed: float = 4.2
 @export var arena_radius: float = 20.0
 
 # Critical zone (exposed head/crown): strikes landing here hit harder
@@ -376,7 +376,7 @@ func take_damage(amount: int, knockback_dir: Vector3) -> void:
 	if boss_hp_bar:
 		boss_hp_bar.value = max(hp, 0)
 	
-	knockback_velocity = knockback_dir * (amount * 5.0)
+	knockback_velocity = knockback_dir * (amount * 3.0)
 	
 	if hp <= 0:
 		die()

@@ -12,8 +12,8 @@ func _ready() -> void:
 	burst_damage = 8
 	burst_cooldown = 4.0
 	orbit_distance = 5.8
-	lunge_speed = 23.0
-	feint_speed = 14.5
+	lunge_speed = 18.0
+	feint_speed = 11.0
 	super._ready()
 	_build_fen_flags()
 
@@ -29,9 +29,9 @@ func _rig_profile() -> String:
 
 func _enter_mire_phase() -> void:
 	mire_phase = true
-	move_speed *= 1.20
-	orbit_speed *= 1.28
-	lunge_speed *= 1.18
+	move_speed *= 1.10
+	orbit_speed *= 1.15
+	lunge_speed *= 1.10
 	burst_cooldown = maxf(2.8, burst_cooldown * 0.72)
 	burst_radius += 0.5
 	_phase_flash_timer = 0.8

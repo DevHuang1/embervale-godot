@@ -7,15 +7,16 @@ class_name GroveDressing
 ## batches), glow-mushroom clusters, ancient ruins and lit torches.
 
 @export var seed_value: int = 20260823
-@export var tree_ring_min: float = 58.0
-@export var tree_ring_max: float = 73.0
-@export var tree_count: int = 230
-@export var grove_cluster_count: int = 9
-@export var rock_count: int = 180
-@export var bush_count: int = 130
-@export var pebble_count: int = 520
-@export var tuft_count: int = 1500
-@export var scatter_radius: float = 71.0
+@export var tree_ring_min: float = 232.0
+@export var tree_ring_max: float = 292.0
+@export var tree_count: int = 360
+@export var grove_cluster_count: int = 26
+@export var rock_count: int = 320
+@export var bush_count: int = 240
+@export var pebble_count: int = 1100
+@export var tuft_count: int = 36000
+@export_range(0.5, 2.5, 0.1) var ecosystem_density: float = 1.6
+@export var scatter_radius: float = 300.0
 @export var tree_trunk_color: Color = Color(0.12, 0.095, 0.075)
 @export var tree_canopy_color: Color = Color(0.075, 0.15, 0.10)
 @export var rock_color: Color = Color(0.27, 0.29, 0.26)
@@ -42,6 +43,21 @@ func _ready() -> void:
 	_build_torches()
 	_build_realm_flavor()
 	_build_props()
+	var ecosystem := RealmEcosystem.new()
+	ecosystem.name = "RealmEcosystem"
+	ecosystem.foliage_density = ecosystem_density
+	add_child(ecosystem)
+	var ecosystem_id := "bramblewood"
+	match _realm_flavor():
+		RealmFlavor.MISTFEN:
+			ecosystem_id = "mistfen"
+		RealmFlavor.HEARTWOOD:
+			ecosystem_id = "heartwood"
+		RealmFlavor.MOONFEN:
+			ecosystem_id = "moonfen"
+		_: 
+			ecosystem_id = "bramblewood"
+	ecosystem.setup(ecosystem_id, seed_value + 1337, scatter_radius)
 
 func _realm_flavor() -> int:
 	var id := ""
@@ -210,8 +226,8 @@ func _build_trees() -> void:
 		trunks.append(Transform3D(b, Vector3(pos.x, ground_y, pos.z)))
 		canopies.append(Transform3D(b, Vector3(pos.x, ground_y + 3.05 * s, pos.z)))
 
-	_batch(trunk, bark, trunks, true, 78.0)
-	_batch(canopy, canopy_mat, canopies, true, 78.0)
+	_batch(trunk, bark, trunks, true, 310.0)
+	_batch(canopy, canopy_mat, canopies, true, 310.0)
 
 ## Small interior groves so the open plain isn't empty between landmarks
 func _build_grove_clusters() -> void:
@@ -248,8 +264,8 @@ func _build_grove_clusters() -> void:
 			var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s, s))
 			trunks.append(Transform3D(b, Vector3(p.x, gy, p.y)))
 			canopies.append(Transform3D(b, Vector3(p.x, gy + 2.5 * s, p.y)))
-	_batch(trunk, bark, trunks, true, 78.0)
-	_batch(canopy, canopy_mat, canopies, true, 78.0)
+	_batch(trunk, bark, trunks, true, 310.0)
+	_batch(canopy, canopy_mat, canopies, true, 310.0)
 
 func _build_rocks() -> void:
 	var rock := SphereMesh.new()
@@ -273,7 +289,7 @@ func _build_rocks() -> void:
 			Vector3(s, s * rng.randf_range(0.35, 0.7), s))
 		transforms.append(Transform3D(b, pos))
 
-	_batch(rock, rock_mat, transforms, true, 78.0)
+	_batch(rock, rock_mat, transforms, true, 310.0)
 
 ## Low leafy bushes for mid-distance texture
 func _build_bushes() -> void:
@@ -296,7 +312,7 @@ func _build_bushes() -> void:
 			Vector3(s, s * rng.randf_range(0.5, 0.8), s))
 		transforms.append(Transform3D(b,
 			Vector3(p.x, _ground_height(p.x, p.y) + 0.08, p.y)))
-	_batch(bush, mat, transforms, true, 78.0)
+	_batch(bush, mat, transforms, true, 310.0)
 
 ## Tiny ground stones — cheap detail that sells scale
 func _build_pebbles() -> void:
@@ -314,7 +330,7 @@ func _build_pebbles() -> void:
 			Vector3(s, s * 0.55, s * rng.randf_range(0.8, 1.2)))
 		transforms.append(Transform3D(b,
 			Vector3(p.x, _ground_height(p.x, p.y) - 0.02, p.y)))
-	_batch(pebble, mat, transforms, false, 78.0)
+	_batch(pebble, mat, transforms, false, 310.0)
 
 func _build_pale_path() -> void:
 	var stone := BoxMesh.new()
@@ -361,21 +377,21 @@ func _build_pale_path() -> void:
 			transforms.append(Transform3D(
 				arena_basis.scaled(Vector3.ONE * rng.randf_range(0.7, 1.2)), sp))
 
-	_batch(stone, stone.material, transforms, false, 78.0)
+	_batch(stone, stone.material, transforms, false, 310.0)
 
 func _build_tufts() -> void:
 	var tuft := CylinderMesh.new()
-	tuft.top_radius = 0.02
-	tuft.bottom_radius = 0.06
-	tuft.height = 0.34
-	tuft.radial_segments = 5
+	tuft.top_radius = 0.03
+	tuft.bottom_radius = 0.09
+	tuft.height = 0.6
+	tuft.radial_segments = 3
 	tuft.rings = 1
 
 	var grass := ShaderMaterial.new()
 	grass.shader = load("res://assets/shaders/grass_blade.gdshader")
 	grass.set_shader_parameter("blade_color", tuft_color)
 	grass.set_shader_parameter("tip_color", tuft_color.lightened(0.45))
-	grass.set_shader_parameter("blade_height", 0.34)
+	grass.set_shader_parameter("blade_height", 0.6)
 
 	var transforms: Array[Transform3D] = []
 	for i in tuft_count:
@@ -386,7 +402,7 @@ func _build_tufts() -> void:
 			rng.randf_range(-0.2, 0.2)))
 		transforms.append(Transform3D(b, Vector3(p.x, _ground_height(p.x, p.y), p.y)))
 
-	_batch(tuft, grass, transforms, false, 78.0)
+	_batch(tuft, grass, transforms, false, 310.0)
 
 func _build_mushrooms() -> void:
 	var lights_node := get_parent().get_node_or_null("WarmLights")
@@ -461,8 +477,8 @@ func _build_ruins() -> void:
 			fallen.append(Transform3D(tilt, Vector3(p.x, gy + 0.35, p.y)))
 		else:
 			standing.append(Transform3D(b, Vector3(p.x, gy, p.y)))
-	_batch(column, marble, standing, true, 78.0)
-	_batch(broken, marble, fallen, true, 78.0)
+	_batch(column, marble, standing, true, 310.0)
+	_batch(broken, marble, fallen, true, 310.0)
 
 	# Cracked plaza floor under the columns
 	var slab := BoxMesh.new()
@@ -478,7 +494,7 @@ func _build_ruins() -> void:
 			slabs.append(Transform3D(
 				Basis(Vector3.UP, rng.randf() * TAU),
 				Vector3(p.x, gy + 0.02, p.y)))
-	_batch(slab, slab.material, slabs, false, 78.0)
+	_batch(slab, slab.material, slabs, false, 310.0)
 
 ## Lit torches marking the road: near spawn, mid-road, arena mouth
 func _build_torches() -> void:
@@ -520,8 +536,8 @@ func _build_torches() -> void:
 		var flicker := LightFlicker.new()
 		flicker.base_energy = 1.5
 		light.add_child(flicker)
-	_batch(post, wood, posts, true, 78.0)
-	_batch(bowl, flame_mat, bowls, false, 78.0)
+	_batch(post, wood, posts, true, 310.0)
+	_batch(bowl, flame_mat, bowls, false, 310.0)
 
 ## Tiny helper node so torch flames breathe without per-frame GD cost
 class LightFlicker:
@@ -560,7 +576,7 @@ func _build_thorn_arches() -> void:
 			* Basis(Vector3.UP, rng.randf_range(-0.35, 0.35))
 		b = b.scaled(Vector3.ONE * rng.randf_range(0.9, 1.25))
 		transforms.append(Transform3D(b, Vector3(s.x, gy + 1.35, s.y)))
-	_batch(ring, briar, transforms, true, 78.0)
+	_batch(ring, briar, transforms, true, 310.0)
 
 ## MISTFEN: swaying reeds in the damp hollows and pale drowned stones.
 func _build_reeds() -> void:
@@ -593,7 +609,7 @@ func _build_reeds() -> void:
 		b = b.scaled(Vector3.ONE * rng.randf_range(0.55, 1.35))
 		transforms.append(Transform3D(b, Vector3(p.x, gy + 0.42, p.y)))
 		placed += 1
-	_batch(reed, grass, transforms, false, 78.0)
+	_batch(reed, grass, transforms, false, 310.0)
 
 func _build_drowned_stones() -> void:
 	var stone := SphereMesh.new()
@@ -619,7 +635,7 @@ func _build_drowned_stones() -> void:
 		# Half-sunk: pushed down so only the crown breaks the fen floor
 		transforms.append(Transform3D(b,
 			Vector3(p.x, gy - 0.18 * s, p.y)))
-	_batch(stone, wet, transforms, true, 78.0)
+	_batch(stone, wet, transforms, true, 310.0)
 
 ## HEARTWOOD: charred spires with ember seams and a slow drifting mote field.
 func _build_charred_spires() -> void:
@@ -661,8 +677,8 @@ func _build_charred_spires() -> void:
 			Vector3(p.x, seam_y, p.y)))
 		if i % 3 == 0 and tall_spots.size() < 5:
 			tall_spots.append(Vector3(p.x, gy + 2.6 * s, p.y))
-	_batch(spire, charred, trunks, true, 78.0)
-	_batch(seam, ember, seams, false, 78.0)
+	_batch(spire, charred, trunks, true, 310.0)
+	_batch(seam, ember, seams, false, 310.0)
 
 	for spot in tall_spots:
 		var light := OmniLight3D.new()

@@ -73,7 +73,7 @@ func _build_skill_cards() -> void:
 		btn.toggle_mode = true
 		btn.custom_minimum_size = Vector2(230, 84)
 		btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		btn.add_theme_font_size_override("font_size", 10)
+		btn.add_theme_font_size_override("font_size", 13)
 		btn.pressed.connect(_on_skill_selected.bind(sk.get("id", ""), btn))
 		skill_grid.add_child(btn)
 
@@ -82,7 +82,7 @@ func _build_sfx_buttons() -> void:
 		var btn := Button.new()
 		btn.text = PRESET_LABELS.get(str(preset), str(preset).to_upper())
 		btn.toggle_mode = true
-		btn.add_theme_font_size_override("font_size", 10)
+		btn.add_theme_font_size_override("font_size", 13)
 		btn.pressed.connect(_on_preset_selected.bind(str(preset), btn))
 		sfx_row.add_child(btn)
 

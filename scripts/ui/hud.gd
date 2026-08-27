@@ -257,11 +257,20 @@ func _update_skill_cooldowns() -> void:
 			skill_cd_labels[slot].text = ""
 			continue
 		var remaining := float(game_state.skill_cooldowns.get("slot_%d" % slot, 0.0))
-		btn.set_cooldown(remaining, float(sk.get("cooldown", 1.0)))
+		var total := float(sk.get("cooldown", 1.0))
+		btn.set_cooldown(remaining, total)
 		btn.accent = _skill_accent(str(sk.get("type", "")))
-		btn.tooltip_text = "%s (%s)" % [str(sk.get("name", "?")), SKILL_KEYS[slot]]
+		btn.tooltip_data = _build_skill_tooltip(sk, slot)
+		btn.tooltip_text = " "
 		skill_glyph_labels[slot].text = str(sk.get("glyph", ""))
-		skill_cd_labels[slot].text = "%ds" % ceili(remaining) if remaining > 0.0 else ""
+# Small countdown readout pinned on the icon while cooling; no headline
+# text when ready (the cleared radial arc + green flash already say READY).
+		if remaining > 0.0:
+			skill_cd_labels[slot].text = "%0.1f" % remaining
+			skill_cd_labels[slot].add_theme_color_override("font_color",
+				btn.accent.lightened(0.2))
+		else:
+			skill_cd_labels[slot].text = ""
 		# Vector glyph by rite family; emoji stays as fallback when the
 		# icon set has no match for the type.
 		var icon := _icon_texture(str(sk.get("type", "")))
@@ -281,6 +290,55 @@ func _update_skill_cooldowns() -> void:
 			(game_state.combat_state != GameState.CombatState.COMBAT or not target_ok))
 	attack_button.dimmed = game_state.combat_state \
 		in [GameState.CombatState.DEFEATED, GameState.CombatState.VICTORY]
+
+func _build_skill_tooltip(sk: Dictionary, slot: int) -> Dictionary:
+	var type_str := str(sk.get("type", ""))
+	var type_label := _skill_type_label(type_str)
+	var parts: Array[String] = []
+	var dmg := float(sk.get("dmg_mult", 0.0))
+	var heal := int(sk.get("heal", 0))
+	var radius := float(sk.get("radius", 0.0))
+	if dmg > 0.0:
+		parts.append("Damage ×%0.1f" % dmg)
+	if heal > 0:
+		parts.append("Heals %d" % heal)
+	if radius > 0.0:
+		parts.append("Radius %0.1f" % radius)
+	var needs_target := type_str != "heal_bloom"
+	var target_hint := ""
+	if needs_target:
+		target_hint = "✱ Targets your marked foe"
+	else:
+		target_hint = "✓ Usable anywhere — no target needed"
+	return {
+		"name": str(sk.get("name", "RITE")),
+		"key": SKILL_KEYS[slot],
+		"type_label": type_label,
+		"cooldown": float(sk.get("cooldown", 1.0)),
+		"desc": str(sk.get("desc", "")),
+		"effect": " · ".join(parts),
+		"target_hint": target_hint,
+	}
+
+func _skill_type_label(type_str: String) -> String:
+	match type_str:
+		"heal_bloom":
+			return "HEAL"
+		"explosion":
+			return "EXPLOSION"
+		"comet":
+			return "COMET"
+		"aoe":
+			return "AREA BLAST"
+		"strike":
+			return "STRIKE"
+		"whirl":
+			return "WHIRL"
+		"dash_strike":
+			return "DASH STRIKE"
+		_:
+			return type_str.to_upper()
+
 
 ## Skill buttons tint by rite family so the kit reads at thumb-glance.
 func _skill_accent(skill_type: String) -> Color:
@@ -513,7 +571,62 @@ func _on_settings_pressed() -> void:
 	settings.open()
 
 func _on_skill_pressed(slot: int) -> void:
+	# Touch-friendly skill hint: brief toast above the skill bar so players
+	# always know what the rite does / how long it's charging.
+	var sk: Dictionary = game_state.get_skill(slot)
+	if not sk.is_empty():
+		_show_skill_toast(sk)
 	InputManager.skill_slot_pressed.emit(slot)
+
+## Brief, self-hiding toast that spells out what a skill does — handy on
+## touch where there is no hover tooltip. Shows name, effect and cooldown.
+func _show_skill_toast(sk: Dictionary) -> void:
+	var toast: Label = get_node_or_null("SkillToast")
+	if toast == null:
+		toast = Label.new()
+		toast.name = "SkillToast"
+		toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		toast.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		toast.custom_minimum_size = Vector2(460, 96)
+		toast.add_theme_font_size_override("font_size", 17)
+		toast.add_theme_constant_override("shadow_offset_x", 1)
+		toast.add_theme_constant_override("shadow_offset_y", 2)
+		toast.add_theme_color_override("shadow_color", Color(0, 0, 0, 0.85))
+		# Sit just above the skill bar at the bottom-centre of the screen.
+		var anchor := Control.new()
+		anchor.name = "SkillToastAnchor"
+		anchor.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		anchor.anchor_top = 1.0
+		anchor.anchor_bottom = 1.0
+		anchor.offset_top = -204
+		anchor.offset_bottom = -108
+		anchor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		$Root.add_child(anchor)
+		anchor.add_child(toast)
+		toast.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var building := _build_skill_tooltip(sk, 0)
+	var effect := str(building.get("effect", ""))
+	var target := str(building.get("target_hint", ""))
+	var desc := str(building.get("desc", ""))
+	var lines: Array[String] = [str(building.get("name", "RITE"))]
+	if effect != "":
+		lines.append("  •  %s" % effect)
+	if target != "":
+		lines.append("  •  %s" % target)
+	elif desc != "":
+		lines.append("  •  %s" % desc)
+	toast.text = "\n".join(lines)
+	toast.modulate = Color.WHITE
+	toast.add_theme_color_override("font_color",
+		_skill_accent(str(sk.get("type", ""))))
+	toast.visible = true
+	if toast.has_meta("_tween") and toast.get_meta("_tween").is_valid():
+		toast.get_meta("_tween").kill()
+	var t := create_tween()
+	t.tween_interval(1.1)
+	t.tween_property(toast, "modulate:a", 0.0, 0.4)
+	t.tween_callback(func(): toast.visible = false)
+	toast.set_meta("_tween", t)
 
 func _on_attack_pressed() -> void:
 	InputManager.attack_pressed.emit()

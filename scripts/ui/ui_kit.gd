@@ -7,18 +7,18 @@ extends RefCounted
 ## covers default controls; these helpers cover code-built chrome.
 
 const BG_DEEP := Color(0.043, 0.090, 0.071)
-const GLASS_BG := Color(0.050, 0.075, 0.060, 0.74)
-const GLASS_BG_RAISED := Color(0.066, 0.098, 0.078, 0.80)
+const GLASS_BG := Color(0.030, 0.048, 0.038, 0.92)
+const GLASS_BG_RAISED := Color(0.038, 0.058, 0.046, 0.94)
 const EMBER := Color(0.961, 0.722, 0.255)
 const EMBER_BRIGHT := Color(1.0, 0.84, 0.47)
 const EMBER_DEEP := Color(0.78, 0.49, 0.16)
 const CREAM := Color(0.965, 0.925, 0.808)
-const CREAM_DIM := Color(0.80, 0.77, 0.66)
+const CREAM_DIM := Color(0.90, 0.87, 0.76)
 const SAGE := Color(0.56, 0.686, 0.451)
 const SAGE_DIM := Color(0.38, 0.46, 0.32)
 const DANGER := Color(0.851, 0.322, 0.227)
-const BORDER_GOLD := Color(0.961, 0.722, 0.255, 0.45)
-const BORDER_GOLD_STRONG := Color(0.961, 0.722, 0.255, 0.90)
+const BORDER_GOLD := Color(0.961, 0.722, 0.255, 0.70)
+const BORDER_GOLD_STRONG := Color(0.961, 0.722, 0.255, 1.0)
 
 # Accent family for rite-type skill buttons (lit by rite family)
 const STEEL := Color(0.58, 0.64, 0.71, 1.0)
@@ -43,7 +43,7 @@ static func glass_stylebox(raised: bool = false, border_alpha: float = 0.45,
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = GLASS_BG_RAISED if raised else GLASS_BG
 	sb.border_color = Color(BORDER_GOLD.r, BORDER_GOLD.g, BORDER_GOLD.b, border_alpha)
-	sb.set_border_width_all(1)
+	sb.set_border_width_all(2)
 	sb.set_corner_radius_all(radius)
 	sb.shadow_color = Color(0, 0, 0, 0.38)
 	sb.shadow_size = 10
@@ -74,10 +74,10 @@ static func button_stylebox(state: String, accent: Color = EMBER,
 	if state == "pressed":
 		sb.set_border_width_all(2)
 	sb.set_corner_radius_all(RADIUS_BUTTON)
-	sb.content_margin_left = 18
-	sb.content_margin_right = 18
-	sb.content_margin_top = 10
-	sb.content_margin_bottom = 10
+	sb.content_margin_left = 26
+	sb.content_margin_right = 26
+	sb.content_margin_top = 15
+	sb.content_margin_bottom = 15
 	return sb
 
 static func style_button(b: Button, accent: Color = EMBER) -> void:
@@ -85,11 +85,14 @@ static func style_button(b: Button, accent: Color = EMBER) -> void:
 		b.add_theme_stylebox_override(state, button_stylebox(state, accent))
 	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	b.add_theme_color_override("font_color", CREAM)
+	b.add_theme_font_size_override("font_size", 20)
 	b.add_theme_color_override("font_hover_color", EMBER_BRIGHT)
 	b.add_theme_color_override("font_pressed_color", EMBER)
 	b.add_theme_color_override("font_disabled_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.30))
 	b.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.55))
 	b.add_theme_constant_override("outline_size", 2)
+	b.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+	b.add_theme_constant_override("shadow_offset_y", 2)
 
 ## Big primary action: ember-lit surface instead of dark glass.
 static func style_primary_button(b: Button) -> void:
@@ -112,6 +115,9 @@ static func style_primary_button(b: Button) -> void:
 	b.add_theme_color_override("font_hover_color", Color(1, 1, 0.94))
 	b.add_theme_color_override("font_pressed_color", Color(0.96, 0.86, 0.64))
 	b.add_theme_color_override("font_disabled_color", Color(0.9, 0.87, 0.78, 0.35))
+	b.add_theme_font_size_override("font_size", 20)
+	b.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+	b.add_theme_constant_override("shadow_offset_y", 2)
 
 static func chip_style(lbl: Label, tint: Color) -> void:
 	var sb := StyleBoxFlat.new()
@@ -209,6 +215,9 @@ static func style_secondary_button(b: Button) -> void:
 	b.add_theme_color_override("font_pressed_color", SAGE)
 	b.add_theme_color_override("font_disabled_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.25))
 	b.add_theme_constant_override("outline_size", 1)
+	b.add_theme_font_size_override("font_size", 20)
+	b.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+	b.add_theme_constant_override("shadow_offset_y", 2)
 
 static func style_danger_button(b: Button) -> void:
 	for state in ["normal", "hover", "pressed", "disabled"]:
@@ -225,6 +234,9 @@ static func style_danger_button(b: Button) -> void:
 	b.add_theme_color_override("font_pressed_color", DANGER)
 	b.add_theme_color_override("font_disabled_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.25))
 	b.add_theme_constant_override("outline_size", 1)
+	b.add_theme_font_size_override("font_size", 20)
+	b.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+	b.add_theme_constant_override("shadow_offset_y", 2)
 
 ## === Typography ===
 ## Route a label through one of the Theme's font-variation families so

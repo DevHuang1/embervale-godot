@@ -57,7 +57,7 @@ static func launch(visual: Node3D, impulse: Vector3,
 		randf_range(-spin, spin), randf_range(-spin * 0.4, spin * 0.4),
 		randf_range(-spin, spin))
 	_live.append(body)
-	tree.create_timer(lifetime).timeout.connect(body._sink)
+	tree.create_timer(lifetime, false).timeout.connect(body._sink)
 	return body
 
 

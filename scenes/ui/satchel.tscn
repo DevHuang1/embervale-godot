@@ -33,9 +33,12 @@ text = "0 items carried"
 horizontal_alignment = 2
 size_flags_horizontal = 3
 
-[node name="CloseButton" type="TextureButton" parent="Root/VBox/Header"]
+[node name="CloseButton" type="Button" parent="Root/VBox/Header"]
+custom_minimum_size = Vector2(150, 56)
 layout_mode = 2
 tooltip_text = "Close (Esc)"
+text = "✕  CLOSE"
+theme_override_font_sizes/font_size = 19
 
 [node name="ItemsList" type="ScrollContainer" parent="Root/VBox"]
 layout_mode = 2

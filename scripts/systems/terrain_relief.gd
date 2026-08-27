@@ -7,13 +7,13 @@ class_name TerrainRelief
 ## zones around every landmark. Faithful to the layout (paths, quest
 ## nodes, gates) so collision and quest ranges are unaffected.
 
-@export var subdivisions: int = 128
+@export var subdivisions: int = 320
 @export var ridge_amplitude: float = 1.35
 @export var roll_amplitude: float = 0.4
 @export var carve_amplitude: float = 0.95
 @export var flatten_radius: float = 7.0
 
-const HALF_EXTENT: float = 76.0
+const HALF_EXTENT: float = 300.0
 const MAX_CREST: float = 0.6
 
 var _flatten_points: Array[Vector2] = [
@@ -40,8 +40,8 @@ var _flatten_points: Array[Vector2] = [
 ## the scene material at runtime).
 const REALM_TERRAIN := {
 	"bramblewood": {
-		"grass_color": Color(0.19, 0.30, 0.13),
-		"grass_dry": Color(0.36, 0.38, 0.15),
+		"grass_color": Color(0.30, 0.48, 0.20),
+		"grass_dry": Color(0.48, 0.46, 0.20),
 		"dirt_color": Color(0.30, 0.22, 0.13),
 		"stone_color": Color(0.38, 0.38, 0.35),
 		"crest_color": Color(0.45, 0.44, 0.40),
@@ -49,8 +49,8 @@ const REALM_TERRAIN := {
 		"accent_strength": 0.35,
 	},
 	"whispergrove": {
-		"grass_color": Color(0.21, 0.32, 0.15),
-		"grass_dry": Color(0.39, 0.40, 0.18),
+		"grass_color": Color(0.32, 0.50, 0.22),
+		"grass_dry": Color(0.50, 0.48, 0.22),
 		"dirt_color": Color(0.31, 0.24, 0.14),
 		"stone_color": Color(0.40, 0.40, 0.37),
 		"crest_color": Color(0.47, 0.46, 0.42),
@@ -58,8 +58,8 @@ const REALM_TERRAIN := {
 		"accent_strength": 0.22,
 	},
 	"mistfen": {
-		"grass_color": Color(0.12, 0.20, 0.17),
-		"grass_dry": Color(0.22, 0.29, 0.26),
+		"grass_color": Color(0.18, 0.32, 0.26),
+		"grass_dry": Color(0.30, 0.38, 0.34),
 		"dirt_color": Color(0.16, 0.21, 0.24),
 		"stone_color": Color(0.30, 0.34, 0.36),
 		"crest_color": Color(0.36, 0.41, 0.43),
@@ -68,8 +68,8 @@ const REALM_TERRAIN := {
 		"accent_strength": 0.28,
 	},
 	"heartwood": {
-		"grass_color": Color(0.26, 0.19, 0.10),
-		"grass_dry": Color(0.42, 0.27, 0.11),
+		"grass_color": Color(0.36, 0.28, 0.16),
+		"grass_dry": Color(0.52, 0.36, 0.16),
 		"dirt_color": Color(0.23, 0.15, 0.09),
 		"stone_color": Color(0.30, 0.26, 0.24),
 		"crest_color": Color(0.38, 0.31, 0.26),
@@ -77,8 +77,8 @@ const REALM_TERRAIN := {
 		"accent_strength": 0.50,
 	},
 	"moonfen": {
-		"grass_color": Color(0.20, 0.15, 0.30),
-		"grass_dry": Color(0.28, 0.20, 0.38),
+		"grass_color": Color(0.28, 0.22, 0.42),
+		"grass_dry": Color(0.36, 0.28, 0.48),
 		"dirt_color": Color(0.13, 0.10, 0.22),
 		"stone_color": Color(0.22, 0.20, 0.30),
 		"crest_color": Color(0.28, 0.25, 0.38),
@@ -226,7 +226,7 @@ func _build_mesh() -> ArrayMesh:
 
 	var am := ArrayMesh.new()
 	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	am.custom_aabb = AABB(Vector3(-78.0, -5.0, -78.0), Vector3(156.0, 16.0, 156.0))
+	am.custom_aabb = AABB(Vector3(-302.0, -5.0, -302.0), Vector3(620.0, 20.0, 620.0))
 	return am
 
 # === Deterministic noise (mirrors terrain_moss.gdshader) ===

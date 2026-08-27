@@ -501,8 +501,9 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 2
-theme_override_font_sizes = {"font_size": 14}
-theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1)}
+theme_override_font_sizes = {"font_size": 12}
+theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1), "font_shadow_color": Color(0, 0, 0, 0.75)}
+theme_override_constants = {"shadow_offset_x": 1, "shadow_offset_y": 2}
 
 [node name="Skill1Button" type="Control" parent="Root/SkillBar"]
 custom_minimum_size = Vector2(96, 96)
@@ -542,8 +543,9 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 2
-theme_override_font_sizes = {"font_size": 14}
-theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1)}
+theme_override_font_sizes = {"font_size": 12}
+theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1), "font_shadow_color": Color(0, 0, 0, 0.75)}
+theme_override_constants = {"shadow_offset_x": 1, "shadow_offset_y": 2}
 
 [node name="Skill2Button" type="Control" parent="Root/SkillBar"]
 custom_minimum_size = Vector2(96, 96)
@@ -583,5 +585,6 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 2
-theme_override_font_sizes = {"font_size": 14}
-theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1)}
+theme_override_font_sizes = {"font_size": 12}
+theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1), "font_shadow_color": Color(0, 0, 0, 0.75)}
+theme_override_constants = {"shadow_offset_x": 1, "shadow_offset_y": 2}

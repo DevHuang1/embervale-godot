@@ -13,6 +13,8 @@ class_name SettingsMenu
 
 func _ready() -> void:
 	UiKit.apply_glass($Root/Panel)
+	process_mode = Node.PROCESS_MODE_ALWAYS  # stay interactive while the world is frozen
+	_freeze_was_visible = visible
 	UiKit.style_secondary_button(back_button)
 	UiKit.style_danger_button(quit_game_button)
 	master_slider.value = audio.master_volume
@@ -67,6 +69,22 @@ func _on_sfx_changed(value: float) -> void:
 	audio.set_sfx_volume(value)
 	audio.save_settings()
 	audio.play_ui_blip()
+
+var _freeze_was_visible := false
+
+## Freeze/resume the world whenever this interface toggles, whichever
+## code path opened or closed it.
+func _poll_world_freeze() -> void:
+	if visible == _freeze_was_visible:
+		return
+	_freeze_was_visible = visible
+	if visible:
+		game_state.push_world_freeze()
+	else:
+		game_state.pop_world_freeze()
+
+func _process(_delta: float) -> void:
+	_poll_world_freeze()
 
 func _on_back_pressed() -> void:
 	audio.play_ui_back()

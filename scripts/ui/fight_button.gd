@@ -27,8 +27,18 @@ const STEEL := Color(0.58, 0.64, 0.71, 1.0)
 const WOOD := Color(0.36, 0.24, 0.13, 1.0)
 const CD_OVERLAY := Color(0.07, 0.07, 0.09, 0.88)
 
+const TT_BG := Color(0.045, 0.06, 0.08, 0.96)
+const TT_BORDER := Color(0.72, 0.55, 0.24, 0.95)
+const TT_TITLE := Color(1.0, 0.93, 0.78)
+const TT_ACCENT := Color(0.96, 0.72, 0.29)
+const TT_BODY := Color(0.94, 0.90, 0.82)
+const TT_DIM := Color(0.76, 0.70, 0.60)
+
 var active_pointer := -1
 var mouse_active := false
+# Human-readable info fed by the HUD so the custom tooltip can explain what
+# a skill does, its effect, its cooldown, and whether it needs a target.
+var tooltip_data: Dictionary = {}
 var dimmed := false:
 	set(value):
 		if dimmed == value:
@@ -38,6 +48,7 @@ var dimmed := false:
 		queue_redraw()
 var _pressed := false
 var _cooldown_ratio := 0.0
+var _cd_remaining := 0.0      # seconds left, for the on-logo countdown
 var _ready_flash := 0.0    # brief glow when a cooldown completes
 
 func _ready() -> void:
@@ -47,6 +58,7 @@ func _ready() -> void:
 ## Cooldown ring: ratio = remaining/total; 0 means ready.
 func set_cooldown(remaining: float, total: float) -> void:
 	var ratio := clampf(remaining / maxf(total, 0.01), 0.0, 1.0) if remaining > 0.0 else 0.0
+	_cd_remaining = remaining
 	# Crossing from cooling → ready sparks a one-shot flash
 	if _cooldown_ratio > 0.02 and ratio <= 0.001:
 		_flash_ready()
@@ -131,9 +143,34 @@ func _draw() -> void:
 	draw_arc(center, r, 0.0, TAU, 64,
 		Color(rim.r, rim.g, rim.b, 0.55 if dimmed else 0.9), 3.0, true)
 	if _cooldown_ratio > 0.004:
-		# Dark overlay drains clockwise from the top as the cooldown recovers
-		draw_arc(center, r, -PI * 0.5, -PI * 0.5 + TAU * _cooldown_ratio,
-			48, CD_OVERLAY, 6.0, true)
+		# Pie overlay covering the icon interior proportionally to remaining
+		# time — unmistakable at thumb-glance, unlike a thin rim arc alone.
+		var segs := 40
+		var fan := PackedVector2Array([center])
+		for i in segs + 1:
+			var pie_ang := -PI * 0.5 + TAU * _cooldown_ratio * float(i) / float(segs)
+			fan.append(center + Vector2(cos(pie_ang), sin(pie_ang)) * r * 0.93)
+		draw_colored_polygon(fan, Color(0.02, 0.03, 0.03, 0.55))
+		# Dark overlay drains clockwise from the top as the cooldown recovers —
+		# thick and high-contrast so it reads clearly around the icon.
+		var cd_end := -PI * 0.5 + TAU * _cooldown_ratio
+		draw_arc(center, r, -PI * 0.5, cd_end, 48, CD_OVERLAY, 7.0, true)
+		# A bright leading edge marks where the drain currently is.
+		var lead := accent.lightened(0.4)
+		lead.a = 0.9 if not dimmed else 0.5
+		draw_arc(center, r, cd_end - 0.12, cd_end, 8, lead, 8.0, true)
+		# Big centered countdown INSIDE the logo disc.
+		var txt := ("%d" % int(ceil(_cd_remaining))) if _cd_remaining >= 3.0 \
+			else ("%0.1f" % _cd_remaining)
+		var fs := int(clampf(r * 0.62, 13.0, 34.0))
+		var f := ThemeDB.fallback_font
+		var base_y := center.y + fs * 0.36
+		var txt_w := r * 2.0
+		var txt_x := center.x - r
+		draw_string_outline(f, Vector2(txt_x, base_y), txt,
+			HORIZONTAL_ALIGNMENT_CENTER, txt_w, fs, 4, Color(0, 0, 0, 0.9))
+		draw_string(f, Vector2(txt_x, base_y), txt,
+			HORIZONTAL_ALIGNMENT_CENTER, txt_w, fs, Color(1.0, 0.93, 0.72))
 	if _ready_flash > 0.01:
 		# Expanding glow ring when the rite comes off cooldown
 		var flash_col := accent.lightened(0.5)
@@ -211,3 +248,73 @@ func _draw_axe_head(c: Vector2, r: float) -> void:
 	draw_circle(c + Vector2(0, -0.44) * s, rivet_r, STEEL.lightened(0.35))
 	draw_circle(c + Vector2(-rivet_r * 0.25, -0.44 * s - rivet_r * 0.25),
 		rivet_r * 0.6, STEEL.lightened(0.55))
+
+## Build a rich, readable explanation panel for a skill. Called by Godot
+## whenever the hover tooltip is needed; content comes from tooltip_data,
+## which the HUD sets from the equipped weapon kit each frame.
+func _make_custom_tooltip(_for_text: String) -> Control:
+	var panel := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = TT_BG
+	sb.set_border_width_all(2)
+	sb.border_color = TT_BORDER
+	sb.set_corner_radius_all(8)
+	sb.content_margin_left = 14
+	sb.content_margin_right = 14
+	sb.content_margin_top = 12
+	sb.content_margin_bottom = 12
+	panel.add_theme_stylebox_override("panel", sb)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 5)
+	panel.add_child(vbox)
+
+	var d: Dictionary = tooltip_data
+	var name_str := str(d.get("name", "RITE"))
+	var key := str(d.get("key", ""))
+	var title := Label.new()
+	title.text = "%s  %s" % [name_str, ("(%s)" % key) if key != "" else ""]
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", TT_TITLE)
+	title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+	title.add_theme_constant_override("shadow_offset_x", 1)
+	title.add_theme_constant_override("shadow_offset_y", 1)
+	vbox.add_child(title)
+
+	var type_str := str(d.get("type_label", ""))
+	var cooldown := float(d.get("cooldown", 0.0))
+	var meta := Label.new()
+	meta.text = "%s   ·   CD %0.1fs" % [type_str, cooldown]
+	meta.add_theme_font_size_override("font_size", 14)
+	meta.add_theme_color_override("font_color", TT_ACCENT)
+	vbox.add_child(meta)
+
+	var desc := str(d.get("desc", ""))
+	if desc != "":
+		var dl := Label.new()
+		dl.text = desc
+		dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		dl.custom_minimum_size = Vector2(240, 0)
+		dl.add_theme_font_size_override("font_size", 14)
+		dl.add_theme_color_override("font_color", TT_BODY)
+		vbox.add_child(dl)
+
+	var effect := str(d.get("effect", ""))
+	if effect != "":
+		var el := Label.new()
+		el.text = effect
+		el.add_theme_font_size_override("font_size", 14)
+		el.add_theme_color_override("font_color", TT_DIM)
+		vbox.add_child(el)
+
+	var target := str(d.get("target_hint", ""))
+	if target != "":
+		var tl := Label.new()
+		tl.text = target
+		tl.add_theme_font_size_override("font_size", 13)
+		tl.add_theme_color_override("font_color",
+			Color(0.62, 0.85, 0.45) if target.begins_with("✓") else Color(0.96, 0.62, 0.35))
+		vbox.add_child(tl)
+
+	return panel
+

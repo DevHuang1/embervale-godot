@@ -39,6 +39,8 @@ const ITEMS := [
 
 func _ready() -> void:
 	visible = false
+	process_mode = Node.PROCESS_MODE_ALWAYS  # stay interactive while the world is frozen
+	_freeze_was_visible = visible
 	# The Glintmonger's case reads as a warm display sheet over the dim.
 	UiKit.apply_parchment($Root/Center/Panel)
 	UiKit.style_secondary_button(close_button)
@@ -51,6 +53,22 @@ func open() -> void:
 	visible = true
 	_refresh()
 	audio.play_ui_blip()
+
+var _freeze_was_visible := false
+
+## Freeze/resume the world whenever this interface toggles, whichever
+## code path opened or closed it.
+func _poll_world_freeze() -> void:
+	if visible == _freeze_was_visible:
+		return
+	_freeze_was_visible = visible
+	if visible:
+		game_state.push_world_freeze()
+	else:
+		game_state.pop_world_freeze()
+
+func _process(_delta: float) -> void:
+	_poll_world_freeze()
 
 func close() -> void:
 	visible = false
