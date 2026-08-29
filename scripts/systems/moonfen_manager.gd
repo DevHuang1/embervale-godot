@@ -34,3 +34,19 @@ func _spawn_fenlings() -> void:
 		fenling.call("set_base_atk", 5)
 		fenling.call("set_burst_cooldown", 4.0)
 		fenlings.append(fenling)
+	_spawn_moonfen_elite()
+
+func _spawn_moonfen_elite() -> void:
+	var elite_scene: PackedScene = load("res://scenes/entities/elite_hushling.tscn")
+	if elite_scene == null:
+		return
+	var elite: Node3D = elite_scene.instantiate()
+	elite.name = "MoonfenEmberWarden"
+	add_child(elite)
+	elite.global_position = Vector3(0.0, 0.5, 9.0)
+	var md := CharacterModelData.new()
+	md.display_name = "Moonfen Ember Warden"
+	md.model_scale = 1.22
+	md.body_tint = Color(0.08, 0.18, 0.24, 1.0)
+	md.eye_glow_color = Color(0.42, 0.86, 1.0, 1.0)
+	md.configure_entity(elite)

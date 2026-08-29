@@ -25,12 +25,15 @@ class_name GroveDressing
 
 var rng := RandomNumberGenerator.new()
 
+const FOG_BANK_SCENE := preload("res://scenes/world/fog_bank.tscn")
+
 ## Signature prop layer keyed to the explorable realm (falls back through
 ## biome_id, then the current travel realm, then Bramblewood).
 enum RealmFlavor { BRAMBLEWOOD, MISTFEN, HEARTWOOD, MOONFEN }
 
 func _ready() -> void:
 	rng.seed = seed_value
+	_apply_visual_palette()
 	_build_trees()
 	_build_grove_clusters()
 	_build_rocks()
@@ -42,6 +45,7 @@ func _ready() -> void:
 	_build_ruins()
 	_build_torches()
 	_build_realm_flavor()
+	_apply_fog_quality_to_scene()
 	_build_props()
 	var ecosystem := RealmEcosystem.new()
 	ecosystem.name = "RealmEcosystem"
@@ -58,6 +62,51 @@ func _ready() -> void:
 		_: 
 			ecosystem_id = "bramblewood"
 	ecosystem.setup(ecosystem_id, seed_value + 1337, scatter_radius)
+
+func _visual_realm_id() -> String:
+	var gs := get_node_or_null("/root/GameState")
+	var active := str(gs.get("current_realm")) if gs != null else ""
+	if active == "whispergrove":
+		return active
+	var world_root := get_parent()
+	if world_root != null and "biome_id" in world_root:
+		return str(world_root.get("biome_id"))
+	return active if not active.is_empty() else "bramblewood"
+
+## Opaque foliage and broad material colors carry realm identity without
+## transparent leaf cards or extra draw calls.
+func _apply_visual_palette() -> void:
+	match _visual_realm_id():
+		"whispergrove":
+			tree_trunk_color = Color(0.13, 0.09, 0.06)
+			tree_canopy_color = Color(0.09, 0.21, 0.13)
+			rock_color = Color(0.31, 0.34, 0.29)
+			tuft_color = Color(0.18, 0.32, 0.16)
+			mushroom_cap_color = Color(0.44, 0.62, 0.42)
+		"mistfen":
+			tree_trunk_color = Color(0.10, 0.13, 0.15)
+			tree_canopy_color = Color(0.09, 0.18, 0.18)
+			rock_color = Color(0.25, 0.31, 0.34)
+			tuft_color = Color(0.12, 0.25, 0.23)
+			mushroom_cap_color = Color(0.38, 0.60, 0.72)
+		"heartwood":
+			tree_trunk_color = Color(0.09, 0.055, 0.045)
+			tree_canopy_color = Color(0.18, 0.105, 0.055)
+			rock_color = Color(0.25, 0.20, 0.18)
+			tuft_color = Color(0.31, 0.18, 0.08)
+			mushroom_cap_color = Color(0.74, 0.25, 0.08)
+		"moonfen":
+			tree_trunk_color = Color(0.10, 0.065, 0.16)
+			tree_canopy_color = Color(0.11, 0.075, 0.27)
+			rock_color = Color(0.18, 0.15, 0.28)
+			tuft_color = Color(0.16, 0.10, 0.30)
+			mushroom_cap_color = Color(0.28, 0.18, 0.48)
+		_:
+			tree_trunk_color = Color(0.105, 0.075, 0.055)
+			tree_canopy_color = Color(0.065, 0.145, 0.08)
+			rock_color = Color(0.28, 0.29, 0.25)
+			tuft_color = Color(0.15, 0.25, 0.10)
+			mushroom_cap_color = Color(0.38, 0.52, 0.34)
 
 func _realm_flavor() -> int:
 	var id := ""
@@ -83,13 +132,49 @@ func _build_realm_flavor() -> void:
 		RealmFlavor.MISTFEN:
 			_build_reeds()
 			_build_drowned_stones()
+			_build_fog_bank()
 		RealmFlavor.HEARTWOOD:
 			_build_charred_spires()
 			_build_ember_motes()
+			_build_fog_bank()
 		RealmFlavor.MOONFEN:
 			_build_glowcaps()
 		_:
 			_build_thorn_arches()
+
+func _build_fog_bank() -> void:
+	var fog := FOG_BANK_SCENE.instantiate() as GPUParticles3D
+	if fog == null:
+		return
+	fog.process_material = fog.process_material.duplicate()
+	add_child(fog)
+	_apply_fog_quality(fog)
+
+## Fog banks honor the quality tier: reduced counts at MEDIUM, fully off at
+## LOW so portrait-mobile overdraw stays within budget (matches the plan's
+## "Low disables fog" acceptance rule alongside volumetric-fog culling).
+func _apply_fog_quality(fog: GPUParticles3D) -> void:
+	var qs := get_node_or_null("/root/QualityScaler")
+	if qs == null:
+		return
+	var scale := float(qs.get("particle_scale"))
+	if scale <= 0.5:
+		fog.emitting = false
+		return
+	var pm := fog.process_material as ParticleProcessMaterial
+	if pm != null:
+		var base: int = fog.amount
+		fog.amount = maxi(3, int(round(base * scale)))
+		pm.emission_box_extents = pm.emission_box_extents * lerpf(0.7, 1.0, scale)
+
+## Scale declarative FogBank nodes (e.g. Moonfen scene instances) too.
+func _apply_fog_quality_to_scene() -> void:
+	var world := get_parent()
+	if world == null:
+		return
+	for child in world.get_children():
+		if child is GPUParticles3D and str(child.name).begins_with("FogBank"):
+			_apply_fog_quality(child)
 
 func _ground_height(x: float, z: float) -> float:
 	var terrain = get_parent().get_node_or_null("Terrain")
@@ -147,22 +232,22 @@ func _shader_mat(path: String, params: Dictionary) -> ShaderMaterial:
 		m.set_shader_parameter(key, params[key])
 	return m
 
-## Bind the scanned CC0 PBR sets onto rock/bark shader materials unless the
-## caller overrides them, so procedural surfaces pick up photo detail for
-## free and never fall back to the white default texture.
+## Bind the shared stylized PBR sets onto rock/bark shader materials unless
+## the caller overrides them. These broad painted forms match the procedural
+## silhouettes and avoid photo-scan noise at portrait-mobile resolution.
 func _bind_scan_textures(m: ShaderMaterial, path: String) -> void:
 	if path.ends_with("rock.gdshader"):
-		for pair in [["rock_albedo_tex", "rock/albedo.jpg"],
-				["rock_normal_tex", "rock/normal.jpg"],
-				["rock_rough_tex", "rock/roughness.jpg"]]:
+		for pair in [["rock_albedo_tex", "rock/albedo.png"],
+				["rock_normal_tex", "rock/normal.png"],
+				["rock_rough_tex", "rock/roughness.png"]]:
 			m.set_shader_parameter(pair[0], load(
-				"res://assets/textures/pbr/%s" % pair[1]))
+				"res://assets/textures/stylized/%s" % pair[1]))
 	elif path.ends_with("bark.gdshader"):
-		for pair in [["bark_albedo_tex", "bark/albedo.jpg"],
-				["bark_normal_tex", "bark/normal.jpg"],
-				["bark_rough_tex", "bark/roughness.jpg"]]:
+		for pair in [["bark_albedo_tex", "bark/albedo.png"],
+				["bark_normal_tex", "bark/normal.png"],
+				["bark_rough_tex", "bark/roughness.png"]]:
 			m.set_shader_parameter(pair[0], load(
-				"res://assets/textures/pbr/%s" % pair[1]))
+				"res://assets/textures/stylized/%s" % pair[1]))
 
 func _batch(mesh: Mesh, material: Material, transforms: Array[Transform3D],
 		shadows: bool, extent: float = 35.0) -> void:

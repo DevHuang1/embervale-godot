@@ -58,7 +58,7 @@ uniform float height_contrast : hint_range(0.0, 6.0) = 2.4;
 
 // --- Parallax occlusion (tier-gated by QualityScaler -> pom_mode) ---
 // 0 = off (analytic bump only), 1 = single-step offset (MEDIUM),
-// 2 = 8-step occlusion march near camera (HIGH)
+// 2 = 4-step occlusion march near camera (HIGH, Android-budgeted)
 uniform int pom_mode = 0;
 uniform float depth_scale : hint_range(0.0, 0.2) = 0.025;
 uniform float pom_near : hint_range(4.0, 48.0) = 15.0;
@@ -81,6 +81,10 @@ uniform float terrain_brightness : hint_range(0.5, 2.0) = 1.28;
 uniform float detail_warp_amount : hint_range(0.0, 4.0) = 0.9;
 uniform float ember_fleck_density : hint_range(0.0, 0.5) = 0.045;
 uniform float ember_fleck_intensity : hint_range(0.0, 4.0) = 0.85;
+// Low-cost realism controls: procedural breakup avoids visible tile repetition.
+uniform float macro_breakup_strength : hint_range(0.0, 1.0) = 0.42;
+uniform float micro_grain_strength : hint_range(0.0, 1.0) = 0.26;
+uniform float puddle_sheen_strength : hint_range(0.0, 1.0) = 0.22;
 
 // --- Persistent ground wear (TerrainWear splats via WorldState global) ---
 global uniform sampler2D world_wear_map;
@@ -162,7 +166,7 @@ vec2 pom_offset(vec2 uv, vec3 cam_vec, vec3 nrm, int steps,
 	float d = 0.0;
 	vec2 cuv = uv;
 	float dh = 1.0 - layer_height(cuv, wg, wd, ws, wrr);
-	for (int i = 0; i < 8; i++) {
+	for (int i = 0; i < 4; i++) {
 		if (i >= steps || d >= dh) { break; }
 		cuv -= duv;
 		d += step_d;
@@ -206,7 +210,11 @@ void fragment() {
 	float crest = smoothstep(1.4, 2.6, world_pos.y);
 	float wr = max(rock_mask, crest * (1.0 - patches));
 
-	vec2 uv = wp * uv_world_scale;
+	// Gently warp the shared world UV so scanned layers do not repeat on a rigid grid.
+	vec2 macro_warp = vec2(
+		fbm(wp * 0.021 + vec2(17.4, 5.8)),
+		fbm(wp * 0.019 + vec2(42.1, 23.7)));
+	vec2 uv = wp * uv_world_scale + (macro_warp - 0.5) * 0.16 * macro_breakup_strength;
 
 	// --- Base weights -> height-modulated weights (UE heightlerp) ---
 	float wg = 1.0;
@@ -240,7 +248,7 @@ void fragment() {
 	float pom_fade = smoothstep(pom_near + 6.0, pom_near * 0.45, cam_dist);
 	if (pom_mode > 0 && pom_fade > 0.001 && depth_scale > 0.0001) {
 		int steps = 1;
-		if (pom_mode > 1) { steps = 8; }
+		if (pom_mode > 1) { steps = 4; }
 		puv = pom_offset(uv, CAMERA_POSITION_WORLD - world_pos, n, steps,
 			wg, wd, ws, wrr);
 		uvg = layer_uv(puv, 0);
@@ -275,6 +283,11 @@ void fragment() {
 		float moss_mask = moss_strength * mix(0.35, 1.0, moisture_strength)
 			* moisture_mask * (1.0 - wr) * flatness;
 		col = mix(col, moss_color * (0.78 + realm_field * 0.22), clamp(moss_mask, 0.0, 1.0));
+		// Broad color breakup makes the ground read as natural patches rather than a tiled plane.
+		float macro_value = fbm(wp * 0.031 + vec2(63.2, 14.7));
+		float macro_contrast = smoothstep(0.16, 0.84, macro_value);
+		float macro_tone = mix(0.88, 1.12, macro_contrast);
+		col *= mix(1.0, macro_tone, macro_breakup_strength);
 		// Moist realms get a restrained darkening/wet sheen without flattening PBR layers.
 		float wet_response = moisture_strength * moisture_mask * (1.0 - wr) * 0.18;
 		col = mix(col, col * 0.90 + moss_color * 0.04, clamp(wet_response, 0.0, 1.0));
@@ -324,8 +337,12 @@ void fragment() {
 	float cav = smoothstep(0.30, 1.05, h0);
 	AO = mix(0.80, 1.0, cav);
 	float grain = hash21(floor(world_pos.xz * 110.0));
+	float fine_grain = vnoise(world_pos.xz * 8.0 + vec2(2.7, 9.4));
 	ALBEDO *= mix(1.0, 0.95 + grain * 0.09, close_fade);
+	ALBEDO *= mix(1.0, 0.96 + fine_grain * 0.08, micro_grain_strength * close_fade);
 	ROUGHNESS = clamp(r_out * mix(0.96, 1.03, grain), 0.0, 1.0);
+	float sheen_mask = smoothstep(0.58, 0.90, moisture_mask) * moisture_strength * puddle_sheen_strength;
+	ROUGHNESS = mix(ROUGHNESS, max(0.18, ROUGHNESS - 0.24), sheen_mask);
 
 	// --- Rain wetting: darken albedo, gloss the surface ---
 	float wet = clamp(world_rain_level, 0.0, 1.0);

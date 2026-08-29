@@ -57,6 +57,7 @@ theme/custom="res://assets/ui/theme.tres"
 3d_physics/layer_4="pickup"
 3d_physics/layer_5="boss"
 3d_physics/layer_6="environment"
+3d_physics/layer_7="prop"
 
 [physics]
 
@@ -65,9 +66,14 @@ physics/common/physics_tick=60
 [rendering]
 
 rendering/quality/shadows/enabled=true
-rendering/quality/shadow_atlas/size=2048
-rendering/quality/shadow_atlas/quadrant_subdivision=4
+rendering/quality/shadow_atlas/size=1024
+rendering/quality/shadow_atlas/quadrant_subdivision=2
 rendering/lights_and_shadows/use_occlusion_culling=true
+rendering/anti_aliasing/quality/msaa_3d=0
+rendering/anti_aliasing/quality/msaa_2d=0
+rendering/anti_aliasing/quality/use_taa=false
+rendering/scaling_3d/scale=0.75
+rendering/scaling_3d/mode=0
 rendering/environment/defaults/default_clear_color=Color(0.043, 0.094, 0.078, 1)
 rendering/environment/defaults/default_environment="res://assets/environments/embervale_env.tres"
 

@@ -1,4 +1,4 @@
-[gd_scene load_steps=42 format=3]
+[gd_scene load_steps=43 format=3]
 
 [ext_resource type="Script" path="res://scripts/systems/moonfen_manager.gd" id="1_wm"]
 [ext_resource type="Environment" path="res://assets/environments/moonfen_env.tres" id="2_env"]
@@ -13,10 +13,11 @@
 [ext_resource type="Script" path="res://scripts/systems/terrain_relief.gd" id="11_relief"]
 [ext_resource type="Shader" path="res://assets/shaders/water_fen.gdshader" id="12_water"]
 [ext_resource type="Shader" path="res://assets/shaders/rock.gdshader" id="13_stone"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/albedo.jpg" id="stone_albedo"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/normal.jpg" id="stone_normal"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/roughness.jpg" id="stone_rough"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/rock/albedo.png" id="stone_albedo"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/rock/normal.png" id="stone_normal"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/rock/roughness.png" id="stone_rough"]
 [ext_resource type="PackedScene" path="res://scenes/ui/shop_menu.tscn" id="14_shop"]
+[ext_resource type="PackedScene" path="res://scenes/world/fog_bank.tscn" id="15_fog"]
 
 [sub_resource type="ShaderMaterial" id="Mat_water"]
 shader = ExtResource("12_water")
@@ -180,6 +181,13 @@ mesh = SubResource("PlaneMesh_water")
 material_override = SubResource("Mat_water")
 cast_shadow = 0
 
+[node name="FenReflection" type="ReflectionProbe" parent="."]
+position = Vector3(0, 3, 0)
+size = Vector3(60, 12, 60)
+origin_offset = Vector3(0, 1, 0)
+box_projection = true
+max_distance = 72.0
+
 [node name="MoonLight" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.707, 0, -0.707, 0, 1, 0, 0.707, 0, 0.707, 30, 60, 20)
 light_color = Color(0.64, 0.58, 0.96, 1)
@@ -279,6 +287,12 @@ local_coords = false
 visibility_aabb = AABB(-32, -2, -32, 64, 12, 64)
 process_material = SubResource("Proc_mist")
 draw_pass_1 = SubResource("Quad_mist")
+
+[node name="FogBankWest" parent="." instance=ExtResource("15_fog")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 0.4, -8)
+
+[node name="FogBankEast" parent="." instance=ExtResource("15_fog")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 0.4, 10)
 
 [node name="ForestBorder" type="Node3D" parent="."]
 script = ExtResource("10_dress")

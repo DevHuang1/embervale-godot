@@ -39,6 +39,7 @@ var _altar: Node3D = null
 var _practice_altar: Node3D = null
 
 var _relic_trophy: Node3D = null
+var _realm_expansion: Node3D = null
 
 @onready var relic_pedestal: Node3D = get_node_or_null("RelicPedestal")
 
@@ -46,6 +47,10 @@ func _ready() -> void:
 	_init_signals()
 	_init_day_night()
 	_setup_grove()
+	_realm_expansion = preload("res://scripts/world/realm_expansion.gd").new()
+	_realm_expansion.name = "RealmExpansion"
+	add_child(_realm_expansion)
+	_realm_expansion.setup(self)
 	audio.start_ambient()
 	
 	# Connect game state signals
@@ -130,10 +135,14 @@ func _spawn_wave(stage: int) -> void:
 		return
 	var realm_id := Bestiary.realm_id_for_stage(stage)
 	var origin := hero.global_position if hero != null else player_spawn.global_position
+	var elite_count := int(comp.get("elite", 0))
 	var hard_count := int(comp.get("hard", 0))
 	var normal_count := int(comp.get("normal", 0))
-	var total := hard_count + normal_count
+	var total := elite_count + hard_count + normal_count
 	var idx := 0
+	for i in elite_count:
+		_spawn_pack_enemy(origin, realm_id, true, idx, total, true)
+		idx += 1
 	for i in hard_count:
 		_spawn_pack_enemy(origin, realm_id, true, idx, total)
 		idx += 1
@@ -142,15 +151,16 @@ func _spawn_wave(stage: int) -> void:
 		idx += 1
 
 func _spawn_pack_enemy(origin: Vector3, realm_id: String, hard: bool,
-		idx: int, total: int) -> void:
+		idx: int, total: int, elite: bool = false) -> void:
 	var v := Bestiary.variant_for(realm_id, "hard" if hard else "normal")
 	if v.is_empty():
 		return
 	# Ranged "spitter" kin get their own rigged scene; everything else is
 	# the classic hushling (recolored per realm by CharacterModelData).
 	var kind := str(v.get("kind", "hushling"))
-	var scene_path := "res://scenes/entities/spitter.tscn" \
-		if kind == "spitter" else "res://scenes/entities/hushling.tscn"
+	var scene_path := "res://scenes/entities/elite_hushling.tscn" \
+		if elite else ("res://scenes/entities/spitter.tscn" \
+		if kind == "spitter" else "res://scenes/entities/hushling.tscn")
 	var scene: PackedScene = load(scene_path)
 	if scene == null:
 		return
@@ -158,16 +168,20 @@ func _spawn_pack_enemy(origin: Vector3, realm_id: String, hard: bool,
 	add_child(enemy)
 	enemy.global_position = _pack_spot(origin, idx, total)
 	var md := CharacterModelData.new()
-	md.display_name = str(v.get("display", "Hushling"))
-	md.model_scale = float(v.get("scale", 1.0))
-	md.body_tint = v.get("tint", Color(0, 0, 0, 0))
-	md.eye_glow_color = v.get("eye", Color(0, 0, 0, 0))
-	md.max_hp_override = int(v.get("hp", 0))
-	md.base_atk_bonus = int(v.get("atk_bonus", 0))
-	md.move_speed_mult = float(v.get("speed", 1.0))
+	md.display_name = "Ember Warden" if elite else str(v.get("display", "Hushling"))
+	md.model_scale = 1.18 if elite else float(v.get("scale", 1.0))
+	md.body_tint = Color(0.28, 0.08, 0.04, 1.0) if elite else v.get("tint", Color(0, 0, 0, 0))
+	md.eye_glow_color = Color(1.0, 0.30, 0.08, 1.0) if elite else v.get("eye", Color(0, 0, 0, 0))
+	md.max_hp_override = 0 if elite else int(v.get("hp", 0))
+	md.base_atk_bonus = 0 if elite else int(v.get("atk_bonus", 0))
+	md.move_speed_mult = 0.92 if elite else float(v.get("speed", 1.0))
 	md.configure_entity(enemy)
+	if enemy.has_method("configure_archetype"):
+		enemy.configure_archetype(kind)
 	if bool(v.get("volley", false)) and "thorn_volley" in enemy:
 		enemy.thorn_volley = true
+	if elite:
+		enemy.name = "EliteEmberWarden_%d" % idx
 	# Spawn read: realm-tinted portal + positional cue so the pack materializes
 	# with clear audio/visual feedback instead of silently popping in.
 	var realm: Dictionary = Bestiary.REALMS.get(realm_id, {})
@@ -488,6 +502,8 @@ func _on_hero_interact() -> void:
 		nearby.interact()
 
 func _get_nearby_interactable() -> Node:
+	# Prefer the facing ray for deliberate interaction, but fall back to the
+	# nearest configured prop so touch controls do not require pixel-perfect aim.
 	var space_state = get_world_3d().direct_space_state
 	var query = PhysicsRayQueryParameters3D.create(
 		hero.global_position + Vector3(0, 1, 0),
@@ -495,9 +511,20 @@ func _get_nearby_interactable() -> Node:
 	)
 	query.collision_mask = 1 << 3 | 1 << 5  # Pickup + Environment
 	var result = space_state.intersect_ray(query)
-	if result and result.collider:
+	if result and result.collider and result.collider.is_in_group("interactable"):
 		return result.collider
-	return null
+	var closest: Node = null
+	var closest_dist := 2.8
+	for candidate in get_tree().get_nodes_in_group("interactable"):
+		if not candidate is Node3D or not is_instance_valid(candidate):
+			continue
+		if candidate.get("opened") == true:
+			continue
+		var dist := hero.global_position.distance_to(candidate.global_position)
+		if dist < closest_dist:
+			closest_dist = dist
+			closest = candidate
+	return closest
 
 func _on_player_defeated() -> void:
 	# Reset to last safe state

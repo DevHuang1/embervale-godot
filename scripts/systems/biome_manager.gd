@@ -25,7 +25,9 @@ func _ready() -> void:
 ## === Identity ===
 
 func _enter_biome() -> void:
-	if game_state.current_realm != biome_id:
+	var shared_whispergrove := biome_id == "bramblewood" \
+		and game_state.current_realm == "whispergrove"
+	if game_state.current_realm != biome_id and not shared_whispergrove:
 		game_state.set_current_realm(biome_id)
 	_apply_realm_theme(game_state.current_stage)
 	var title := str(_biome_def.get("title", biome_id.capitalize()))
@@ -36,10 +38,16 @@ func _enter_biome() -> void:
 	_start_respawner()
 
 func _realm_tint() -> Color:
-	return Bestiary.REALMS.get(biome_id, {}).get("mist_tint", Color(0.65, 0.75, 0.72))
+	return Bestiary.REALMS.get(_visual_realm_id(), {}).get(
+		"mist_tint", Color(0.65, 0.75, 0.72))
 
 func _fx_tint() -> Color:
-	return Bestiary.REALMS.get(biome_id, {}).get("firefly_tint", Color(1.0, 0.86, 0.45))
+	return Bestiary.REALMS.get(_visual_realm_id(), {}).get(
+		"firefly_tint", Color(1.0, 0.86, 0.45))
+
+func _visual_realm_id() -> String:
+	return "whispergrove" if biome_id == "bramblewood" \
+		and game_state.current_realm == "whispergrove" else biome_id
 
 ## === Theming: fixed to this biome, not the quest ladder ===
 
@@ -47,7 +55,7 @@ func _apply_realm_theme(_stage: int) -> void:
 	if day_night == null:
 		return
 	day_night.apply_realm(_realm_tint(), _fx_tint(),
-		Bestiary.REALMS.get(biome_id, {}).get("grade", {}))
+		Bestiary.REALMS.get(_visual_realm_id(), {}).get("grade", {}))
 	var fog_mult := float(_biome_def.get("fog_energy", 1.0))
 	if world_environment != null and world_environment.environment != null and fog_mult != 1.0:
 		world_environment.environment.fog_density *= fog_mult

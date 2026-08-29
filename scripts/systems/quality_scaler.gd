@@ -30,6 +30,12 @@ var pom_mode: int = 2                # 0 off, 1 parallax offset, 2 POM march
 var vegetation_pushers: int = 4      # world_pushers slots published to shaders
 var corpse_pool_size: int = 6        # pooled tumble corpses
 var contact_shadows: bool = true     # key light contact shadows
+var vfx_density: float = 1.0         # particle counts, timing unchanged
+var vfx_pool_limit: int = 24         # pooled transparent emitters
+var vfx_trail_limit: int = 12        # simultaneous ribbon/core meshes
+var transient_light_budget: int = 3  # short-lived impact lights
+var distortion_enabled: bool = true  # chroma/rain-smear post effects
+var material_detail_level: int = 2   # 0 broad, 1 offset, 2 close POM
 
 var _sample_clock := 0.0
 var _low_time := 0.0
@@ -40,7 +46,9 @@ var _env_scene: Node = null
 
 func _ready() -> void:
 	_load_mode()
-	_apply_level(int(Level.HIGH))
+	# Boot at the smooth baseline and let AUTO restore detail only when the
+	# machine shows clear headroom — smoother-first over razor-sharp.
+	_apply_level(int(Level.LOW))
 
 
 var _qs_scene: Node = null
@@ -115,10 +123,34 @@ func _apply_level(new_level: int) -> void:
 	vegetation_pushers = [1, 4, 4][level]
 	corpse_pool_size = [2, 4, 6][level]
 	contact_shadows = level == int(Level.HIGH)
+	vfx_density = [0.45, 0.72, 1.0][level]
+	vfx_pool_limit = [10, 16, 24][level]
+	vfx_trail_limit = [6, 9, 12][level]
+	transient_light_budget = [0, 0, 3][level]
+	distortion_enabled = level == int(Level.HIGH)
+	material_detail_level = level
+	# Trade resolution for smoothness: render at a fraction of the window and
+	# bilinearly upscale, so even weak GPUs hold a steadier framerate. The
+	# sharper the user wants it, the closer to full res they land.
+	if level == int(Level.LOW):
+		_set_scaling(0.6)
+	elif level == int(Level.MEDIUM):
+		_set_scaling(0.75)
+	else:
+		_set_scaling(1.0)
 	_apply_environment()
 	_apply_terrain_pom()
 	_apply_light_tiers()
 	level_changed.emit(level)
+
+## Apply 3D render resolution scaling on the active viewport (safe no-op when
+## the viewport is not ready yet, e.g. during autoload boot before a scene).
+func _set_scaling(scale_3d: float) -> void:
+	var viewport := get_viewport()
+	if viewport == null:
+		return
+	viewport.scaling_3d_scale = clampf(scale_3d, 0.25, 1.0)
+	viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 
 
 ## Key-light tiering (Godot 4 has no contact shadows; omni/spot shadow
