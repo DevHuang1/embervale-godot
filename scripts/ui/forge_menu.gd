@@ -33,6 +33,16 @@ var pending_base: Dictionary = {}
 var pending_rarity: int = 0
 
 var _freeze_was_visible := false
+var element_switcher: PanelContainer = null
+var element_status: Label = null
+var element_buttons: Dictionary = {}
+const ELEMENTS := ["fire", "frost", "shock", "nature"]
+const ELEMENT_COLORS := {
+	"fire": Color(1.0, 0.30, 0.10),
+	"frost": Color(0.38, 0.84, 1.0),
+	"shock": Color(0.76, 0.52, 1.0),
+	"nature": Color(0.34, 1.0, 0.46),
+}
 
 ## Freeze/resume the world whenever this interface toggles, whichever
 ## code path opened or closed it.
@@ -57,6 +67,7 @@ func _ready() -> void:
 	UiKit.style_primary_button(scan_button)
 	UiKit.style_primary_button(equip_button)
 	UiKit.style_button(close_button, UiKit.SAGE)
+	_build_element_switcher()
 	_connect_signals()
 	
 	close_button.pressed.connect(_on_close_pressed)
@@ -71,6 +82,66 @@ func _connect_signals() -> void:
 	scan_manager.scan_started.connect(_on_scan_started)
 	scan_manager.scan_completed.connect(_on_scan_completed)
 	scan_manager.forge_completed.connect(_on_forge_completed)
+	game_state.weapon_changed.connect(_refresh_element_switcher)
+	game_state.gold_changed.connect(_on_element_forge_gold_changed)
+
+func _build_element_switcher() -> void:
+	element_switcher = PanelContainer.new()
+	element_switcher.name = "ElementSwitcher"
+	element_switcher.custom_minimum_size = Vector2(0, 86)
+	element_switcher.add_theme_stylebox_override("panel", UiKit.glass_stylebox(false, 0.85))
+	var row := HBoxContainer.new()
+	row.name = "AttunementRow"
+	row.add_theme_constant_override("separation", 8)
+	element_switcher.add_child(row)
+	var title := Label.new()
+	title.custom_minimum_size = Vector2(230, 0)
+	title.text = "CHECKPOINT ATTUNEMENT\n24 gold · switch weapon element"
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 14)
+	title.add_theme_color_override("font_color", Color(0.82, 0.84, 0.76))
+	row.add_child(title)
+	for element in ELEMENTS:
+		var button := Button.new()
+		button.name = "%sButton" % element.capitalize()
+		button.custom_minimum_size = Vector2(118, 58)
+		button.text = element.to_upper()
+		button.add_theme_font_size_override("font_size", 13)
+		button.add_theme_color_override("font_color", ELEMENT_COLORS[element].lightened(0.15))
+		button.pressed.connect(_on_element_pressed.bind(element))
+		row.add_child(button)
+		element_buttons[element] = button
+	element_status = Label.new()
+	element_status.custom_minimum_size = Vector2(190, 0)
+	element_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	element_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	element_status.add_theme_font_size_override("font_size", 12)
+	row.add_child(element_status)
+	$Root/VBox.add_child(element_switcher)
+	_refresh_element_switcher()
+
+func _refresh_element_switcher(_weapon: Dictionary = {}) -> void:
+	if element_status == null:
+		return
+	var current := str(game_state.equipped_weapon.get("element", ""))
+	if current.is_empty():
+		current = "none"
+	element_status.text = "CURRENT\n%s\nGOLD %d" % [current.to_upper(), game_state.gold]
+	for element in element_buttons:
+		var button: Button = element_buttons[element]
+		button.disabled = element == current or game_state.gold < GameState.ELEMENT_SWITCH_COST
+
+func _on_element_forge_gold_changed(_gold: int) -> void:
+	_refresh_element_switcher()
+
+func _on_element_pressed(element: String) -> void:
+	var result: Dictionary = game_state.switch_weapon_element(element)
+	element_status.text = str(result.get("message", ""))
+	if bool(result.get("success", false)):
+		audio.play_forge_success()
+	else:
+		audio.play_ui_blip()
+	_refresh_element_switcher()
 
 func _on_close_pressed() -> void:
 	if is_scanning:

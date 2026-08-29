@@ -5,7 +5,7 @@ class_name SatchelUI
 ## Inventory, forged gear + armor, the equipped weapon's skill kit
 
 @onready var game_state: GameState = GameState
-@onready var items_vbox: VBoxContainer = $Root/VBox/ItemsList/ItemsVBox
+@onready var items_vbox: Container = $Root/VBox/ItemsList/ItemsVBox
 @onready var count_label: Label = $Root/VBox/Header/CountLabel
 @onready var close_button: Button = $Root/VBox/Header/CloseButton
 @onready var weapon_name: Label = $Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon/WeaponInfo/WeaponName
@@ -15,6 +15,11 @@ class_name SatchelUI
 @onready var skill_kit: HBoxContainer = $Root/VBox/ClassFooter/ClassVBox/SkillKit
 
 var _skill_cd_labels: Array[Label] = []
+var _arsenal_grid: GridContainer
+var _equipment_row: HBoxContainer
+var _selected_item_label: Label
+var _stats_panel: PanelContainer
+var _stats_grid: GridContainer
 
 func _ready() -> void:
 	UiKit.apply_glass($Root)
@@ -28,6 +33,7 @@ func _ready() -> void:
 	forge_button.add_theme_font_size_override("font_size", 18)
 	UiKit.style_button(close_button, UiKit.SAGE)
 	_connect_signals()
+	_build_albion_layout()
 	_rebuild_inventory()
 	_update_forged_gear()
 	_rebuild_skill_kit()
@@ -60,6 +66,133 @@ func _connect_signals() -> void:
 	game_state.inventory_changed.connect(_on_inventory_changed)
 	game_state.weapon_changed.connect(_on_weapon_changed)
 	game_state.armor_changed.connect(_on_armor_changed)
+	if game_state.has_signal("stats_changed"):
+		game_state.stats_changed.connect(_on_stats_changed)
+
+func _build_albion_layout() -> void:
+	var root_vbox := $Root/VBox as VBoxContainer
+	var list_parent := items_vbox.get_parent()
+	_arsenal_grid = GridContainer.new()
+	_arsenal_grid.name = "ArsenalGrid"
+	_arsenal_grid.columns = 3
+	_arsenal_grid.add_theme_constant_override("h_separation", 10)
+	_arsenal_grid.add_theme_constant_override("v_separation", 10)
+	_arsenal_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list_parent.remove_child(items_vbox)
+	items_vbox.queue_free()
+	list_parent.add_child(_arsenal_grid)
+	items_vbox = _arsenal_grid
+
+	_equipment_row = HBoxContainer.new()
+	_equipment_row.name = "EquipmentLoadout"
+	_equipment_row.add_theme_constant_override("separation", 12)
+	root_vbox.add_child(_equipment_row)
+	root_vbox.move_child(_equipment_row, 1)
+	_selected_item_label = Label.new()
+	_selected_item_label.text = "Select a weapon or item to inspect"
+	_selected_item_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_selected_item_label.custom_minimum_size = Vector2(230, 0)
+	UiKit.style_label(_selected_item_label, &"Caption", 15)
+	_rebuild_equipment_loadout()
+	_build_stats_panel(root_vbox)
+
+func _build_stats_panel(root_vbox: VBoxContainer) -> void:
+	_stats_panel = PanelContainer.new()
+	_stats_panel.name = "CharacterStats"
+	_stats_panel.custom_minimum_size = Vector2(0, 86)
+	_stats_panel.add_theme_stylebox_override("panel", UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON))
+	root_vbox.add_child(_stats_panel)
+	root_vbox.move_child(_stats_panel, 2)
+	_stats_grid = GridContainer.new()
+	_stats_grid.columns = 6
+	_stats_grid.add_theme_constant_override("h_separation", 18)
+	_stats_grid.add_theme_constant_override("v_separation", 2)
+	_stats_panel.add_child(_stats_grid)
+	_refresh_stats_panel()
+
+func _refresh_stats_panel() -> void:
+	if _stats_grid == null:
+		return
+	for child in _stats_grid.get_children():
+		child.queue_free()
+	var attack_total := game_state.get_base_auto_damage()
+	var defense_total := game_state.armor_defense() + game_state.defense_stat()
+	var speed_total := game_state.attack_speed_mult() * game_state.armor_speed_mult()
+	var values := [
+		["ATTACK", str(attack_total), Color(1.0, 0.66, 0.30)],
+		["DEFENSE", str(defense_total), Color(0.42, 0.82, 0.98)],
+		["CRIT CHANCE", "%d%%" % roundi(game_state.crit_chance() * 100.0), Color(1.0, 0.82, 0.34)],
+		["CRIT MULT", "×%.2f" % game_state.crit_damage(), Color(0.92, 0.48, 1.0)],
+		["ATTACK SPEED", "×%.2f" % speed_total, Color(0.48, 1.0, 0.62)],
+		["HP", "%d / %d" % [game_state.hp, game_state.max_hp], Color(0.98, 0.42, 0.42)]
+	]
+	for entry in values:
+		var label := Label.new()
+		label.text = str(entry[0]) + "\n" + str(entry[1])
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		UiKit.style_label(label, &"Caption", 14)
+		label.add_theme_color_override("font_color", entry[2])
+		_stats_grid.add_child(label)
+
+func _rebuild_equipment_loadout() -> void:
+	if _equipment_row == null:
+		return
+	for child in _equipment_row.get_children():
+		child.queue_free()
+	_add_equipment_slot("WEAPON", game_state.equipped_weapon, Color(0.96, 0.72, 0.30))
+	_add_equipment_slot("ARMOR", game_state.equipped_armor, Color(0.42, 0.76, 0.96))
+	_equipment_row.add_child(_selected_item_label)
+	_refresh_stats_panel()
+
+func _add_equipment_slot(slot_name: String, gear: Dictionary, tint: Color) -> void:
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(230, 84)
+	panel.add_theme_stylebox_override("panel", UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON))
+	var vbox := VBoxContainer.new()
+	panel.add_child(vbox)
+	var slot_label := Label.new()
+	slot_label.text = slot_name
+	UiKit.style_label(slot_label, &"Eyebrow", 13)
+	slot_label.add_theme_color_override("font_color", tint)
+	vbox.add_child(slot_label)
+	var name_label := Label.new()
+	name_label.text = str(gear.get("name", "EMPTY SLOT")) if not gear.is_empty() else "EMPTY SLOT"
+	UiKit.style_label(name_label, &"MenuTitle", 17)
+	vbox.add_child(name_label)
+	var stat_label := Label.new()
+	stat_label.text = "ATK %d  ·  DEF %d" % [int(gear.get("atk", 0)), int(gear.get("defense", 0))]
+	UiKit.style_label(stat_label, &"Caption", 14)
+	vbox.add_child(stat_label)
+	_equipment_row.add_child(panel)
+
+func _add_weapon_card(weapon: Dictionary) -> void:
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(210, 126)
+	panel.add_theme_stylebox_override("panel", UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON))
+	var vbox := VBoxContainer.new()
+	panel.add_child(vbox)
+	var rarity_names := ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"]
+	var rarity := clampi(int(weapon.get("rarity", 0)), 0, 4)
+	var title := Label.new()
+	title.text = "%s  %s" % [str(weapon.get("glyph", "⚔")), str(weapon.get("name", "WEAPON"))]
+	UiKit.style_label(title, &"MenuTitle", 15)
+	vbox.add_child(title)
+	var meta := Label.new()
+	meta.text = "%s  ·  ATK %d" % [rarity_names[rarity], int(weapon.get("atk", 0))]
+	UiKit.style_label(meta, &"Caption", 13)
+	vbox.add_child(meta)
+	var equip := Button.new()
+	equip.text = "EQUIP"
+	UiKit.style_secondary_button(equip)
+	equip.custom_minimum_size = Vector2(0, 42)
+	equip.pressed.connect(_on_equip_weapon.bind(str(weapon.get("id", ""))))
+	vbox.add_child(equip)
+	items_vbox.add_child(panel)
+
+func _on_equip_weapon(weapon_id: String) -> void:
+	if game_state.equip_weapon_by_id(weapon_id):
+		_selected_item_label.text = "Equipped %s" % weapon_id
+		_rebuild_equipment_loadout()
 
 func _rebuild_inventory() -> void:
 	# Clear
@@ -67,6 +200,8 @@ func _rebuild_inventory() -> void:
 		child.queue_free()
 	
 	var total = 0
+	for weapon in game_state.forged_weapons:
+		_add_weapon_card(weapon)
 	for item in game_state.inventory:
 		total += item.quantity
 		if item.quantity > 0:
@@ -126,13 +261,21 @@ func _add_item_row(item: Dictionary) -> void:
 func _on_inventory_changed(_notice: String = "", _count: int = 0) -> void:
 	_rebuild_inventory()
 	_update_forged_gear()
+	_rebuild_equipment_loadout()
 
 func _on_weapon_changed(_weapon: Dictionary) -> void:
 	_update_forged_gear()
 	_rebuild_skill_kit()
+	_rebuild_equipment_loadout()
+	_refresh_stats_panel()
 
 func _on_armor_changed(_armor: Dictionary) -> void:
 	_rebuild_armor_row()
+	_rebuild_equipment_loadout()
+	_refresh_stats_panel()
+
+func _on_stats_changed() -> void:
+	_refresh_stats_panel()
 
 func _on_use_item(item_id: String) -> void:
 	var result = game_state.use_item(item_id)

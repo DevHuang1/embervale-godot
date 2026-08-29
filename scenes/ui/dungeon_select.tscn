@@ -1,0 +1,67 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/dungeon_select.gd" id="1_dungeon"]
+
+[node name="DungeonSelect" type="CanvasLayer"]
+layer = 30
+visible = false
+script = ExtResource("1_dungeon")
+
+[node name="Root" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 0
+
+[node name="Dim" type="ColorRect" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+color = Color(0.012, 0.025, 0.018, 0.78)
+
+[node name="Center" type="CenterContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Panel" type="PanelContainer" parent="Root/Center"]
+custom_minimum_size = Vector2(900, 620)
+
+[node name="VBox" type="VBoxContainer" parent="Root/Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Header" type="HBoxContainer" parent="Root/Center/Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="Title" type="Label" parent="Root/Center/Panel/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"MenuTitle"
+text = "DUNGEONS & INSTANCES"
+
+[node name="Close" type="Button" parent="Root/Center/Panel/VBox/Header"]
+custom_minimum_size = Vector2(110, 52)
+layout_mode = 2
+text = "CLOSE"
+
+[node name="Status" type="Label" parent="Root/Center/Panel/VBox"]
+layout_mode = 2
+theme_type_variation = &"Caption"
+text = "Choose an expedition. Clear the instance, claim the cache, and return stronger."
+autowrap_mode = 2
+
+[node name="CardsScroll" type="ScrollContainer" parent="Root/Center/Panel/VBox"]
+custom_minimum_size = Vector2(0, 450)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Cards" type="VBoxContainer" parent="Root/Center/Panel/VBox/CardsScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12

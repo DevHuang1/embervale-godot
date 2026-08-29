@@ -42,6 +42,8 @@ func _process(delta: float) -> void:
 	var intensity: float = _world_state.combat_intensity \
 		if _world_state != null else 0.0
 	var rain: float = _world_state.rain_level if _world_state != null else 0.0
+	var quality = _world_state.quality if _world_state != null else null
+	var allow_distortion := quality == null or bool(quality.distortion_enabled)
 	var target_vignette := clampf(VIGNETTE_BASE + _vignette_level * 0.35 + _pulse,
 		0.0, VIGNETTE_MAX)
 	# Combat tension breathes a hair of extra vignette (capped by VIGNETTE_MAX)
@@ -51,8 +53,8 @@ func _process(delta: float) -> void:
 	_chroma = maxf(_chroma - delta * 3.2, 0.0)
 	_mat.set_shader_parameter("vignette_amount", clampf(target_vignette, 0.0, 0.9))
 	_mat.set_shader_parameter("saturation", target_sat)
-	_mat.set_shader_parameter("chroma_strength", _chroma)
-	_mat.set_shader_parameter("wetness", rain)
+	_mat.set_shader_parameter("chroma_strength", _chroma if allow_distortion else 0.0)
+	_mat.set_shader_parameter("wetness", rain if allow_distortion else 0.0)
 
 func _on_hp_changed(_old_hp: int, new_hp: int) -> void:
 	var warmth := GameState.get_warmth_percent()

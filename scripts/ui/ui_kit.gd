@@ -7,8 +7,8 @@ extends RefCounted
 ## covers default controls; these helpers cover code-built chrome.
 
 const BG_DEEP := Color(0.043, 0.090, 0.071)
-const GLASS_BG := Color(0.030, 0.048, 0.038, 0.92)
-const GLASS_BG_RAISED := Color(0.038, 0.058, 0.046, 0.94)
+const GLASS_BG := Color(0.055, 0.075, 0.065, 0.96)
+const GLASS_BG_RAISED := Color(0.075, 0.095, 0.080, 0.97)
 const EMBER := Color(0.961, 0.722, 0.255)
 const EMBER_BRIGHT := Color(1.0, 0.84, 0.47)
 const EMBER_DEEP := Color(0.78, 0.49, 0.16)
@@ -17,7 +17,7 @@ const CREAM_DIM := Color(0.90, 0.87, 0.76)
 const SAGE := Color(0.56, 0.686, 0.451)
 const SAGE_DIM := Color(0.38, 0.46, 0.32)
 const DANGER := Color(0.851, 0.322, 0.227)
-const BORDER_GOLD := Color(0.961, 0.722, 0.255, 0.70)
+const BORDER_GOLD := Color(1.0, 0.78, 0.30, 0.82)
 const BORDER_GOLD_STRONG := Color(0.961, 0.722, 0.255, 1.0)
 
 # Accent family for rite-type skill buttons (lit by rite family)
@@ -68,16 +68,16 @@ static func button_stylebox(state: String, accent: Color = EMBER,
 			sb.bg_color = Color(0.05, 0.07, 0.06, 0.55)
 			sb.border_color = Color(accent.r, accent.g, accent.b, 0.18)
 		_:
-			sb.bg_color = Color(0.058, 0.088, 0.070, 0.88)
+			sb.bg_color = Color(0.10, 0.13, 0.10, 0.94)
 			sb.border_color = Color(accent.r, accent.g, accent.b, 0.42)
 	sb.set_border_width_all(1)
 	if state == "pressed":
 		sb.set_border_width_all(2)
 	sb.set_corner_radius_all(RADIUS_BUTTON)
-	sb.content_margin_left = 26
-	sb.content_margin_right = 26
-	sb.content_margin_top = 15
-	sb.content_margin_bottom = 15
+	sb.content_margin_left = 30
+	sb.content_margin_right = 30
+	sb.content_margin_top = 18
+	sb.content_margin_bottom = 18
 	return sb
 
 static func style_button(b: Button, accent: Color = EMBER) -> void:
@@ -85,7 +85,7 @@ static func style_button(b: Button, accent: Color = EMBER) -> void:
 		b.add_theme_stylebox_override(state, button_stylebox(state, accent))
 	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	b.add_theme_color_override("font_color", CREAM)
-	b.add_theme_font_size_override("font_size", 20)
+	b.add_theme_font_size_override("font_size", 23)
 	b.add_theme_color_override("font_hover_color", EMBER_BRIGHT)
 	b.add_theme_color_override("font_pressed_color", EMBER)
 	b.add_theme_color_override("font_disabled_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.30))
@@ -100,7 +100,7 @@ static func style_primary_button(b: Button) -> void:
 		var sb := button_stylebox(state)
 		match state:
 			"normal":
-				sb.bg_color = Color(0.62, 0.42, 0.12, 0.94)
+				sb.bg_color = Color(0.74, 0.50, 0.16, 0.98)
 				sb.border_color = Color(EMBER_BRIGHT.r, EMBER_BRIGHT.g, EMBER_BRIGHT.b, 0.65)
 			"hover":
 				sb.bg_color = Color(0.72, 0.49, 0.15, 0.97)
@@ -115,7 +115,7 @@ static func style_primary_button(b: Button) -> void:
 	b.add_theme_color_override("font_hover_color", Color(1, 1, 0.94))
 	b.add_theme_color_override("font_pressed_color", Color(0.96, 0.86, 0.64))
 	b.add_theme_color_override("font_disabled_color", Color(0.9, 0.87, 0.78, 0.35))
-	b.add_theme_font_size_override("font_size", 20)
+	b.add_theme_font_size_override("font_size", 23)
 	b.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
 	b.add_theme_constant_override("shadow_offset_y", 2)
 
@@ -215,7 +215,7 @@ static func style_secondary_button(b: Button) -> void:
 	b.add_theme_color_override("font_pressed_color", SAGE)
 	b.add_theme_color_override("font_disabled_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.25))
 	b.add_theme_constant_override("outline_size", 1)
-	b.add_theme_font_size_override("font_size", 20)
+	b.add_theme_font_size_override("font_size", 23)
 	b.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
 	b.add_theme_constant_override("shadow_offset_y", 2)
 
@@ -234,7 +234,7 @@ static func style_danger_button(b: Button) -> void:
 	b.add_theme_color_override("font_pressed_color", DANGER)
 	b.add_theme_color_override("font_disabled_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.25))
 	b.add_theme_constant_override("outline_size", 1)
-	b.add_theme_font_size_override("font_size", 20)
+	b.add_theme_font_size_override("font_size", 23)
 	b.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
 	b.add_theme_constant_override("shadow_offset_y", 2)
 

@@ -63,9 +63,15 @@ class_name HUD
 const SKILL_KEYS := ["Q", "E", "R"]
 
 var _cooldown_poll := 0.0
+var elemental_hud: Node = null
+# "◈ LIGHT LOCKED" chip — grows from the mark signal, dies on release.
+var _lock_chip: Label = null
+var _lock_held := false
+var _lock_chip_t := 0.0
 
 func _ready() -> void:
 	_apply_ui_theme()
+	_build_elemental_hud()
 	_connect_signals()
 	_update_all()
 	
@@ -73,6 +79,7 @@ func _ready() -> void:
 	satchel_button.pressed.connect(_on_satchel_pressed)
 	scan_button.pressed.connect(_on_scan_pressed)
 	shop_button.pressed.connect(_on_shop_pressed)
+	_build_dungeon_button()
 	settings_button.pressed.connect(_on_settings_pressed)
 	stats_button.pressed.connect(_on_stats_pressed)
 	glint_button.pressed.connect(_on_glint_pressed)
@@ -106,6 +113,35 @@ func _ready() -> void:
 	for lbl in [$Root/DodgeButton/DodgeLabel, $Root/JumpButton/JumpLabel]:
 		if lbl:
 			lbl.visible = false
+	_build_lock_chip()
+
+func _build_elemental_hud() -> void:
+	var combat_vbox := combat_card.get_node_or_null("CombatVBox")
+	if combat_vbox == null:
+		return
+	elemental_hud = preload("res://scripts/ui/elemental_hud.gd").new()
+	elemental_hud.name = "ElementalHud"
+	combat_vbox.add_child(elemental_hud)
+
+## Top-center lock chip: the one screen element that makes "you are marked
+## by your lantern / you are not" readable the instant the state flips.
+func _build_lock_chip() -> void:
+	_lock_chip = Label.new()
+	_lock_chip.name = "LockChip"
+	_lock_chip.anchor_left = 0.5
+	_lock_chip.anchor_right = 0.5
+	_lock_chip.anchor_top = 0.0
+	_lock_chip.offset_left = -150.0
+	_lock_chip.offset_right = 150.0
+	_lock_chip.offset_top = 120.0
+	_lock_chip.offset_bottom = 154.0
+	_lock_chip.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_lock_chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lock_chip.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_lock_chip.add_theme_font_size_override("font_size", 17)
+	UiKit.chip_style(_lock_chip, Color(1.0, 0.74, 0.30))
+	_lock_chip.visible = false
+	$Root.add_child(_lock_chip)
 
 func _connect_signals() -> void:
 	game_state.hp_changed.connect(_on_hp_changed)
@@ -124,6 +160,10 @@ func _connect_signals() -> void:
 	
 	if world:
 		world.get_node("Hero").position_changed.connect(_on_hero_position)
+	# Visual path so a lock state never hides: mark-locked and mark-released
+	# update the lock chip and button glow independent of hero attack cycle.
+	game_state.mark_locked.connect(_on_mark_locked)
+	game_state.mark_released.connect(_on_mark_released_chip)
 	
 	# Combat signals via world
 	var hero = world.get_node("Hero") if world else null
@@ -149,6 +189,17 @@ func _process(delta: float) -> void:
 				enemy_hp_bar.value = e.get_hp()
 			if e.has_method("is_dead") and e.is_dead():
 				combat_card.visible = false
+	# Lock chip: breathe on acquire, fade on release.
+	if _lock_chip != null:
+		if _lock_held:
+			_lock_chip_t = minf(_lock_chip_t + delta * 3.0, 1.0)
+			var breath := 0.86 + 0.14 * sin(float(Time.get_ticks_msec()) * 0.006)
+			_lock_chip.modulate.a = _lock_chip_t * breath
+		else:
+			_lock_chip_t = maxf(_lock_chip_t - delta * 4.5, 0.0)
+			_lock_chip.modulate.a = _lock_chip_t
+			if _lock_chip_t <= 0.0:
+				_lock_chip.visible = false
 	_process_markers(delta)
 
 func _update_all() -> void:
@@ -516,7 +567,34 @@ func _on_combat_started(enemy: Node3D) -> void:
 	enemy_hp_bar.max_value = enemy.max_hp if enemy.has_method("get_max_hp") else 28
 	enemy_hp_bar.value = enemy.hp if enemy.has_method("get_hp") else 28
 	combat_status.text = "Target locked — Elian closes in"
+	if elemental_hud != null and elemental_hud.has_method("set_target"):
+		elemental_hud.set_target(enemy)
 
+## Lit path: chip fades in the instant a foe is claimed; chip + card stay
+## visible together so the player never has to hunt for feedback.
+func _on_mark_locked(enemy: Node3D) -> void:
+	_lock_held = true
+	_lock_chip_t = 0.0
+	_lock_chip.visible = true
+	_lock_chip.text = "◈ LIGHT LOCKED — %s" % _display_enemy_name(enemy)
+	_set_buttons_locked(true)
+
+func _on_mark_released_chip() -> void:
+	_lock_held = false
+	_set_buttons_locked(false)
+
+## Skill & attack row: a brief pulse ring per button reads as "ready to
+## spend on your lit target" while the mark persists.
+func _set_buttons_locked(on: bool) -> void:
+	attack_button.set_lock_glow(on)
+	for slot in 3:
+		var sk := game_state.get_skill(slot)
+		if sk.is_empty():
+			skill_buttons[slot].set_lock_glow(false)
+			continue
+		var type_str := str(sk.get("type", ""))
+		var needs_target := type_str != "heal_bloom"
+		skill_buttons[slot].set_lock_glow(on and needs_target)
 ## "@Hushling@12" → "Hushling": scene-instanced nodes carry engine scaffolding.
 func _display_enemy_name(enemy: Node3D) -> String:
 	var parts := String(enemy.name).split("@", false)
@@ -549,6 +627,30 @@ func _on_joystick_direction(direction: Vector2) -> void:
 func _on_scan_pressed() -> void:
 	# Open scan camera
 	InputManager.scan_pressed.emit()
+
+func _build_dungeon_button() -> void:
+	var action_row := $Root/MetaRow/ActionRow as HBoxContainer
+	if action_row == null or action_row.get_node_or_null("DungeonButton") != null:
+		return
+	var button := Button.new()
+	button.name = "DungeonButton"
+	button.text = "DUNGEON"
+	button.tooltip_text = "Choose an instance"
+	button.custom_minimum_size = Vector2(136, 58)
+	UiKit.style_primary_button(button)
+	button.pressed.connect(_on_dungeon_pressed)
+	action_row.add_child(button)
+
+func _on_dungeon_pressed() -> void:
+	var menu := get_tree().root.find_child("DungeonSelect", true, false)
+	if not menu:
+		var scene: PackedScene = load("res://scenes/ui/dungeon_select.tscn")
+		menu = scene.instantiate()
+		var host := get_tree().current_scene
+		if host == null:
+			host = get_tree().root
+		host.add_child(menu)
+	menu.open()
 
 func _on_shop_pressed() -> void:
 	var shop := get_tree().root.find_child("ShopMenu", true, false)

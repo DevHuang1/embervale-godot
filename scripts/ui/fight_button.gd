@@ -50,6 +50,13 @@ var _pressed := false
 var _cooldown_ratio := 0.0
 var _cd_remaining := 0.0      # seconds left, for the on-logo countdown
 var _ready_flash := 0.0    # brief glow when a cooldown completes
+var _lock_glow := 0.0      # 0..1 lantern lock ring (a mark is held)
+var _lock_target := 0.0
+
+## Raise/lower the pulsing "marked foe" ring so the whole action row
+## visibly breathes with the lantern lock.
+func set_lock_glow(on: bool) -> void:
+	_lock_target = 1.0 if on else 0.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -123,6 +130,17 @@ func _process(delta: float) -> void:
 		_ready_flash = maxf(_ready_flash - delta * 2.2, 0.0)
 		if _ready_flash == 0.0:
 			queue_redraw()
+	if _lock_glow != _lock_target:
+		if _lock_glow < _lock_target:
+			_lock_glow = minf(_lock_glow + delta * 3.5, 1.0)
+		else:
+			_lock_glow = maxf(_lock_glow - delta * 5.0, 0.0)
+		queue_redraw()
+	_glow_drift += delta
+	if _lock_glow > 0.0:
+		queue_redraw()
+
+var _glow_drift := 0.0
 
 func _draw() -> void:
 	var center := size * 0.5
@@ -142,6 +160,16 @@ func _draw() -> void:
 	var rim := accent.lightened(0.35) if _pressed else accent
 	draw_arc(center, r, 0.0, TAU, 64,
 		Color(rim.r, rim.g, rim.b, 0.55 if dimmed else 0.9), 3.0, true)
+	if _lock_glow > 0.01:
+		# Pulsing lantern-orange ring: "a foe is lit" — breathes in time with
+		# the ground mark so button row and world ring share one language.
+		var pulse := 0.5 + 0.5 * sin(_glow_drift * TAU * 1.2)
+		var lc := Color(1.0, 0.74, 0.30)
+		draw_arc(center, r + 4.0, 0.0, TAU, 64,
+			Color(lc.r, lc.g, lc.b, (0.35 + 0.45 * pulse) * _lock_glow), 4.0, true)
+		draw_arc(center, r * (1.04 + 0.06 * pulse), 0.0, TAU, 64,
+			Color(lc.r, lc.g, lc.b,
+				0.30 * _lock_glow * (1.0 - pulse * 0.5)), 2.0, true)
 	if _cooldown_ratio > 0.004:
 		# Pie overlay covering the icon interior proportionally to remaining
 		# time — unmistakable at thumb-glance, unlike a thin rim arc alone.
