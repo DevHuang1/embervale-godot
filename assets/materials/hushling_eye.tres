@@ -6,7 +6,7 @@
 render_priority = 0
 shader = ExtResource("1_entity")
 shader_parameter/base_color = Color(0.05, 0.07, 0.07, 1)
-shader_parameter/roughness = 0.3
+shader_parameter/roughness = 0.22
 shader_parameter/metallic = 0.0
 shader_parameter/specular = 0.5
 shader_parameter/rim_color = Color(0.85, 0.95, 0.9, 1)
@@ -20,3 +20,5 @@ shader_parameter/flash_color = Color(1, 0.3, 0.2, 1)
 shader_parameter/flash_intensity = 0.0
 shader_parameter/sway_amount = 0.0
 shader_parameter/sway_speed = 1.0
+shader_parameter/micro_roughness = 0.04
+shader_parameter/emission_pulse_speed = 1.6

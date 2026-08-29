@@ -1,10 +1,12 @@
-[gd_resource type="ShaderMaterial" load_steps=6 format=3]
+[gd_resource type="ShaderMaterial" load_steps=8 format=3]
 
 [ext_resource type="Shader" path="res://assets/shaders/entity_body.gdshader" id="1_entity"]
 [ext_resource type="Texture2D" path="res://assets/textures/generated/boss_bark_normal.png" id="2_nrm"]
 [ext_resource type="Texture2D" path="res://assets/textures/generated/boss_orm.png" id="3_orm"]
 [ext_resource type="Texture2D" path="res://assets/textures/generated/boss_heart_mask.png" id="4_hrt"]
 [ext_resource type="Texture2D" path="res://assets/textures/generated/detail_normal.png" id="5_dtl"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/albedo.jpg" id="7_rock_alb"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/bark/albedo.jpg" id="6_bark_alb"]
 
 [resource]
 render_priority = 0
@@ -13,6 +15,8 @@ shader_parameter/base_color = Color(0.13, 0.11, 0.12, 1)
 shader_parameter/roughness = 0.55
 shader_parameter/metallic = 0.08
 shader_parameter/specular = 0.4
+shader_parameter/albedo_texture = ExtResource("6_bark_alb")
+shader_parameter/albedo_mix = 0.46
 shader_parameter/normal_texture = ExtResource("2_nrm")
 shader_parameter/normal_mix = 0.62
 shader_parameter/orm_texture = ExtResource("3_orm")
@@ -39,3 +43,9 @@ shader_parameter/cloth_noise_scale = 9.0
 shader_parameter/joint_ao_strength = 0.18
 shader_parameter/joint_ao_low = -1.8
 shader_parameter/joint_ao_high = -0.6
+shader_parameter/detail_tex = ExtResource("7_rock_alb")
+shader_parameter/detail_mix = 0.35
+shader_parameter/detail_scale = Vector2(3, 3)
+shader_parameter/micro_roughness = 0.1
+shader_parameter/rain_response = 0.42
+shader_parameter/emission_pulse_speed = 0.6

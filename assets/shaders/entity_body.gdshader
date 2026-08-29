@@ -1,7 +1,7 @@
 shader_type spatial;
 render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
-// === Embervale Entity Body v2 ===
+// === Embervale Entity Body v3 ===
 // Full PBR lighting response (moonlight, lanterns, warm pools), fresnel rim
 // lighting with width control, animated emissive glow gated by a mask,
 // optional texture inputs (albedo / normal / ORM / detail normal), a cheap
@@ -23,6 +23,8 @@ uniform float normal_mix : hint_range(0.0, 1.0) = 0.0;
 // glTF-style ORM packing: R = ambient occlusion, G = roughness, B = metallic
 uniform sampler2D orm_texture : hint_default_white;
 uniform float orm_mix : hint_range(0.0, 1.0) = 0.0;
+uniform sampler2D roughness_texture : hint_default_white;
+uniform float roughness_mix : hint_range(0.0, 1.0) = 0.0;
 uniform sampler2D detail_normal : hint_normal;
 uniform float detail_normal_strength : hint_range(0.0, 1.5) = 0.0;
 uniform vec2 detail_normal_scale = vec2(7.0, 7.0);
@@ -73,9 +75,24 @@ uniform float joint_ao_high : hint_range(-2.0, 2.0) = -0.08;
 // --- WorldState reactivity (strict superset: defaults keep prior looks) ---
 // Ambient magic lifts mask-gated emission at night (fireflies brighten with it).
 global uniform float world_magic_level;
+global uniform float world_rain_level;
 uniform float magic_glow_lift : hint_range(0.0, 1.0) = 0.25;
 // Battle wear: darkens and roughens the body as HP drops (0 = pristine).
 uniform float hp_wear : hint_range(0.0, 1.0) = 0.0;
+
+// === v3 drop-in superset ===
+// Per-clone surface variation, wet-weather reactivity (same downpour as the
+// terrain), micro roughness breakup, breathing weak-point emission, and a
+// secondary albedo layer for hybrid surfaces (bark+stone, clay+crust). All
+// default OFF so every existing .tres renders identically until bound.
+uniform float albedo_variation : hint_range(0.0, 0.5) = 0.0;
+uniform float variation_seed : hint_range(0.0, 1.0) = 0.35;
+uniform float micro_roughness : hint_range(0.0, 0.4) = 0.0;
+uniform float rain_response : hint_range(0.0, 1.0) = 0.0;
+uniform float emission_pulse_speed : hint_range(0.0, 8.0) = 0.0;
+uniform sampler2D detail_tex : source_color, hint_default_white;
+uniform float detail_mix : hint_range(0.0, 1.0) = 0.0;
+uniform float detail_scale : hint_range(0.5, 16.0) = 4.0;
 
 varying vec3 world_pos_v;
 varying float local_y_v;
@@ -119,12 +136,30 @@ void fragment() {
 	// Two-tone banding: trim color below the object-local height band
 	float band = smoothstep(trim_height - trim_softness, trim_height + trim_softness, local_y_v);
 	ALBEDO = mix(ALBEDO, trim_color, trim_blend * (1.0 - band));
+	// v3 per-clone variation + secondary albedo layer (bark/stone hybrids)
+	if (albedo_variation > 0.001) {
+		float v3seed = hash21(vec2(floor(fract(variation_seed + world_pos_v.y * 0.017) * 4096.0), 7.0));
+		float v3sway = (v3seed - 0.5) * 2.0 * albedo_variation;
+		ALBEDO *= (1.0 + v3sway) * mix(vec3(1.0), vec3(1.04, 1.0, 0.93), v3sway * 0.5);
+	}
+	if (detail_mix > 0.001) {
+		vec3 dex = texture(detail_tex, UV * detail_scale).rgb;
+		float dband = value_noise(world_pos_v.xz * 1.6 + vec2(world_pos_v.y * 0.9));
+		ALBEDO = mix(ALBEDO, ALBEDO * (dex * 2.0), detail_mix * (0.45 + 0.55 * dband));
+	}
 
 	// ORM: R=AO, G=roughness, B=metallic
 	vec3 orm = texture(orm_texture, UV).rgb;
 	ROUGHNESS = mix(roughness, orm.g, orm_mix);
+	ROUGHNESS = mix(ROUGHNESS, texture(roughness_texture, UV).r, roughness_mix);
 	METALLIC = mix(metallic, orm.b, orm_mix);
 	SPECULAR = specular;
+	// v3 micro roughness: world-space grain keeps large surrogate skins from
+	// reading as smooth plastic under a strong key light.
+	if (micro_roughness > 0.001) {
+		float mrg = value_noise(world_pos_v.xz * 10.0 + vec2(world_pos_v.y * 5.0));
+		ROUGHNESS = clamp(ROUGHNESS + (mrg - 0.5) * 2.0 * micro_roughness, 0.02, 1.0);
+	}
 
 	// Normal blend: sampled tangent normal + tiled detail micro-surface
 	float n_active = clamp(normal_mix + detail_normal_strength, 0.0, 1.0);
@@ -144,7 +179,8 @@ void fragment() {
 	float em_mask = mix(1.0, texture(emission_mask, UV).r, emission_mask_mix);
 	// Ambient magic breathes extra life into masked glow (night groves pulse).
 	float magic_lift = 1.0 + world_magic_level * magic_glow_lift * 0.35 * em_mask;
-	EMISSION = emission_color * emission_energy * glow_intensity * em_mask * magic_lift
+	float em_pulse = mix(1.0, 1.0 + 0.16 * sin(TIME * emission_pulse_speed + variation_seed * 6.2831), step(0.001, emission_pulse_speed));
+	EMISSION = emission_color * emission_energy * glow_intensity * em_mask * magic_lift * em_pulse
 		+ rim_color * rim * rim_intensity
 		+ flash_color * flash_intensity * 1.6;
 
@@ -173,5 +209,15 @@ void fragment() {
 	if (hp_wear > 0.001) {
 		ALBEDO *= mix(1.0, 0.62 + 0.1 * value_noise(world_pos_v.xz * 14.0), hp_wear);
 		ROUGHNESS = mix(ROUGHNESS, 0.95, hp_wear * 0.7);
+	}
+
+	// v3 wet weather: shared world_rain_level darkens + glosses the skin so
+	// bodies answer the same downpour as the terrain (default off per body).
+	if (rain_response > 0.001) {
+		float wet = clamp(world_rain_level, 0.0, 1.0);
+		if (wet > 0.003) {
+			ALBEDO *= mix(1.0, 0.72, wet * rain_response * 0.8);
+			ROUGHNESS = mix(ROUGHNESS, min(ROUGHNESS, 0.34), wet * rain_response * 0.85);
+		}
 	}
 }

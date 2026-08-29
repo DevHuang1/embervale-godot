@@ -117,6 +117,7 @@ func _ready() -> void:
 		_base_foot_pos[foot_l] = foot_l.position
 	if foot_r:
 		_base_foot_pos[foot_r] = foot_r.position
+	_apply_albedo_variation()
 
 func _process(delta: float) -> void:
 	if _dead_check():
@@ -198,6 +199,28 @@ func _apply_scan_reveal() -> void:
 		if m is ShaderMaterial and m.shader != null \
 				and m.shader.resource_path.ends_with("entity_body.gdshader"):
 			m.set_shader_parameter("scan_reveal", v)
+
+## Per-clone surface variation (v3): bodies whose material opts in via
+## albedo_variation get their OWN duplicate with a unique seed, so a pack
+## of hushlings reads as varied individuals while the shared .tres stays pristine.
+func _apply_albedo_variation() -> void:
+	if visual_root == null:
+		return
+	for mi in visual_root.find_children("*", "MeshInstance3D", true, false):
+		var m: Material = mi.material_override
+		if m == null and mi.mesh != null:
+			m = mi.get_active_material(0)
+		if not (m is ShaderMaterial) or (m as ShaderMaterial).shader == null:
+			continue
+		var sm := m as ShaderMaterial
+		if not sm.shader.resource_path.ends_with("entity_body.gdshader"):
+			continue
+		var strength = sm.get_shader_parameter("albedo_variation")
+		if strength == null or float(strength) <= 0.0:
+			continue
+		var local := sm.duplicate(false)
+		local.set_shader_parameter("variation_seed", randf())
+		mi.material_override = local
 
 ## Pendulum energy for lantern creaks (read by Hero).
 func pendulum_speed() -> float:
@@ -319,6 +342,8 @@ func trigger_attack(kind: String = "") -> void:
 					_play_sky()
 				"spin":
 					_play_spin()
+				"enemy":
+					_play_enemy_strike()
 				_:
 					if attack_style == "magic":
 						_play_cast()
@@ -847,6 +872,49 @@ func _finish_cast(base_drive: Vector3, base_guard: Vector3,
 
 ## Slash dispatcher: the current combo step picks the swing variant.
 ## Magic casts and BLOB/BRUTE one-shots never enter this path.
+## Enemy-only strike: deliberately slow and readable so the player always
+## has a full tell. Long coil (0.45s) -> brief hold -> heavy snap (0.12s)
+## -> long recovery (0.8s). Never combos; each attack is a single event.
+func _play_enemy_strike() -> void:
+	var drive := arm_r if _swing_right else arm_l
+	var guard := arm_l if _swing_right else arm_r
+	if not drive:
+		anim_state = AnimState.IDLE
+		_emit_impact()
+		return
+	var base_drive := _base_arm_r_rot if _swing_right else _base_arm_l_rot
+	var base_guard := _base_arm_l_rot if _swing_right else _base_arm_r_rot
+	var twist := 0.30 if _swing_right else -0.30
+	_attack_tween = create_tween()
+	# Slow coil back with a torso wind that the player can read across the arena
+	if visual_root:
+		_attack_tween.parallel().tween_property(visual_root, "rotation:y", twist, 0.45) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_attack_tween.parallel().tween_property(drive, "rotation:x", base_drive.x - 2.6, 0.45) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	if guard:
+		_attack_tween.parallel().tween_property(guard, "rotation:x",
+			base_guard.x - 0.6, 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	# Brief planted hold: commitment window (dodge here)
+	_attack_tween.tween_interval(0.10)
+	# Heavy snap into the strike
+	_attack_tween.tween_property(drive, "rotation:x", base_drive.x + 1.2, 0.12) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	if visual_root:
+		_attack_tween.parallel().tween_property(visual_root, "rotation:y", -twist * 0.6, 0.12) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_attack_tween.tween_callback(_swing_impact.bind(-twist * 0.6, 0.18))
+	# Long, tired recovery back to guard
+	_attack_tween.chain().tween_property(drive, "rotation:x", base_drive.x, 0.80) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	if visual_root:
+		_attack_tween.parallel().tween_property(visual_root, "rotation:y", 0.0, 0.80) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	_attack_tween.chain().tween_callback(func():
+		if anim_state == AnimState.ATTACK:
+			anim_state = AnimState.IDLE)
+	_swing_right = not _swing_right
+
 func _play_swing() -> void:	match combo_step:
 		1:
 			_play_swing_reverse()

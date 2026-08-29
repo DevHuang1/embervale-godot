@@ -53,6 +53,23 @@ func _run() -> void:
 				failures += 1
 				print("FAIL: %s unbound sampler '%s'" % [path, sampler])
 
+	# --- Entity v3 material pass ---
+	const ENTITY_MATERIALS := ["entity_hero", "entity_hero_ember", "entity_hushling", "entity_boss"]
+	for em_name in ENTITY_MATERIALS:
+		var mp := "res://assets/materials/%s.tres" % em_name
+		if not ResourceLoader.exists(mp):
+			failures += 1
+			print("FAIL: missing entity material: ", mp)
+			continue
+		var em := load(mp) as ShaderMaterial
+		if em == null or em.shader == null:
+			failures += 1
+			print("FAIL: entity material invalid: ", mp)
+			continue
+		if not em.shader.resource_path.ends_with("entity_body.gdshader"):
+			failures += 1
+			print("FAIL: %s not an entity_body material" % mp)
+
 	for pusher in ["world_pusher_1", "world_pusher_2", "world_pusher_3"]:
 		var globals: Dictionary = ProjectSettings.get_setting(
 			"shader_globals/%s" % pusher, {})

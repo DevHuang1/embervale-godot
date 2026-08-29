@@ -6,6 +6,15 @@ below is fully generated, drop-in compatible, and regenerable/replaceable:
 any PNG under `assets/textures/generated/` can be swapped for a painted master
 at the same path without touching materials or code.
 
+## Entity material realism pass (v3)
+- M assets/shaders/entity_body.gdshader - v3 drop-in superset: per-clone albedo_variation / variation_seed tonal+hue roll, micro_roughness world-space grain, rain_response shared with the world_rain_level downpour, emission_pulse_speed breathing for weak points, and a secondary detail_tex layer for bark+stone and clay+crust hybrids. All default OFF so prior materials render identically until bound.
+- M entity_hushling.tres - clone tonal variation + micro roughness + rain
+- M entity_boss.tres - bark/stone secondary albedo layer, heart pulse, rain
+- M hushling_eye.tres - glossier lens + breathing weak-point glow
+- M entity_hero.tres, entity_hero_ember.tres - micro roughness + rain
+- M scripts/entities/entity_animator.gd - duplicates the shared enemy material per clone with a unique seed (shared .tres stays pristine)
+- M scripts/systems/loot_drop.gd - gold drops render as warm shaded metal
+
 ## Shaders
 - **M** `assets/shaders/entity_body.gdshader` — v2, strict superset: albedo /
   normal / ORM (R=AO G=Rough B=Metal) / emission-mask inputs with mix factors,
