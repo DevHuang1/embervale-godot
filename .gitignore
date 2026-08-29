@@ -36,3 +36,8 @@ user_*.cfg
 
 # Hackathon plan (keep untracked)
 SHIPATON_PLAN.md
+
+# Stray local junk (crash dump + downloaded reference image)
+crash_log.txt
+images (1).jpeg
+images (1).jpeg.import
