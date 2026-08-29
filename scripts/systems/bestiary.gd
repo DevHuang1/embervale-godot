@@ -20,6 +20,13 @@ const STAGE_REALM := {
 }
 
 const REALMS := {
+	"whispergrove": {
+		"title": "Whispergrove",
+		"intro": "Jade boughs gather around the Lantern Bearer.",
+		"mist_tint": Color(0.58, 0.76, 0.65),
+		"firefly_tint": Color(1.0, 0.84, 0.38),
+		"grade": {"saturation": 1.08, "contrast": 1.02, "glow": 1.08},
+	},
 	REALM_BRAMBLEWOOD: {
 		"title": "Bramblewood",
 		"intro": "The grove's green edge stirs with small hungers.",
@@ -41,6 +48,13 @@ const REALMS := {
 		"firefly_tint": Color(1.0, 0.55, 0.30),
 		"grade": {"saturation": 1.06, "contrast": 1.10, "glow": 1.2},
 	},
+	"moonfen": {
+		"title": "Moonfen",
+		"intro": "Violet water holds a cold reflection of the old moon.",
+		"mist_tint": Color(0.42, 0.58, 0.78),
+		"firefly_tint": Color(0.36, 0.86, 1.0),
+		"grade": {"saturation": 1.08, "contrast": 1.08, "glow": 1.22},
+	},
 }
 
 ## Enemy tier variants per realm. Fields feed CharacterModelData plus the
@@ -54,16 +68,17 @@ const ENEMY_VARIANTS := {
 			"speed": 1.0, "volley": false,
 			"tint": Color(0, 0, 0, 0), "eye": Color(0, 0, 0, 0),
 		},
-		"hard": {
-			"display": "Elder Hushling", "scale": 1.12, "hp": 48, "atk_bonus": 2,
-			"speed": 0.92, "volley": true,
+"hard": {
+				"kind": "charger",
+				"display": "Elder Charger", "scale": 1.12, "hp": 48, "atk_bonus": 2,
+				"speed": 0.92, "volley": true,
 			"tint": Color(0.13, 0.20, 0.12), "eye": Color(1.0, 0.42, 0.16),
 		},
 	},
 	REALM_MISTFEN: {
-		"normal": {
-			"kind": "hushling",
-			"display": "Fenwick Hushling", "scale": 0.92, "hp": 34, "atk_bonus": 1,
+"normal": {
+				"kind": "ambusher",
+				"display": "Fenwick Ambusher", "scale": 0.92, "hp": 34, "atk_bonus": 1,
 			"speed": 1.05, "volley": false,
 			"tint": Color(0.16, 0.22, 0.26), "eye": Color(0.62, 0.80, 0.96),
 		},
@@ -94,7 +109,7 @@ const ENEMY_VARIANTS := {
 const WAVES := {
 	0: {"normal": 2, "hard": 0},
 	1: {"normal": 2, "hard": 1},
-	2: {"normal": 2, "hard": 2},
+	2: {"normal": 2, "hard": 2, "elite": 1},
 }
 
 ## Boss identity: what the player may bend vs what stays locked forever.

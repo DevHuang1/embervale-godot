@@ -12,8 +12,8 @@ func _ready() -> void:
 	burst_damage = 8
 	burst_cooldown = 4.0
 	orbit_distance = 5.8
-	lunge_speed = 18.0
-	feint_speed = 11.0
+	lunge_speed = 10.5
+	feint_speed = 6.5
 	super._ready()
 	_build_fen_flags()
 

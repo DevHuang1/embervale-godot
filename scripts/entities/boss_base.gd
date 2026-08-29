@@ -19,7 +19,7 @@ enum BossPhase { PHASE_1, PHASE_2, PHASE_3, ENRAGE }
 @export var max_hp: int = 500
 @export var phase_thresholds: Array = [0.7, 0.3, 0.1]  # HP percentages for phase transitions
 @export var base_atk: int = 12
-@export var move_speed: float = 4.2
+@export var move_speed: float = 3.6
 @export var arena_radius: float = 20.0
 
 # Critical zone (exposed head/crown): strikes landing here hit harder
@@ -48,6 +48,7 @@ var _menace_t := 0.0
 # Null = the untouched default boss.
 var customization: BossCustomization = null
 var sfx_profile: String = "vanilla"
+var elemental_status: Node = null
 # Practice respawns skip rewards and the scan-earn loop.
 @export var is_practice: bool = false
 ## Diamonds granted on the FIRST kill of this boss per save (cosmetic only).
@@ -55,10 +56,16 @@ var sfx_profile: String = "vanilla"
 
 func _ready() -> void:
 	hp = max_hp
+	var health_bar := preload("res://scripts/ui/enemy_health_bar.gd").new()
+	health_bar.name = "EnemyHealthBar"
+	add_child(health_bar)
+	elemental_status = preload("res://scripts/systems/elemental_status.gd").new()
+	elemental_status.name = "ElementalStatus"
+	add_child(elemental_status)
 	_calculate_phase_thresholds()
 	
 	collision_layer = 1 << 4  # Boss layer
-	collision_mask = 1 << 0 | 1 << 5  # Player + Environment
+	collision_mask = 1 << 0 | 1 << 5 | 1 << 6  # Player + Environment + Prop
 	
 	hitbox.area_entered.connect(_on_hitbox_entered)
 	
@@ -71,6 +78,12 @@ func _ready() -> void:
 
 	# Boss UI
 	_show_boss_health_bar()
+
+	# Use a bounded wider frame for arena-scale attacks while preserving the
+	# player-centered follow camera and mobile-safe spring-arm behavior.
+	var camera_rig := get_parent().get_node_or_null("CameraRig")
+	if camera_rig != null and camera_rig.has_method("set_boss_combat"):
+		camera_rig.set_boss_combat(true, arena_radius)
 
 	_build_boss_details()
 
@@ -249,7 +262,7 @@ func _update_ai(delta: float) -> void:
 	if stun_timer > 0:
 		return
 	
-	var player = get_parent().get_node_or_null("Hero")
+	var player = get_tree().get_first_node_in_group("player")
 	if not player:
 		return
 	
@@ -257,9 +270,12 @@ func _update_ai(delta: float) -> void:
 	var to_player = (player.global_position - global_position).normalized()
 	var dist = global_position.distance_to(player.global_position)
 	
+	var status_speed := 1.0
+	if elemental_status != null and elemental_status.has_method("movement_multiplier"):
+		status_speed = float(elemental_status.movement_multiplier())
 	if dist > 3.0:
-		velocity.x = lerp(velocity.x, to_player.x * move_speed, 0.1)
-		velocity.z = lerp(velocity.z, to_player.z * move_speed, 0.1)
+		velocity.x = lerp(velocity.x, to_player.x * move_speed * status_speed, 0.1)
+		velocity.z = lerp(velocity.z, to_player.z * move_speed * status_speed, 0.1)
 	else:
 		velocity.x = lerp(velocity.x, 0.0, 0.2)
 		velocity.z = lerp(velocity.z, 0.0, 0.2)
@@ -289,7 +305,7 @@ func _try_attacks(player: Node3D, dist: float) -> void:
 				_perform_ultimate(player)
 
 func _perform_basic_attack(player: Node3D) -> void:
-	attack_cooldowns["basic"] = 2.0
+	attack_cooldowns["basic"] = 2.8
 	# Melee slam animation + ember shockwave at impact
 	if animator:
 		animator.trigger_attack()
@@ -301,20 +317,21 @@ func _perform_basic_attack(player: Node3D) -> void:
 	_shake_camera(0.22)
 
 func _shake_camera(intensity: float) -> void:
-	var rig = get_parent().get_node_or_null("CameraRig")
-	if rig and rig.has_method("add_shake"):
-		rig.add_shake(intensity)
+	var tier := "major" if intensity >= 0.45 else ("heavy" if intensity >= 0.25 else "medium")
+	var base := float(ImpactDirector.FEEDBACK_TIERS[tier].shake)
+	ImpactDirector.apply_feedback(self, tier, global_position + Vector3.UP * 1.0,
+		Vector3.FORWARD, intensity / maxf(base, 0.001))
 
 func _perform_special_1(player: Node3D) -> void:
-	attack_cooldowns["special_1"] = 8.0
+	attack_cooldowns["special_1"] = 10.0
 	# Override in derived classes
 
 func _perform_special_2(player: Node3D) -> void:
-	attack_cooldowns["special_2"] = 12.0
+	attack_cooldowns["special_2"] = 15.0
 	# Override in derived classes
 
 func _perform_ultimate(player: Node3D) -> void:
-	attack_cooldowns["ultimate"] = 20.0
+	attack_cooldowns["ultimate"] = 24.0
 	# Override in derived classes - massive attack
 
 func _deal_area_damage(center: Vector3, radius: float, damage: int) -> void:
@@ -354,12 +371,15 @@ func _on_hitbox_entered(area: Area3D) -> void:
 			dmg = 10
 		take_damage(dmg, area.global_position.direction_to(global_position))
 
-func take_damage(amount: int, knockback_dir: Vector3) -> void:
+func take_damage(amount: int, knockback_dir: Vector3, critical: bool = false) -> void:
 	if is_defeated:
 		return
 	
 	hp -= amount
-	FloatingText.spawn_on_entity(self, str(amount), Color(1, 0.84, 0.47))
+	FloatingText.spawn_damage_on_entity(self, amount, critical)
+	var health_bar := get_node_or_null("EnemyHealthBar")
+	if health_bar != null and health_bar.has_method("notify_damage"):
+		health_bar.notify_damage()
 	
 	# Visual
 	if animator:
@@ -418,11 +438,17 @@ func _evolve_for_phase(phase: int) -> void:
 	# Transition shockwave + rumble sells the shift physically
 	CombatFx.spawn_shockwave(self, global_position - Vector3(0, 0.3, 0), 4.2,
 		Color(1.0, 0.42, 0.15, 0.8), 0.8)
+	CombatFx.spawn_impact_light(self, global_position,
+		Color(1.0, 0.55, 0.25), 3.6, 6.0, 0.42)
 	CombatFx.spawn_motes(self, global_position + Vector3(0, 1.2, 0),
 		Color(1.0, 0.55, 0.25, 0.7), 18, 1.4, 1.1, 2.4)
-	CombatFx.impact(self, 0.55, 0.08, 0.06, 0.65)
+	ImpactDirector.apply_feedback(self, "major", global_position + Vector3.UP * 1.4,
+		Vector3.FORWARD, 1.0)
 
 func die() -> void:
+	var camera_rig := get_parent().get_node_or_null("CameraRig")
+	if camera_rig != null and camera_rig.has_method("set_boss_combat"):
+		camera_rig.set_boss_combat(false)
 	is_defeated = true
 	collision_layer = 0
 	collision_mask = 0
@@ -521,6 +547,15 @@ func _hide_boss_health_bar() -> void:
 
 func is_dead() -> bool:
 	return is_defeated
+
+func apply_elemental_status(element: String, intensity: int = 1) -> void:
+	if elemental_status != null and elemental_status.has_method("apply"):
+		elemental_status.apply(element, intensity)
+
+func get_elemental_status_snapshot() -> Dictionary:
+	if elemental_status != null and elemental_status.has_method("status_snapshot"):
+		return elemental_status.status_snapshot()
+	return {}
 
 func get_crit_multiplier_at(point: Vector3) -> float:
 	var world_center := global_position + global_transform.basis * crit_zone_center

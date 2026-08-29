@@ -13,10 +13,10 @@ func _rig_profile() -> String:
 func _ready() -> void:
 	# Ranged profile: hold standoff, reposition instead of lunging in.
 	orbit_distance = 8.5
-	lunge_speed = 8.0
-	feint_speed = 7.0
-	orbit_speed = 4.4
-	recover_speed = 5.6
+	lunge_speed = 5.6
+	feint_speed = 4.8
+	orbit_speed = 2.8
+	recover_speed = 3.6
 	burst_cooldown = 4.2
 	burst_damage = 7
 	sfx_profile = "venom_spit"
@@ -73,8 +73,9 @@ func _perform_bramble_burst(player: Node3D) -> void:
 	else:
 		audio.play_enemy_special()
 	var target_pos: Vector3 = player.global_position + Vector3(0, 0.7, 0)
-	CombatFx.spawn_ring(self, target_pos, 1.6,
-		Color(0.36, 0.9, 0.42, 0.7), 0.5)
+	CombatFx.spawn_ground_telegraph(self,
+		Vector3(target_pos.x, 0, target_pos.z), 1.6,
+		Color(0.36, 0.9, 0.42), 0.5)
 	_spawn_burst_fx(Color(0.36, 0.9, 0.42, 0.5), 0.5, 14)
 	var timer := get_tree().create_timer(0.55, false)
 	timer.timeout.connect(_lob_venom.bind(player, target_pos))

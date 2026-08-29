@@ -15,13 +15,15 @@ func _ready() -> void:
 	_def = Bestiary.boss_def(def_id)
 	if _def.is_empty():
 		push_error("BiomeBoss: unknown def_id '%s'" % def_id)
-	super._ready()
+	# Derived stats must exist before BossBase calculates thresholds and camera
+	# framing; otherwise phase timing and arena zoom use base defaults.
 	max_hp = int(_def.get("hp", 400))
 	hp = max_hp
 	base_atk = int(_def.get("atk", 12))
 	move_speed = float(_def.get("speed", 4.5))
 	diamond_reward = int(_def.get("diamond_reward", 3))
 	arena_radius = 20.0
+	super._ready()
 
 	var vis := get_node_or_null("Visual")
 	if vis != null:
@@ -170,8 +172,8 @@ func _erupt_at(pos: Vector3, radius: float, damage: int, warn := 0.5) -> void:
 	if is_defeated:
 		return
 	if warn > 0.0:
-		CombatFx.spawn_ring(self, pos, radius * 1.2,
-			Color(DANGER.r, DANGER.g, DANGER.b, 0.7), warn)
+		CombatFx.spawn_ground_telegraph(self, pos, radius * 1.1,
+			Color(DANGER.r, DANGER.g, DANGER.b), warn)
 		CombatFx.spawn_decal(self, pos, radius * 0.8)
 		var timer := get_tree().create_timer(warn, false)
 		timer.timeout.connect(_erupt_at.bind(pos, radius, damage, 0.0))

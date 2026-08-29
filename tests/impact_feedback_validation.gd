@@ -81,6 +81,15 @@ func _run_algorithm_unit_tests() -> void:
 	_assert_true(reduced < mobile,
 		"reduced-motion multiplier is below mobile full-feedback amplitude")
 
+	var elite_profile: Dictionary = ImpactDirectorRuntime.FEEDBACK_TIERS["elite_hit"]
+	var chain_profile: Dictionary = ImpactDirectorRuntime.FEEDBACK_TIERS["elemental_chain"]
+	_assert_true(int(elite_profile.priority) > int(ImpactDirectorRuntime.FEEDBACK_TIERS["heavy"].priority),
+		"elite hit has priority above a standard heavy hit")
+	_assert_true(int(chain_profile.priority) > int(ImpactDirectorRuntime.FEEDBACK_TIERS["major"].priority),
+		"elemental chain has the highest impact priority")
+	_assert_true(float(chain_profile.shake) <= GLOBAL_CAP,
+		"elemental chain base shake remains within the global cap")
+
 func _run_environment(environment: Dictionary) -> void:
 	var label := str(environment.name)
 	print("-- Environment: ", label, " --")
@@ -100,6 +109,12 @@ func _run_environment(environment: Dictionary) -> void:
 		camera.add_to_group("camera_rig")
 	_assert_true(hero != null, label + " has Hero")
 	_assert_true(camera != null, label + " has CameraRig")
+	if camera != null and camera.has_method("set_boss_combat"):
+		camera.set_boss_combat(true, 20.0)
+		await _wait_frames(8)
+		_assert_true(float(camera.get("distance")) <= 17.5,
+			label + " boss camera pulls into a readable combat frame")
+		camera.set_boss_combat(false)
 	if hero == null or camera == null:
 		world.queue_free()
 		await _wait_frames(2)

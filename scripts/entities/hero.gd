@@ -26,15 +26,15 @@ signal interact_pressed
 ## Visual-only shrink applied to the Rig wrapper — never collision, ranges
 ## or camera. Characters read smaller; bosses keep their authored size.
 @export var visual_scale: float = 0.78
-@export var move_speed: float = 5.0
+@export var move_speed: float = 3.4
 @export var turn_speed: float = 12.0
 @export var accel_rate: float = 11.0
 @export var decel_rate: float = 15.0
 
 # Dodge roll
-@export var dodge_duration: float = 0.30
-@export var dodge_speed_mult: float = 2.5
-@export var dodge_cooldown_time: float = 1.05
+@export var dodge_duration: float = 0.36
+@export var dodge_speed_mult: float = 1.9
+@export var dodge_cooldown_time: float = 1.20
 @export var dodge_iframes: float = 0.34
 
 # Verticality
@@ -62,7 +62,7 @@ var _swing_base_rot := Vector3.ZERO
 var _swing_tween: Tween = null
 # Instance id of the enemy we glide toward after pressing attack; -1 = none
 var _attack_run_target := -1
-var auto_strike_cooldown: float = 0.92
+var auto_strike_cooldown: float = 1.15
 var approach_distance: float = 1.42
 var hit_flash_timer: float = 0.0
 var invulnerable_timer: float = 0.0
@@ -97,6 +97,12 @@ var _skill_buffer_until := [0, 0, 0]
 # Weapon visuals
 var hand_socket_l: AttachmentSocket = null
 var hand_socket_r: AttachmentSocket = null
+
+## Grip calibration (world units) applied along the palm bone's axes after
+## the authored rig mounts: X across the knuckles, Y down the wrist, Z out
+## of the palm. Tune per-rig so weapon handles sit inside the fist.
+@export var grip_offset_l: Vector3 = Vector3(0.0, 0.06, 0.03)
+@export var grip_offset_r: Vector3 = Vector3(0.0, 0.06, 0.03)
 var _base_body_shader := {}   # original entity shader params for armor restore
 var _aura_base_energy: float = 0.18   # cosmetics baseline; magic pulses it
 var _base_move_speed: float = 5.0
@@ -137,13 +143,23 @@ var _slope_pitch := 0.0
 var _slope_roll := 0.0
 var _prev_phase_sin := 0.0
 var _anim_impact_serial := 0
+# Lantern lock-on flare (0..1), driven by GameState.mark_locked so the
+# per-frame light pulse below never fights the spike.
+var lantern_flare := 0.0
+var _flare_tween: Tween = null
+# One-off clarity tip: the flame is cosmetic (burns only after dusk), so the
+# player learns once that combat comes from marking a foe, not the lantern.
+var _lantern_tip_shown := false
+var _lantern_was_lit := false
 
 func _ready() -> void:
 	target_position = global_position
 	
 	# Setup collision
 	collision_layer = 1 << 0  # Player layer
-	collision_mask = 1 << 1 | 1 << 5  # Enemy + Environment
+	collision_mask = 1 << 1 | 1 << 5 | 1 << 6  # Enemy + Environment + Prop
+	# Snap to the ground on slopes so climbing reads smooth, not bouncy
+	floor_snap_length = 0.5
 	
 	# Hitbox for enemy attacks
 	hitbox.area_entered.connect(_on_hitbox_entered)
@@ -156,6 +172,10 @@ func _ready() -> void:
 
 	# Load equipped weapon
 	_load_default_weapon()
+	# World-visible lantern mark: keeps GameState.enemy_target legible.
+	TargetMarker.ensure(self)
+	TargetMarker.bind_lantern(lantern)
+	GameState.mark_locked.connect(_on_mark_locked)
 	game_state.weapon_changed.connect(_on_weapon_changed)
 	game_state.armor_changed.connect(_on_armor_changed)
 	game_state.stats_changed.connect(_apply_stat_multipliers)
@@ -202,6 +222,7 @@ func _ready() -> void:
 	InputManager.dodge_pressed.connect(_on_dodge_pressed)
 	InputManager.jump_pressed.connect(_on_jump_pressed)
 	InputManager.tap_world.connect(_on_world_tap)
+	InputManager.tap_foe.connect(_on_foe_tap)
 
 	# Combo finisher feedback (slash kits only; casts never combo)
 	animator.attack_impact.connect(_on_attack_impact)
@@ -218,6 +239,14 @@ func _ready() -> void:
 		"hand_r": "Palm.R",
 		"back": "Hips",
 	})
+	# The pose-preserving reparent leaves the ghost-rig offsets baked into
+	# the socket, which reads as the weapon floating OUT of the fist on the
+	# authored rig (unit-scaled x100 armature: local offsets don't map 1:1).
+	# Snap each hand socket onto its palm-bone origin, then apply a small
+	# world-unit grip offset along the bone's orthonormalized axes so the
+	# handle sits inside the fingers. Bone animation still carries the socket.
+	_snap_hand_socket(hand_socket_l, grip_offset_l)
+	_snap_hand_socket(hand_socket_r, grip_offset_r)
 	# The rig mounted after the initial armor pass, so re-apply body tint to
 	# the authored silhouette (armor gear survives the mount via keep-prefix).
 	_apply_armor_visual()
@@ -236,6 +265,17 @@ func _physics_process(delta: float) -> void:
 	_handle_movement(delta)
 	_update_timers(delta)
 	_update_attack_approach(delta)
+	# Safety net: never stay hard-locked onto a foe that died/freed mid-cast.
+	# If combat state still references a dead/invalid target, drop the lock so
+	# the player can immediately mark a fresh one (and no skill ever touches a
+	# freed instance because nothing lingers on it).
+	if game_state.combat_state == GameState.CombatState.COMBAT:
+		var target := game_state.enemy_target
+		if target == null or not is_instance_valid(target) \
+				or (target.has_method("is_dead") and target.is_dead()):
+			game_state.disengage_enemy()
+			_attack_run_target = -1
+			has_move_target = false
 	_update_movement_audio(delta)
 	_apply_lantern_state()
 	_update_visuals(delta)
@@ -938,6 +978,14 @@ func _apply_lantern_state() -> void:
 	lantern_light.visible = active
 	lantern_mesh.visible = active
 	lantern_particles.emitting = active
+	# Clarity: the flame is purely atmospheric (wakes as night settles in).
+	# It does NOT gate combat — marking a foe does. Show this once.
+	if active and not _lantern_was_lit and not _lantern_tip_shown:
+		_lantern_tip_shown = true
+		FloatingText.spawn_on_entity(self,
+			"The lantern wakes at dusk — tap a foe to mark & strike",
+			Color(1.0, 0.85, 0.55), 2.0)
+	_lantern_was_lit = active
 
 func _movement_fx_setup() -> void:
 	movement_fx = GPUParticles3D.new()
@@ -1155,7 +1203,7 @@ func _perform_auto_strike(enemy: Node3D) -> void:
 		# Ranged basic attack: a glowing bolt flies to the target so the
 		# damage lands when the orb arrives, not before it leaves the staff.
 		if enemy != null and is_instance_valid(enemy):
-			_fire_magic_bolt(cast_origin,
+			await _fire_magic_bolt(cast_origin,
 				enemy.global_position + Vector3(0, 0.85, 0))
 	else:
 		audio.play_swing_stage(animator.combo_step)
@@ -1210,19 +1258,19 @@ func _perform_auto_strike(enemy: Node3D) -> void:
 		crit_mult *= game_state.crit_damage()
 	if crit_mult > 1.0:
 		damage = int(round(damage * crit_mult))
-		FloatingText.spawn_on_entity(enemy, "%d!" % damage,
-				Color(0.62, 0.92, 1.0) if countered else Color(1, 0.55, 0.25))
+		FloatingText.spawn_damage_on_entity(enemy, damage, true,
+			Color(0.62, 0.92, 1.0) if countered else Color(1, 0.55, 0.25))
 		# Crit breath: a short slow-mo dip sells heavy critical strikes
 		if crit_mult >= 1.4:
 			CombatFx.hit_stop(self, 0.10, 0.30)
 	
 	# Apply damage
 	if enemy.has_method("take_damage"):
-		enemy.take_damage(damage, global_position.direction_to(enemy.global_position))
+		enemy.take_damage(damage, global_position.direction_to(enemy.global_position), crit_mult > 1.0)
+		_apply_elemental_status(enemy)
 		if crit_mult <= 1.0:
-			FloatingText.spawn_on_entity(enemy,
-					"%d ⚡" % damage if countered else str(damage),
-					Color(0.62, 0.92, 1.0) if countered else Color(1, 0.92, 0.72))
+			FloatingText.spawn_damage_on_entity(enemy, damage, false,
+				Color(0.62, 0.92, 1.0) if countered else Color(1, 0.92, 0.72))
 	# Swings also chip destructible props near the impact point
 	_damage_props_near(hit_pos)
 	
@@ -1268,13 +1316,15 @@ func _fire_magic_bolt(from_pos: Vector3, to_pos: Vector3) -> void:
 	add_child(orb)
 	orb.global_position = from_pos
 	var flight := create_tween()
-	flight.tween_property(orb, "global_position", to_pos, 0.18) \
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-	flight.tween_callback(func():
-		if is_instance_valid(orb):
-			CombatFx.spawn_burst(self, orb.global_position,
-				Color(0.72, 0.62, 1.0, 0.8), 6, 2.4, 0.2, 0.1)
-			orb.queue_free())
+	flight.tween_property(orb, "global_position", to_pos, 0.24) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	await flight.finished
+	if is_instance_valid(orb):
+		CombatFx.spawn_burst(self, orb.global_position,
+			Color(0.72, 0.62, 1.0, 0.9), 10, 3.0, 0.24, 0.12)
+		CombatFx.spawn_ring(self, orb.global_position, 0.42,
+			Color(0.62, 0.82, 1.0, 0.7), 0.22)
+		orb.queue_free()
 
 func _on_animator_impact() -> void:
 	_anim_impact_serial += 1
@@ -1324,17 +1374,17 @@ func _on_enemy_killed(enemy: Node3D) -> void:
 	get_tree().call_group("screen_fx", "comfort")
 	
 	# Gold spills from the fallen — the trader's currency
-	var reward := 40 if enemy.is_in_group("boss") else 12
-	game_state.add_gold(reward)
-	FloatingText.spawn_on_entity(enemy, "+%d 🪙" % reward, Color(1.0, 0.84, 0.35))
+	var reward := 40 if enemy.is_in_group("boss") else (18 if enemy.is_in_group("elite") else 12)
+	var loot_drop := preload("res://scripts/systems/loot_drop.gd")
+	loot_drop.spawn_gold(self, enemy.global_position + Vector3(0, 0.25, 0), reward)
 	
-	# Loot drops
+	# Loot drops: physical pickups persist through GameState when collected.
 	if game_state.level == 1:
-		game_state.add_loot("hushling_thorn", 1)
-		game_state.add_loot("moss_tonic", 1, "Hushling cache secured — Thorn and Moss Tonic added.", 2)
+		loot_drop.spawn_item(self, enemy.global_position + Vector3(0.24, 0.2, 0.0), "hushling_thorn", 1)
+		loot_drop.spawn_item(self, enemy.global_position + Vector3(-0.24, 0.2, 0.0), "moss_tonic", 1)
 	else:
 		if randf() < 0.35:
-			game_state.add_loot("moss_tonic", 1, "A Moss Tonic rolls free of the bramble.")
+			loot_drop.spawn_item(self, enemy.global_position + Vector3(0.0, 0.2, 0.24), "moss_tonic", 1)
 	
 	audio.play_victory()
 
@@ -1384,8 +1434,10 @@ func _update_visuals(delta: float) -> void:
 	_apply_slope_tilt(delta)
 	_apply_turn_lean(delta)
 	
-	# Lantern light pulse, slightly brighter while moving
-	lantern_light.light_energy = 1.8 + speed_ratio * 0.18 + sin(animator.phase * 1.7) * 0.15
+	# Lantern light pulse, slightly brighter while moving; multiplies up by
+	# the lock-on flare so claiming a foe makes the lantern swell visibly.
+	lantern_light.light_energy = (1.8 + speed_ratio * 0.18
+		+ sin(animator.phase * 1.7) * 0.15) * (1.0 + lantern_flare)
 	
 	# Ember trail streams behind fast movement; striding out lowers the bar
 	if ember_trail:
@@ -1453,7 +1505,34 @@ func _on_world_tap(world_pos: Vector3, camera: Camera3D) -> void:
 	desired_direction = Vector3.ZERO
 	is_moving = true
 	_attack_run_target = -1
-	game_state.disengage_enemy()  # Moving cancels combat lock
+	# A ground tap only drops the lantern lock when the player is genuinely
+	# leaving the fight; a short reposition nearby keeps the mark alive.
+	var locked: Node3D = game_state.enemy_target
+	if locked == null or not is_instance_valid(locked) \
+			or (locked.has_method("is_dead") and locked.is_dead()) \
+			or locked.global_position.distance_to(world_pos) > 6.0:
+		game_state.disengage_enemy()  # Moving cancels combat lock
+
+## Tapping a foe lights it with the lantern: engage + mark + approach,
+## identical to pressing Attack beside it.
+func _on_foe_tap(enemy: Node3D) -> void:
+	if enemy == null or not is_instance_valid(enemy) \
+			or not enemy.is_in_group("enemy") \
+			or (enemy.has_method("is_dead") and enemy.is_dead()):
+		return
+	_begin_attack_target(enemy)
+
+## The lantern swells a beat the instant it claims a foe (mark_locked),
+## layered on the per-frame light pulse so the lock reads on the bearer.
+func _on_mark_locked(_enemy: Node3D) -> void:
+	if _flare_tween and _flare_tween.is_valid():
+		_flare_tween.kill()
+	lantern_flare = 1.0
+	_flare_tween = create_tween()
+	_flare_tween.tween_property(self, "lantern_flare", 1.0, 0.12) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_flare_tween.tween_property(self, "lantern_flare", 0.0, 0.5) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 func _on_attack_pressed() -> void:
 	_attack_holding = true
@@ -1485,8 +1564,22 @@ func _on_attack_pressed() -> void:
 	if nearest:
 		_begin_attack_target(nearest)
 	else:
-		FloatingText.spawn_on_entity(self, "No mark in your light",
-			Color(1.0, 0.84, 0.47))
+		FloatingText.spawn_on_entity(self, "NO FOE IN YOUR LIGHT",
+			Color(1.0, 0.62, 0.30), 1.4)
+		audio.play_lantern_refuse()
+		get_tree().call_group("screen_fx", "pulse_vignette", 0.18)
+		CombatFx.impact(self, 0.06, 0.0, 0.5, 0.15)
+		_show_refuse_hint("Tap a foe to light it, or step closer to one")
+
+## Second-beat hint below a refusal: what to DO next, spelled out so the
+## "not marked" state always teaches the recovery instead of dead-ending.
+func _show_refuse_hint(text: String) -> void:
+	var tw := create_tween()
+	tw.tween_interval(0.55)
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(self):
+			FloatingText.spawn_on_entity(self, text,
+				Color(0.95, 0.85, 0.70), 0.92))
 
 ## Hold-to-charge: releasing after a long press lands a heavy overhead
 ## strike (2.2x, wide arc, dust + shockwave). Taps stay light combo hits.
@@ -1543,10 +1636,16 @@ func _use_skill_slot(slot: int) -> void:
 		_execute_skill(slot, result.skill)
 		return
 	# Surface WHY the rite refused: cooldowns buffer a retry, missing
-	# marks just tell the player plainly (no silent console spam).
+	# marks get an unmissable cue — bigger text, a screen pulse and a
+	# lantern tone — because the mark is otherwise invisible state.
 	var msg := str(result.get("message", ""))
 	if msg.to_lower().contains("target") or msg.to_lower().contains("mark"):
-		FloatingText.spawn_on_entity(self, msg, Color(1.0, 0.84, 0.47))
+		FloatingText.spawn_on_entity(self, "NO TARGET LIT",
+			Color(1.0, 0.62, 0.30), 1.5)
+		audio.play_lantern_refuse()
+		get_tree().call_group("screen_fx", "pulse_vignette", 0.22)
+		CombatFx.impact(self, 0.07, 0.0, 0.5, 0.18)
+		_show_refuse_hint("Tap the foe to light it — then cast again")
 	else:
 		_skill_buffer_until[slot] = Time.get_ticks_msec() + SKILL_BUFFER_MS
 		if msg != "":
@@ -1560,15 +1659,18 @@ const SKILL_WINDUP := {
 
 ## Rite-family charge tints (match the payload palette).
 func _skill_tint(kind: String) -> Color:
+	var base := Color(1.0, 0.90, 0.72)
 	match kind:
 		"explosion", "aoe":
-			return Color(0.96, 0.62, 0.22)
+			base = Color(0.96, 0.62, 0.22)
 		"comet":
-			return Color(0.72, 0.60, 1.00)
+			base = Color(0.72, 0.60, 1.00)
 		"heal_bloom":
-			return Color(0.62, 0.85, 0.45)
-		_:
-			return Color(1.0, 0.90, 0.72)
+			base = Color(0.62, 0.85, 0.45)
+	var element := _equipped_element()
+	if element in ImpactDirector.ELEMENT_COLORS:
+		base = base.lerp(ImpactDirector.ELEMENT_COLORS[element], 0.55)
+	return base
 
 ## Cast preface shared by every rite: announce the skill name, gather a
 ## charge glow at the casting hand, telegraph the target, and play the
@@ -1589,14 +1691,15 @@ func _begin_skill_cast(sk: Dictionary, target: Node3D) -> void:
 	audio.play_skill_cast(kind)
 	var hand_pos := hand_socket_r.global_position if hand_socket_r else lantern.global_position
 	var tint := _skill_tint(kind)
-	# Sustained charge orb that swells through the wind-up and pops at release
+	var highlight := tint.lerp(Color(1.0, 0.97, 0.86), 0.42)
+	# Sustained charge orb that swells through the wind-up and pops at release.
 	CombatFx.spawn_charge_glow(self, hand_pos, tint,
 		float(SKILL_WINDUP.get(kind, 0.3)), 2.6)
-	CombatFx.spawn_motes(self, hand_pos, Color(tint.r, tint.g, tint.b, 0.45),
-		8, 0.35, 0.5, 1.2)
+	CombatFx.spawn_motes(self, hand_pos, Color(highlight.r, highlight.g, highlight.b, 0.52),
+		10, 0.38, 0.55, 1.35)
 	if target != null and is_instance_valid(target) and kind != "heal_bloom":
 		CombatFx.spawn_ring(self, target.global_position, 1.8,
-			Color(0.96, 0.86, 0.6, 0.8), 0.4)
+			Color(tint.r, tint.g, tint.b, 0.82), 0.4)
 
 func _execute_skill(slot: int, sk: Dictionary) -> void:
 	var enemy = game_state.enemy_target
@@ -1610,11 +1713,13 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 				return
 			audio.play_slash()
 			var hit_pos: Vector3 = enemy.global_position + Vector3(0, 0.85, 0)
-			CombatFx.spawn_telegraph(self, hit_pos, Color(1.0, 0.72, 0.29))
-			CombatFx.spawn_slash(self, hit_pos, Color(1.0, 0.72, 0.29, 0.95))
-			CombatFx.spawn_slash(self, hit_pos + Vector3(0, 0.25, 0))
+			var skill_tint := _skill_tint("strike")
+			CombatFx.spawn_telegraph(self, hit_pos, Color(skill_tint.r, skill_tint.g, skill_tint.b, 0.9))
+			CombatFx.spawn_slash(self, hit_pos, Color(skill_tint.r, skill_tint.g, skill_tint.b, 0.95))
+			CombatFx.spawn_slash(self, hit_pos + Vector3(0, 0.25, 0),
+				Color(skill_tint.r, skill_tint.g, skill_tint.b, 0.72))
 			CombatFx.spawn_stretched_burst(self, hit_pos,
-				Color(1.0, 0.84, 0.47, 0.85), 10, 7.5, 0.26)
+				Color(skill_tint.r, skill_tint.g, skill_tint.b, 0.85), 10, 7.5, 0.26)
 			CombatFx.spawn_core_flash(self, hit_pos)
 			_deal_skill_damage(enemy, float(sk.get("dmg_mult", 1.5)))
 			CombatFx.impact(self, 0.32, 0.06, 0.10, 0.65)
@@ -1623,25 +1728,27 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 			animator.trigger_attack("spin")
 			_animate_weapon_swing()
 			var radius := float(sk.get("radius", 3.5))
+			var skill_tint := _skill_tint("whirl")
 			# One short readable wind-up; petals, damage, sound and screen
 			# feedback all resolve together right after it.
 			await get_tree().create_timer(0.12, false).timeout
 			CombatFx.spawn_telegraph(self, global_position,
-				Color(1.0, 0.78, 0.35))
+				Color(skill_tint.r, skill_tint.g, skill_tint.b, 0.9))
 			for i in 5:
 				var ang := TAU * i / 5.0
 				CombatFx.spawn_slash(self,
 					global_position + Vector3(cos(ang) * radius * 0.55, 0.9,
-					sin(ang) * radius * 0.55),
-					Color(1.0, 0.78, 0.35, 0.9))
+						sin(ang) * radius * 0.55),
+					Color(skill_tint.r, skill_tint.g, skill_tint.b, 0.9))
 			audio.play_slash()
 			CombatFx.spawn_ring(self, global_position, radius,
-				Color(1.0, 0.78, 0.35, 0.7), 0.7)
+				Color(skill_tint.r, skill_tint.g, skill_tint.b, 0.7), 0.7)
 			CombatFx.spawn_shockwave(self, global_position, radius,
-				Color(1.0, 0.84, 0.47, 0.75), 0.4)
+				Color(skill_tint.r, skill_tint.g, skill_tint.b, 0.78), 0.4)
 			CombatFx.spawn_motes(self, global_position + Vector3(0, 0.3, 0),
-				Color(1.0, 0.78, 0.35, 0.6), 14, radius * 0.5, 0.7, 2.2)
-			CombatFx.spawn_core_flash(self, global_position + Vector3(0, 0.9, 0))
+				Color(skill_tint.r, skill_tint.g, skill_tint.b, 0.6), 14, radius * 0.5, 0.7, 2.2)
+			CombatFx.spawn_core_flash(self, global_position + Vector3(0, 0.9, 0),
+				Color(1.0, 0.96, 0.86, 0.95), 1.8)
 			for foe in get_tree().get_nodes_in_group("enemy"):
 				if foe is Node3D and is_instance_valid(foe) \
 						and global_position.distance_to(foe.global_position) <= radius:
@@ -1659,38 +1766,48 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 				var dir := global_position.direction_to(enemy.global_position)
 				dir.y = 0.0
 				velocity += dir.normalized() * 16.0
+				var dash_tint := _skill_tint("dash_strike")
+				CombatFx.spawn_skill_ribbon(self, global_position + Vector3(0, 0.55, 0),
+				enemy.global_position + Vector3(0, 0.55, 0),
+					Color(dash_tint.r, dash_tint.g, dash_tint.b, 0.78), 0.42, 0.36)
+				CombatFx.spawn_vibrant_trail(self,
+					global_position + Vector3(0, 0.55, 0),
+				enemy.global_position + Vector3(0, 0.55, 0), dash_tint,
+					Color(1.0, 0.92, 0.54, 0.92), 5)
 				# After-image trail: sparks shed behind the lunge line
 				for k in 4:
 					var trail_pos := global_position.lerp(enemy.global_position,
 						0.18 + 0.2 * k) + Vector3(0, 0.45, 0)
 					CombatFx.spawn_stretched_burst(self, trail_pos,
-						Color(1, 0.84, 0.47, 0.55), 4, 3.0, 0.3)
+						Color(dash_tint.r, dash_tint.g, dash_tint.b, 0.55), 4, 3.0, 0.3)
 			await _wait_for_animator_impact(0.35)
 			if enemy == null or not is_instance_valid(enemy):
 				return
 			audio.play_slash()
-			CombatFx.spawn_slash(self, enemy.global_position + Vector3(0, 0.85, 0))
-			CombatFx.spawn_stretched_burst(self,
-				enemy.global_position + Vector3(0, 0.85, 0),
+			var dash_hit: Vector3 = enemy.global_position + Vector3(0, 0.85, 0)
+			CombatFx.spawn_slash(self, dash_hit)
+			CombatFx.spawn_stretched_burst(self, dash_hit,
 				Color(1, 0.84, 0.47, 0.9), 16, 9.0, 0.32)
 			CombatFx.spawn_shockwave(self, enemy.global_position, 1.6,
 				Color(1, 0.84, 0.47, 0.7), 0.35)
-			CombatFx.spawn_core_flash(self,
-				enemy.global_position + Vector3(0, 0.85, 0))
+			CombatFx.spawn_core_flash(self, dash_hit)
 			_deal_skill_damage(enemy, float(sk.get("dmg_mult", 1.8)))
 			CombatFx.impact(self, 0.34, 0.07, 0.10, 0.65)
 		"explosion":
 			animator.attack_style = "magic"
 			animator.trigger_attack("hurl")
-			if enemy == null or not is_instance_valid(enemy):
-				return
+			# Capture the detonation point up front so the cast survives the
+			# target dying/freeing during the wind-up without touching a dead
+			# instance after the await below.
+			var from_pos: Vector3 = hand_socket_r.global_position \
+				if hand_socket_r else global_position + Vector3(0, 1.2, 0)
+			var to_pos: Vector3 = global_position + Vector3(0, 0.6, 0)
+			if enemy != null and is_instance_valid(enemy):
+				to_pos = enemy.global_position + Vector3(0, 0.6, 0)
 			# Launch the burning bolt as soon as the charge orb pops.
 			await get_tree().create_timer(
 				float(SKILL_WINDUP.get("explosion", 0.16)), false).timeout
 			audio.play_skill_release("explosion")
-			var from_pos: Vector3 = hand_socket_r.global_position \
-				if hand_socket_r else global_position + Vector3(0, 1.2, 0)
-			var to_pos: Vector3 = enemy.global_position + Vector3(0, 0.6, 0)
 			CombatFx.spawn_bolt(self, from_pos, to_pos,
 				Color(0.98, 0.60, 0.20), 0.26, 0.34)
 			await get_tree().create_timer(0.12, false).timeout
@@ -1779,6 +1896,8 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 			audio.play_explosion()
 			var slam_radius := float(sk.get("radius", 13.0)) * 0.35
 			CombatFx.spawn_core_flash(self, global_position + Vector3(0, 0.8, 0))
+			CombatFx.spawn_impact_light(self, global_position,
+				Color(1.0, 0.72, 0.35), 3.2, slam_radius * 0.9, 0.30)
 			CombatFx.spawn_shockwave(self, global_position, slam_radius,
 				Color(1.0, 0.84, 0.47, 0.85), 0.45)
 			CombatFx.spawn_ring(self, global_position, slam_radius * 0.9,
@@ -1809,14 +1928,20 @@ func _deal_skill_damage(enemy: Node3D, dmg_mult: float, silent_text: bool = fals
 	if crit > 1.0:
 		damage = int(round(damage * crit))
 	if enemy.has_method("take_damage"):
-		enemy.take_damage(damage, global_position.direction_to(enemy.global_position))
+		enemy.take_damage(damage, global_position.direction_to(enemy.global_position), crit > 1.0)
+		_apply_elemental_status(enemy)
 		if not silent_text or crit > 1.0:
-			FloatingText.spawn_on_entity(enemy,
-				"%d!" % damage if crit > 1.0 else str(damage),
-				Color(1, 0.55, 0.25) if crit > 1.0 else Color(1, 0.92, 0.72))
+			FloatingText.spawn_damage_on_entity(enemy, damage, crit > 1.0)
 	if enemy.has_method("is_dead") and enemy.is_dead():
 		CombatFx.impact(self, 0.28, 0.08, 0.12, 0.7)
 		_on_enemy_killed(enemy)
+
+func _apply_elemental_status(enemy: Node3D) -> void:
+	if enemy == null or not is_instance_valid(enemy) or not enemy.has_method("apply_elemental_status"):
+		return
+	var element := _equipped_element()
+	if not element.is_empty():
+		enemy.apply_elemental_status(element, 1)
 
 func _on_interact_pressed() -> void:
 	interact_pressed.emit()
@@ -1955,8 +2080,9 @@ func _refresh_weapon_visual() -> void:
 			weapon_socket.attach_node(staff)
 
 	_refresh_hand_weapon()
+	_play_weapon_equip_feedback.call_deferred()
 
-## The equipped shop weapons read in-hand: sword in the left fist,
+	## The equipped shop weapons read in-hand: sword in the left fist,
 ## staff in the right (it leads every cast). Relic-kit items wield the
 ## scanned mesh itself.
 func _refresh_hand_weapon() -> void:
@@ -2017,6 +2143,26 @@ func _refresh_hand_weapon() -> void:
 		_swing_base_rot = _drive_swing.rotation if _drive_swing else Vector3.ZERO
 	else:
 		_drive_swing = null
+
+func _play_weapon_equip_feedback() -> void:
+	if _drive_swing == null or not is_instance_valid(_drive_swing):
+		return
+	var base_scale := _drive_swing.scale
+	var base_rot := _drive_swing.rotation
+	_drive_swing.scale = base_scale * 0.08
+	_drive_swing.rotation = base_rot + Vector3(0.0, 0.0, 0.32)
+	var settle := create_tween()
+	settle.set_parallel(true)
+	settle.tween_property(_drive_swing, "scale", base_scale, 0.22) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	settle.tween_property(_drive_swing, "rotation", base_rot, 0.24) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	var element := str(current_weapon.get("element", ""))
+	var glow: Color = ImpactDirector.ELEMENT_COLORS.get(element, Color(1.0, 0.74, 0.30)) as Color
+	CombatFx.spawn_motes(self, global_position + Vector3(0.0, 1.0, 0.0),
+		Color(glow.r, glow.g, glow.b, 0.55), 5, 0.35, 0.42, 1.8)
+	if AudioManager != null and AudioManager.has_method("play_ui_blip"):
+		AudioManager.play_ui_blip()
 
 ## Weapon-derived strike reach (also drives glide distance and FX scale):
 ## slash = short and fast, blunt = medium, magic staves reach farthest.
@@ -2497,6 +2643,21 @@ func _build_slab_hammer_visual() -> Node3D:
 	glow.material_override = hinge
 	rig.add_child(glow)
 	return rig
+
+## Snap a hand socket onto its palm bone (after CharacterRigLoader.bind_sockets
+## re-parents it): origin exactly at the bone, orientation kept, plus a small
+## world-unit grip offset along the bone's orthonormalized axes. Works in
+## world space so the x100 armature scale can't collapse the offset.
+func _snap_hand_socket(sock: AttachmentSocket, grip_offset: Vector3) -> void:
+	if sock == null:
+		return
+	var bone := sock.get_parent() as Node3D
+	if bone == null:
+		return
+	var bone_basis := bone.global_transform.basis.orthonormalized()
+	var grip_pos: Vector3 = bone.global_position + (bone_basis * grip_offset)
+	sock.global_transform = Transform3D(
+		sock.global_transform.basis.orthonormalized(), grip_pos)
 
 # === Armor visuals & stats ===
 func _capture_body_shader_defaults() -> void:

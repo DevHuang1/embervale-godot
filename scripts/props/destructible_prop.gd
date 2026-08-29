@@ -45,7 +45,7 @@ static func create(variant_id: String) -> DestructibleProp:
 
 func _ready() -> void:
 	add_to_group("destructible")
-	collision_layer = 1 << 5          # environment
+	collision_layer = 1 << 6          # prop (camera spring-arm mask stays on environment=terrain, so props no longer collapse the camera)
 	collision_mask = 0
 	_cfg = VARIANTS[variant]
 	max_hp = int(_cfg.hp)
@@ -94,20 +94,20 @@ func _build_material() -> StandardMaterial3D:
 	m.roughness = 0.85
 	match variant:
 		"crate":
-			m.albedo_texture = load("res://assets/textures/pbr/wood/albedo.jpg")
+			m.albedo_texture = load("res://assets/textures/stylized/wood/albedo.png")
 			m.normal_enabled = true
-			m.normal_texture = load("res://assets/textures/pbr/wood/normal.jpg")
-			m.roughness_texture = load("res://assets/textures/pbr/wood/roughness.jpg")
-			m.uv1_scale = Vector3(1.6, 1.6, 1.6)
+			m.normal_texture = load("res://assets/textures/stylized/wood/normal.png")
+			m.roughness_texture = load("res://assets/textures/stylized/wood/roughness.png")
+			m.uv1_scale = Vector3(0.9, 0.9, 0.9)
 		"glowcap":
 			m.albedo_color = Color(0.24, 0.5, 0.62)
 			m.emission = Color(0.4, 0.78, 1.0)
 			m.emission_energy_multiplier = 1.5
 		_:
-			m.albedo_texture = load("res://assets/textures/pbr/clay/albedo.jpg")
+			m.albedo_texture = load("res://assets/textures/stylized/clay/albedo.png")
 			m.normal_enabled = true
-			m.normal_texture = load("res://assets/textures/pbr/clay/normal.jpg")
-			m.roughness_texture = load("res://assets/textures/pbr/clay/roughness.jpg")
+			m.normal_texture = load("res://assets/textures/stylized/clay/normal.png")
+			m.roughness_texture = load("res://assets/textures/stylized/clay/roughness.png")
 	return m
 
 

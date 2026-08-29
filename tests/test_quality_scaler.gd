@@ -31,6 +31,13 @@ func _run() -> void:
 			or scaler.corpse_pool_size != 6 or not scaler.contact_shadows:
 		failures += 1
 		print("FAIL: HIGH tier should max debris/pom/pushers/corpses/shadows")
+	if not is_equal_approx(scaler.vfx_density, 1.0) \
+			or scaler.vfx_pool_limit != 24 or scaler.vfx_trail_limit != 12 \
+			or scaler.transient_light_budget != 3 \
+			or not scaler.distortion_enabled \
+			or scaler.material_detail_level != QualityScaler.Level.HIGH:
+		failures += 1
+		print("FAIL: HIGH tier should max vfx density/pool/trails/lights/distortion")
 
 	# --- Contact shadows are opt-in via the contact_shadow group ---
 	var stage := Node3D.new()
@@ -64,6 +71,13 @@ func _run() -> void:
 			or scaler.corpse_pool_size != 2 or scaler.contact_shadows:
 		failures += 1
 		print("FAIL: LOW tier should minimize debris/pom/pushers/corpses/shadows")
+	if not is_equal_approx(scaler.vfx_density, 0.45) \
+			or scaler.vfx_pool_limit != 10 or scaler.vfx_trail_limit != 6 \
+			or scaler.transient_light_budget != 0 \
+			or scaler.distortion_enabled \
+			or scaler.material_detail_level != QualityScaler.Level.LOW:
+		failures += 1
+		print("FAIL: LOW tier should minimize vfx density/pool/trails/lights/distortion")
 
 	# --- Auto degrades one step per sustained low reading ---
 	scaler.set_mode(QualityScaler.Mode.AUTO)

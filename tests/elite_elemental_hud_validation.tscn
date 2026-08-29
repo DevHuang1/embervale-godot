@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://tests/elite_elemental_hud_validation.gd" id="1_elite"]
+
+[node name="EliteElementalHudValidation" type="Node"]
+script = ExtResource("1_elite")

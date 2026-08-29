@@ -14,6 +14,7 @@ signal pause_pressed
 signal dodge_pressed(direction: Vector2)
 signal jump_pressed
 signal tap_world(position: Vector3, camera: Camera3D)
+signal tap_foe(enemy: Node3D)
 
 @export var touch_deadzone: float = 0.15
 @export var flick_threshold: float = 1600.0
@@ -136,8 +137,14 @@ func emit_world_tap(screen_pos: Vector2, camera: Camera3D) -> void:
 	var to = from + camera.project_ray_normal(screen_pos) * 1000.0
 	var space_state = get_tree().get_root().get_world_3d().direct_space_state
 	var query = PhysicsRayQueryParameters3D.create(from, to)
-	query.collision_mask = 1 << 5
+	# Enemy layer + Environment: a tap that lands on a foe LIGHTS IT UP
+	# (engage + mark) instead of moving — that's the discoverable gesture.
+	query.collision_mask = 1 << 1 | 1 << 5 | 1 << 6
 	query.exclude = [get_tree().current_scene.find_child("Hero")] if get_tree().current_scene and get_tree().current_scene.has_node("Hero") else []
 	var result = space_state.intersect_ray(query)
 	if result:
+		var collider = result.get("collider")
+		if collider != null and collider.is_in_group("enemy"):
+			tap_foe.emit(collider)
+			return
 		tap_world.emit(result.position, camera)

@@ -12,6 +12,7 @@ enum ItemRarity { COMMON, UNCOMMON, RARE }
 const WEAPON_DEFS := {
 	"mug_mace": {
 		"id": "mug_mace", "name": "MUG MACE", "glyph": "☕", "style": "blunt",
+		"element": "fire",
 		"atk": 7, "swing_time": 0.38, "range": 8.2,
 		"skills": [
 			{"name": "MUG SLAM", "type": "aoe", "cooldown": 2.0, "radius": 13.0, "dmg_mult": 1.5},
@@ -68,14 +69,15 @@ const SHOP_STOCK := [
 	{"id": "arcane_staff", "kind": "weapon", "price": 90},
 	{"id": "warden_plate", "kind": "armor", "price": 60},
 	{"id": "emberweave_cloak", "kind": "armor", "price": 40},
+	{"id": "moss_tonic", "kind": "potion", "price": 12, "rarity": 0},
 ]
 
 @export var current_stage: QuestStage = QuestStage.SEEK_SPRITE
 @export var combat_state: CombatState = CombatState.EXPLORING
 
 # Player stats
-@export var hp: int = 60
-@export var max_hp: int = 60
+@export var hp: int = 100
+@export var max_hp: int = 100
 @export var level: int = 1
 @export var xp: int = 0
 
@@ -176,9 +178,11 @@ signal skill_cooldown_changed(slot: int, remaining: float)
 signal quest_progress(message: String)
 signal defeated
 signal victory
+signal mark_locked(target: Node3D)
+signal mark_released
 
 # Constants
-const MAX_HP_BASE = 60
+const MAX_HP_BASE = 100
 const FIRST_KILL_XP = 35
 const SUBSEQUENT_KILL_XP = 10
 const MOSS_TONIC_HEAL = 12
@@ -217,6 +221,7 @@ func reset() -> void:
 	active_trail_color = "ffb84d"
 	active_aura_color = "00000000"
 	boss_first_kills = {}
+	opened_chests = {}
 	active_cosmetic_ids = {}
 	current_stage = QuestStage.SEEK_SPRITE
 	combat_state = CombatState.EXPLORING
@@ -293,13 +298,17 @@ func engage_enemy(enemy: Node3D) -> bool:
 	enemy_selected = true
 	combat_state = CombatState.COMBAT
 	quest_progress.emit("Target marked. Closing the distance with lantern raised.")
+	mark_locked.emit(enemy)
 	return true
 
 func disengage_enemy() -> void:
+	if enemy_target == null and combat_state != CombatState.COMBAT:
+		return
 	enemy_target = null
 	enemy_selected = false
 	if combat_state == CombatState.COMBAT:
 		combat_state = CombatState.EXPLORING
+	mark_released.emit()
 
 func can_auto_strike() -> bool:
 	return combat_state == CombatState.COMBAT and enemy_selected and enemy_target != null and is_instance_valid(enemy_target)
@@ -390,9 +399,10 @@ func use_skill(slot: int) -> Dictionary:
 	if needs_target and (combat_state != CombatState.COMBAT
 			or enemy_target == null or not is_instance_valid(enemy_target)):
 		return {"success": false,
-			"message": "That rite needs a target marked by your lantern."}
+			"message": "Your lantern lights no foe yet — tap an enemy to mark it."}
 	
-	skill_cooldowns[key] = float(sk.cooldown)
+	# Deliberate combat pacing: cooldowns are longer without changing damage.
+	skill_cooldowns[key] = float(sk.cooldown) * 1.20
 	skill_cooldown_changed.emit(slot, skill_cooldowns[key])
 	return {"success": true, "slot": slot, "skill": sk}
 
@@ -561,6 +571,7 @@ func allocate_stat(key: String) -> bool:
 
 # === Boss first-kills (diamond rewards, once per boss per save) ===
 var boss_first_kills: Dictionary = {}
+var opened_chests: Dictionary = {}
 
 ## True the first time this boss key is defeated; later kills return false.
 func mark_boss_killed(boss_key: String) -> bool:
@@ -669,16 +680,49 @@ func buy_shop_item(id: String) -> Dictionary:
 	if entry.kind == "weapon":
 		add_weapon(WEAPON_DEFS[id].duplicate(true), true,
 			"%s secured from the trader's rack." % WEAPON_DEFS[id].name)
-	else:
+	elif entry.kind == "armor":
 		add_armor(ARMOR_DEFS[id], false)
 		equip_armor(id)
 		loot_notice = "%s woven into your gear." % ARMOR_DEFS[id].name
 		loot_count = 1
 		loot_pulse += 1
 		loot_received.emit(loot_notice, 1)
+	else:
+		add_loot(id, 1, "%s purchased from the trader." % get_item(id).get("name", id))
 	return {"success": true, "id": id}
 
 # === Inventory ===
+func sell_shop_item(id: String, kind: String) -> Dictionary:
+	var value := 0
+	if kind == "weapon":
+		if equipped_weapon.get("id", "") == id:
+			return {"success": false, "message": "Equip another weapon before selling this one."}
+		for i in forged_weapons.size():
+			if forged_weapons[i].get("id", "") == id:
+				value = maxi(1, int(WEAPON_DEFS.get(id, {}).get("price", 1)) / 2)
+				forged_weapons.remove_at(i)
+				break
+	elif kind == "armor":
+		if equipped_armor.get("id", "") == id:
+			return {"success": false, "message": "Equip another armor piece before selling this one."}
+		for i in forged_armors.size():
+			if forged_armors[i].get("id", "") == id:
+				value = maxi(1, int(ARMOR_DEFS.get(id, {}).get("price", 1)) / 2)
+				forged_armors.remove_at(i)
+				break
+	else:
+		var item := get_item(id)
+		if item.is_empty() or int(item.get("quantity", 0)) <= 0:
+			return {"success": false, "message": "You have none of that to sell."}
+		value = 6
+		item.quantity -= 1
+	if value <= 0:
+		return {"success": false, "message": "The trader cannot buy that."}
+	add_gold(value, "Sold %s for %d gold." % [id, value])
+	inventory_changed.emit()
+	save_game()
+	return {"success": true, "id": id, "value": value}
+
 func get_item(item_id: String) -> Dictionary:
 	for item in inventory:
 		if item.id == item_id:
@@ -729,6 +773,33 @@ func equip_weapon_by_id(id: String) -> bool:
 			save_game()
 			return true
 	return false
+
+const ELEMENT_SWITCH_COST := 24
+const ELEMENT_SWITCHES := ["fire", "frost", "shock", "nature"]
+
+## Checkpoint forge action: retune the equipped weapon’s elemental payload.
+## This changes only the element identity; damage and skill timing stay intact.
+func switch_weapon_element(element: String, cost: int = ELEMENT_SWITCH_COST) -> Dictionary:
+	if element not in ELEMENT_SWITCHES:
+		return {"success": false, "message": "That element is not stable enough to bind."}
+	var current := str(equipped_weapon.get("element", ""))
+	if current == element:
+		return {"success": false, "message": "The weapon is already attuned to %s." % element.capitalize()}
+	if not spend_gold(cost):
+		return {"success": false, "message": "The checkpoint forge needs %d gold." % cost}
+	equipped_weapon["element"] = element
+	for i in forged_weapons.size():
+		if forged_weapons[i].get("id", "") == equipped_weapon.get("id", ""):
+			forged_weapons[i] = equipped_weapon.duplicate(true)
+			break
+	_refresh_skill_slots()
+	weapon_changed.emit(equipped_weapon)
+	loot_notice = "Weapon attuned to %s." % element.capitalize()
+	loot_count = 0
+	loot_pulse += 1
+	loot_received.emit(loot_notice, 0)
+	save_game()
+	return {"success": true, "message": loot_notice}
 
 # === Scan-forged relics ===
 ## Turns a captured object into a wieldable kit. The player supplies only
@@ -830,6 +901,7 @@ func save_game() -> void:
 	cfg.set_value("progress", "active_trail_color", active_trail_color)
 	cfg.set_value("progress", "active_aura_color", active_aura_color)
 	cfg.set_value("progress", "boss_first_kills", boss_first_kills)
+	cfg.set_value("progress", "opened_chests", opened_chests)
 	cfg.set_value("progress", "active_cosmetic_ids", active_cosmetic_ids)
 	cfg.save(SAVE_PATH)
 
@@ -915,6 +987,8 @@ func load_game() -> bool:
 	active_aura_color = str(cfg.get_value("progress", "active_aura_color", "00000000"))
 	var saved_fks = cfg.get_value("progress", "boss_first_kills", {})
 	boss_first_kills = saved_fks.duplicate(true) if saved_fks is Dictionary else {}
+	var saved_chests = cfg.get_value("progress", "opened_chests", {})
+	opened_chests = saved_chests.duplicate(true) if saved_chests is Dictionary else {}
 	var saved_ids = cfg.get_value("progress", "active_cosmetic_ids", {})
 	active_cosmetic_ids = saved_ids.duplicate(true) if saved_ids is Dictionary else {}
 	stats_changed.emit()

@@ -395,6 +395,24 @@ func play_lantern_pulse(speed_ratio: float = 0.0) -> void:
 	var pitch = 276.0 + speed_ratio * 56.0
 	play_chime(pitch, 0.0, 0.11, 0.022 + speed_ratio * 0.008)
 
+## Bright lock-on stinger, played at the marked foe so the source reads.
+func play_lantern_lock(at_node: Node = null) -> void:
+	if at_node != null:
+		play_synth_at(at_node, "lantern_lock")
+	else:
+		play_cue("lantern_lock")
+
+## Soft "mark forgotten" descent; gentle enough for every tap-to-move.
+func play_lantern_release(at_node: Node = null) -> void:
+	if at_node != null:
+		play_synth_at(at_node, "lantern_release", -4.0)
+	else:
+		play_cue("lantern_release")
+
+## Harsh short buzz when a rite is refused for lack of a lit mark.
+func play_lantern_refuse() -> void:
+	play_cue("lantern_refuse")
+
 func play_boss_stomp(at_node: Node = null) -> void:
 	if at_node != null:
 		play_synth_at(at_node, "boss_stomp")
@@ -694,6 +712,27 @@ func _render_cue(name_: String, variant: int) -> PackedFloat32Array:
 			b.resize(int(0.45 * SYNTH_SR))
 			_hum(b, 0.0, 0.4, 158.0, 172.0, 0.14, 2)
 			_noise(b, rng, 0.05, 0.3, 0.08, 12.0, 0.45)
+		"lantern_lock":
+			# Bright lock-on stinger: two clean rising tones + a glassy
+			# shimmer and a warm ember bed — the "your light has claimed it"
+			# moment, clearly distinct from the soft ambient pulse.
+			b.resize(int(0.42 * SYNTH_SR))
+			_sweep_tone(b, 0.0, 0.16, 587.33, 880.0, 0.20, 7.0)
+			_sweep_tone(b, 0.05, 0.20, 1174.66, 1760.0, 0.11, 6.0)
+			_hum(b, 0.0, 0.30, 110.0, 220.0, 0.09, 2)
+			_crackle(b, rng, 0.10, 0.22, 34.0, 0.07)
+		"lantern_release":
+			# Soft falling "mark forgotten" — gentle so moving around never
+			# clatters, but the state change is heard.
+			b.resize(int(0.40 * SYNTH_SR))
+			_sweep_tone(b, 0.0, 0.22, 440.0, 196.0, 0.14, 5.0)
+			_sweep_tone(b, 0.06, 0.16, 880.0, 587.0, 0.06, 6.0)
+		"lantern_refuse":
+			# Short flat descending buzz: a rite refused for lack of a mark.
+			# Harsher than the soft release so "you CAN'T cast yet" reads.
+			b.resize(int(0.30 * SYNTH_SR))
+			_sweep_tone(b, 0.0, 0.10, 330.0, 160.0, 0.18, 11.0)
+			_noise(b, rng, 0.04, 0.12, 0.10, 20.0, 0.5, 0.30)
 		# --- Hushling ---
 		"hushling_telegraph":
 			b.resize(int(0.30 * SYNTH_SR))

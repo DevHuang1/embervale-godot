@@ -14,14 +14,15 @@ var max_summons: int = 4
 var bramble_wall_cooldown: float = 0.0
 
 func _ready() -> void:
-	super._ready()
+	# Configure derived stats before BossBase calculates phase thresholds and
+	# initializes the boss combat camera profile.
 	max_hp = 800
 	hp = max_hp
 	diamond_reward = 5
 	base_atk = 15
 	move_speed = 4.0
 	arena_radius = 25.0
-	
+	super._ready()
 	_setup_attacks()
 	
 	# Find summon points
@@ -113,8 +114,9 @@ func _skill_thorn_lattice(player: Node3D) -> void:
 	_shake_camera(0.4)
 	for ring in 2:
 		var radius := 5.0 + ring * 6.0
-		CombatFx.spawn_ring(self, player.global_position, radius,
-			Color(1, 0.45, 0.2, 0.55), 1.1 + ring * 0.3)
+		CombatFx.spawn_ground_telegraph(self,
+			Vector3(player.global_position.x, 0, player.global_position.z),
+			radius, Color(1, 0.45, 0.2), 1.1 + ring * 0.3)
 		for i in 10:
 			var angle := (i / 10.0) * TAU
 			var pos: Vector3 = player.global_position \
@@ -193,9 +195,10 @@ func _thorn_rain(target: Node3D) -> void:
 	for c in range(circles):
 		var radius = 4.0 + c * 5.0
 		
-		# Danger-red warning ring for each incoming wave
-		CombatFx.spawn_ring(self, target.global_position, radius,
-			Color(1.0, 0.16, 0.08, 0.65), 1.2 + c * 0.3)
+		# Danger-red warning ring for each incoming wave (protected layer)
+		CombatFx.spawn_ground_telegraph(self,
+			Vector3(target.global_position.x, 0, target.global_position.z),
+			radius, Color(1.0, 0.16, 0.08), 1.2 + c * 0.3)
 		
 		for i in range(thorns_per_circle):
 			var angle = (i / float(thorns_per_circle)) * TAU
@@ -249,7 +252,8 @@ func _deal_thorn_damage(pos: Vector3, radius: float, damage: int) -> void:
 	CombatFx.spawn_decal(self, pos, 0.9)
 
 func _show_warning_ring(pos: Vector3, radius: float, duration: float) -> void:
-	CombatFx.spawn_ring(self, pos, radius, Color(1.0, 0.16, 0.08, 0.7), duration)
+	CombatFx.spawn_ground_telegraph(self,
+		Vector3(pos.x, 0, pos.z), radius, Color(1.0, 0.16, 0.08), duration)
 
 func _spawn_rewards() -> void:
 	if is_practice:

@@ -25,14 +25,20 @@ class_name CameraRig
 @export var dof_far_offset: float = 7.0
 @export var dof_far_transition: float = 7.0
 @export var dof_blur_amount: float = 0.07
+@export var top_down_target_height: float = 0.65
 
 # 3rd-person cinematic mode preset
-@export var third_person: bool = true
-@export var third_person_distance: float = 12.0
-@export var third_person_angle_v: float = -0.55
+@export var third_person: bool = false
+@export var third_person_distance: float = 13.0
+@export var third_person_angle_v: float = -0.62
+@export var third_person_target_height: float = 1.15
 @export var third_person_fov: float = 55.0
 @export var third_person_min_distance: float = 8.0
 @export var third_person_max_distance: float = 24.0
+@export var boss_distance: float = 15.5
+@export var boss_min_distance: float = 12.0
+@export var boss_max_distance: float = 22.0
+@export var boss_fov: float = 46.0
 @export var mode_lerp_speed: float = 3.0
 
 @onready var camera: Camera3D = $SpringArm/Camera3D
@@ -67,6 +73,7 @@ var _cine_dur := 2.6
 var _cine_focus := Vector3.ZERO
 var _cine_anchor := Vector3.ZERO
 var _restore_distance: float = 17.5
+var _boss_combat := false
 
 # Drag-release orbital inertia
 @export var inertia_strength: float = 1.15
@@ -136,8 +143,13 @@ func _apply_idle_drift(delta: float) -> void:
 	target_angle_h += sin(Time.get_ticks_msec() / 1000.0 * 0.15) * 0.00035
 
 func _update_camera_position(delta: float) -> void:
-	var target_pos = target.global_position
-	
+	var target_pos: Vector3 = target.global_position
+	# Aim at the Hero’s torso rather than the feet. This keeps the ground
+	# plane below the frame in third-person mode and prevents terrain/POM
+	# textures from visually swallowing the lower body.
+	var focus_height := third_person_target_height if third_person else top_down_target_height
+	target_pos.y += focus_height
+		
 	# Velocity look-ahead
 	if target.has_method("get_body_velocity"):
 		target_velocity = target.get_body_velocity()
@@ -323,6 +335,23 @@ func _update_cinematic(delta: float) -> void:
 
 func set_target(node: Node3D) -> void:
 	target = node
+
+## Boss arenas need a wider readable combat frame without forcing a full
+## cinematic camera. The distance is derived from the arena radius and clamped
+## for mobile readability and stable spring-arm cost.
+func set_boss_combat(active: bool, arena_radius: float = 20.0) -> void:
+	_boss_combat = active
+	if active:
+		var arena_scale := maxf(arena_radius - 20.0, 0.0) * 0.35
+		_target_distance = clampf(boss_distance + arena_scale, boss_min_distance, boss_max_distance)
+		_target_min_dist = boss_min_distance
+		_target_max_dist = boss_max_distance
+		_target_fov = boss_fov
+	else:
+		_target_distance = third_person_distance if third_person else 17.5
+		_target_min_dist = third_person_min_distance if third_person else 11.0
+		_target_max_dist = third_person_max_distance if third_person else 28.0
+		_target_fov = third_person_fov if third_person else 40.0
 
 func set_distance(new_distance: float) -> void:
 	distance = clamp(new_distance, _target_min_dist, _target_max_dist)

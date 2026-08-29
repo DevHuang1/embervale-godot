@@ -20,33 +20,55 @@ enum Pattern { ORBIT, FEINT, LUNGE, WINDUP, RECOVER, BRAMBLE_BURST }
 
 @export var max_hp: int = 28
 @export var base_atk: int = 3
-@export var move_speed: float = 5.0
+@export var move_speed: float = 3.2
 @export var orbit_distance: float = 72.0 / 10.0  # 7.2 units (STANDOFF converted)
-@export var lunge_speed: float = 16.5
-@export var feint_speed: float = 10.0
-@export var orbit_speed: float = 4.0
-@export var recover_speed: float = 5.0
-@export var burst_cooldown: float = 5.5
+@export var lunge_speed: float = 8.5
+@export var feint_speed: float = 5.5
+@export var orbit_speed: float = 2.0
+@export var recover_speed: float = 2.8
+@export var burst_cooldown: float = 6.5
 @export var burst_radius: float = 3.8
 @export var burst_damage: int = 6
 # Hard-tier flag: bursts become a tracking 3-spike thorn volley.
 @export var thorn_volley: bool = false
+@export var archetype: String = "hushling"
+
+## Reusable behavior profiles keep memory low while making enemy silhouettes and
+## combat rhythms distinct across realms.
+func configure_archetype(profile: String) -> void:
+	archetype = profile
+	match archetype:
+		"charger":
+			move_speed *= 1.12
+			orbit_distance = 5.2
+			lunge_speed = 11.5
+			lunge_cooldown = 2.4
+			counter_range = 2.8
+			burst_damage += 2
+		"ambusher":
+			move_speed *= 1.22
+			orbit_distance = 4.6
+			feint_speed = 7.4
+			lunge_speed = 10.0
+			lunge_cooldown = 2.0
+			counter_windup = 0.48
 
 # Telegraphed counter-strike: after being struck in melee range the sprite
 # winds up visibly before answering. Dodging through the strike is rewarded.
-@export var counter_windup: float = 0.55
+@export var counter_windup: float = 0.72
 @export var counter_range: float = 2.3
-@export var counter_cooldown: float = 2.5
+@export var counter_cooldown: float = 3.2
 var counter_timer: float = 0.0
 
 # Realm/boss SFX preset id ("vanilla" keeps the original cues).
 var sfx_profile: String = "vanilla"
+var elemental_status: Node = null
 
 var hp: int = 28
 var current_pattern: Pattern = Pattern.ORBIT
-var pattern_timer: float = 0.9
-var lunge_cooldown: float = 2.7
-var burst_timer: float = 2.5
+var pattern_timer: float = 1.1
+var lunge_cooldown: float = 3.3
+var burst_timer: float = 3.0
 var burst_active: bool = false
 var lunge_hit: bool = false
 var orbit_direction: int = 1
@@ -114,8 +136,14 @@ func _build_creature_details() -> void:
 
 func _ready() -> void:
 	hp = max_hp
+	var health_bar := preload("res://scripts/ui/enemy_health_bar.gd").new()
+	health_bar.name = "EnemyHealthBar"
+	add_child(health_bar)
+	elemental_status = preload("res://scripts/systems/elemental_status.gd").new()
+	elemental_status.name = "ElementalStatus"
+	add_child(elemental_status)
 	collision_layer = 1 << 1  # Enemy layer
-	collision_mask = 1 << 0 | 1 << 5  # Player + Environment
+	collision_mask = 1 << 0 | 1 << 5 | 1 << 6  # Player + Environment + Prop
 	
 	hitbox.area_entered.connect(_on_hitbox_entered)
 	attack_area.area_entered.connect(_on_attack_area_entered)
@@ -217,7 +245,7 @@ func _update_timers(delta: float) -> void:
 		knockback_velocity = knockback_velocity.lerp(Vector3.ZERO, pow(0.001, delta))
 
 func _update_pattern(delta: float) -> void:
-	var player = get_parent().get_node_or_null("Hero")
+	var player = get_tree().get_first_node_in_group("player")
 	if not player:
 		return
 	
@@ -235,11 +263,11 @@ func _update_pattern(delta: float) -> void:
 					_begin_bramble_burst()
 				elif dist < orbit_distance + 2.6 and lunge_cooldown <= 0:
 					current_pattern = Pattern.LUNGE
-					pattern_timer = 0.34
-					lunge_cooldown = 3.2
+					pattern_timer = 0.55
+					lunge_cooldown = 4.6
 					lunge_hit = false
 					_modulate_eyes(Color(1, 0.3, 0.2))
-					animator.trigger_attack()
+					animator.trigger_attack("enemy")
 					audio.play_enemy_telegraph()
 				else:
 					current_pattern = Pattern.FEINT
@@ -247,7 +275,7 @@ func _update_pattern(delta: float) -> void:
 				
 			Pattern.FEINT, Pattern.LUNGE:
 				current_pattern = Pattern.RECOVER
-				pattern_timer = 0.56
+				pattern_timer = 0.90
 
 			Pattern.WINDUP:
 				_resolve_counter_strike()
@@ -255,7 +283,7 @@ func _update_pattern(delta: float) -> void:
 			Pattern.BRAMBLE_BURST:
 				_perform_bramble_burst(player)
 				current_pattern = Pattern.RECOVER
-				pattern_timer = 0.56
+				pattern_timer = 0.90
 				
 			Pattern.RECOVER:
 				current_pattern = Pattern.ORBIT
@@ -329,7 +357,7 @@ func _spawn_burst_fx(color: Color, lifetime: float, amount: int) -> void:
 		color, amount, 3.8, lifetime, 0.18)
 
 func _update_movement(delta: float) -> void:
-	var player = get_parent().get_node_or_null("Hero")
+	var player = get_tree().get_first_node_in_group("player")
 	if not player:
 		return
 	
@@ -366,6 +394,8 @@ func _update_movement(delta: float) -> void:
 			dir_z = side.z * 0.45 + to_player.z * ((dist - orbit_distance) * 0.03)
 			speed = recover_speed
 	
+	if elemental_status != null and elemental_status.has_method("movement_multiplier"):
+		speed *= float(elemental_status.movement_multiplier())
 	velocity.x = lerp(velocity.x, dir_x * speed + knockback_velocity.x, 1.0 - exp(-delta * 10.0))
 	velocity.z = lerp(velocity.z, dir_z * speed + knockback_velocity.z, 1.0 - exp(-delta * 10.0))
 	velocity.y = 0
@@ -431,12 +461,15 @@ func _on_attack_area_entered(area: Area3D) -> void:
 			else:
 				audio.play_profile_cue(sfx_profile, "stomp")
 
-func take_damage(amount: int, knockback_dir: Vector3) -> void:
+func take_damage(amount: int, knockback_dir: Vector3, critical: bool = false) -> void:
 	if is_defeated:
 		return
 	
 	hp -= amount
-	FloatingText.spawn_on_entity(self, str(amount), Color(1, 0.84, 0.47))
+	FloatingText.spawn_damage_on_entity(self, amount, critical)
+	var health_bar := get_node_or_null("EnemyHealthBar")
+	if health_bar != null and health_bar.has_method("notify_damage"):
+		health_bar.notify_damage()
 	animator.trigger_hit()
 	
 	# Visual feedback
@@ -462,7 +495,7 @@ func take_damage(amount: int, knockback_dir: Vector3) -> void:
 		current_pattern = Pattern.RECOVER
 		pattern_timer = 0.4
 	else:
-		var hero = get_parent().get_node_or_null("Hero")
+		var hero = get_tree().get_first_node_in_group("player")
 		var can_counter := counter_timer <= 0.0 and hp > 0 \
 				and hero != null and is_instance_valid(hero) \
 				and global_position.distance_to(hero.global_position) \
@@ -486,20 +519,20 @@ func _begin_counter_windup() -> void:
 	lunge_hit = false
 	burst_active = false
 	_modulate_eyes(Color(1, 0.25, 0.15))
-	animator.trigger_attack()
+	animator.trigger_attack("enemy")
 	if sfx_profile == "vanilla":
 		audio.play_enemy_telegraph()
 	else:
 		audio.play_profile_cue(sfx_profile, "telegraph")
 	CombatFx.spawn_telegraph(self, global_position + Vector3(0, 0.35, 0),
-		Color(1.0, 0.32, 0.18))
-	CombatFx.spawn_ring(self, global_position, counter_range,
-		Color(1.0, 0.45, 0.18, 0.55), counter_windup)
+		Color(1.0, 0.32, 0.18), true)
+	CombatFx.spawn_ground_telegraph(self, global_position, counter_range,
+		Color(1.0, 0.45, 0.18), counter_windup)
 
 func _resolve_counter_strike() -> void:
 	current_pattern = Pattern.RECOVER
 	pattern_timer = 0.56
-	var player = get_parent().get_node_or_null("Hero")
+	var player = get_tree().get_first_node_in_group("player")
 	if is_defeated or player == null or not is_instance_valid(player):
 		return
 	CombatFx.spawn_slash(self, global_position + Vector3(0, 0.5, 0),
@@ -551,7 +584,7 @@ func _do_launch_death_corpse() -> void:
 	var visual := get_node_or_null("Visual") as Node3D
 	if visual == null or not is_inside_tree():
 		return
-	var killer := get_parent().get_node_or_null("Hero")
+	var killer := get_tree().get_first_node_in_group("player")
 	var dir := Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)).normalized()
 	if killer is Node3D:
 		dir = killer.global_position.direction_to(global_position)
@@ -570,6 +603,15 @@ func _on_death_animation_finished() -> void:
 
 func is_dead() -> bool:
 	return is_defeated
+
+func apply_elemental_status(element: String, intensity: int = 1) -> void:
+	if elemental_status != null and elemental_status.has_method("apply"):
+		elemental_status.apply(element, intensity)
+
+func get_elemental_status_snapshot() -> Dictionary:
+	if elemental_status != null and elemental_status.has_method("status_snapshot"):
+		return elemental_status.status_snapshot()
+	return {}
 
 func set_max_hp(value: int) -> void:
 	max_hp = value

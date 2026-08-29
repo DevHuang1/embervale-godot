@@ -61,12 +61,16 @@ const FEEDBACK_TIERS := {
 		"chroma": 0.14, "fov": 0.0, "priority": 20, "decay": 10.0},
 	"heavy": {"shake": 0.32, "hitstop": 0.100, "time_scale": 0.08,
 		"chroma": 0.24, "fov": 1.5, "priority": 30, "decay": 8.0},
-	"major": {"shake": 0.52, "hitstop": 0.150, "time_scale": 0.06,
-		"chroma": 0.38, "fov": 4.0, "priority": 40, "decay": 6.0},
+		"major": {"shake": 0.52, "hitstop": 0.150, "time_scale": 0.06,
+			"chroma": 0.38, "fov": 4.0, "priority": 40, "decay": 6.0},
+	"elite_hit": {"shake": 0.38, "hitstop": 0.115, "time_scale": 0.08,
+			"chroma": 0.28, "fov": 2.0, "priority": 35, "decay": 7.5},
+	"elemental_chain": {"shake": 0.58, "hitstop": 0.180, "time_scale": 0.05,
+			"chroma": 0.42, "fov": 4.5, "priority": 50, "decay": 5.5},
 	"perfect_dodge": {"shake": 0.16, "hitstop": 0.050, "time_scale": 0.16,
 		"chroma": 0.0, "fov": 0.0, "priority": 25, "decay": 11.0},
 }
-const FEEDBACK_TIER_NAMES := ["light", "medium", "heavy", "major", "perfect_dodge"]
+const FEEDBACK_TIER_NAMES := ["light", "medium", "heavy", "major", "elite_hit", "elemental_chain", "perfect_dodge"]
 
 
 ## Resolve a full profile dict for a strike. Unknown keys fall back safely.
@@ -116,6 +120,10 @@ static func apply_strike(context: Node, style: String, surface: String,
 	CombatFx.spawn_burst(context, hit_pos, profile.color,
 		int(10 * float(profile.burst)) + (4 if heavy else 0), 5.5, 0.3)
 	_spawn_debris(context, style, surface, hit_pos, heavy)
+	# High-tier garnish: a brief local pop light on heavy strikes only (pools
+	# and self-cleans; LOW/MEDIUM set transient_light_budget to zero).
+	if heavy:
+		CombatFx.spawn_impact_light(context, hit_pos, profile.color, 2.4, 4.2, 0.24)
 	if element in ELEMENTS:
 		apply_element(context, element, hit_pos)
 
@@ -179,7 +187,7 @@ static func apply_element(context: Node, element: String, pos: Vector3,
 	match element:
 		"fire":
 			CombatFx.spawn_decal(context, pos, radius * 0.7,
-				Color(0.14, 0.07, 0.03, 0.8))
+				Color(0.92, 0.45, 0.16, 0.55))
 			CombatFx.spawn_burst(context, pos + Vector3(0, 0.2, 0), color,
 				14, radius * 1.6, 0.42, 0.15)
 			CombatFx.spawn_motes(context, pos, Color(color.r, color.g, color.b, 0.6),
