@@ -179,7 +179,7 @@ static func boss_matriarch() -> LootTable:
 	t.add({"type":"diamond", "min":4,   "max":6,   "weight":1.0, "rarity":3,  "guaranteed":true})
 	t.add({"type":"item",    "id":"hushling_thorn","min":4,"max":8,"weight":2.0,"rarity":1})
 	t.add({"type":"item",    "id":"moss_tonic","min":2,"max":3,"weight":1.5,"rarity":0})
-	t.add({"type":"material","id":"monster_core","min":2,"max":4","weight":1.2,"rarity":2})
+	t.add({"type":"material","id":"monster_core","min":2,"max":4,,"weight":1.2,"rarity":2})
 	return t
 
 static func chest_common() -> LootTable:
@@ -215,7 +215,7 @@ static func chest_boss() -> LootTable:
 	t.add({"type":"gold",    "min":100, "max":220, "weight":1.0, "guaranteed":true})
 	t.add({"type":"diamond", "min":3,   "max":8,   "weight":1.0, "rarity":3,  "guaranteed":true})
 	t.add({"type":"xp",      "min":150, "max":300, "weight":1.0, "guaranteed":true})
-	t.add({"type":"material","id":"monster_core","min":2,"max":4","weight":2.0,"rarity":2})
+	t.add({"type":"material","id":"monster_core","min":2,"max":4,,"weight":2.0,"rarity":2})
 	t.add({"type":"material","id":"crystal_fragment","weight":1.5,"rarity":2})
 	t.add({"type":"weapon",  "id":"matriarch_scepter","weight":0.8,"rarity":4})
 	t.add({"type":"armor",   "id":"warden_plate",  "weight":0.9, "rarity":2})
