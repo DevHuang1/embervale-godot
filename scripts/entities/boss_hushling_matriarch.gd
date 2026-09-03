@@ -26,6 +26,26 @@ var _guard_visuals: Array[MeshInstance3D] = []
 var _arena_transform_root: Node3D = null
 var _arena_growths: Array[MeshInstance3D] = []
 
+# === Redesigned Model Variables ===
+const MAT_CHITIN    := Color(0.08, 0.06, 0.05)
+const MAT_THORN     := Color(0.14, 0.10, 0.07)
+const MAT_VEIN      := Color(0.76, 0.18, 0.06)
+const MAT_CORE      := Color(0.42, 0.88, 0.30)
+const MAT_EYE       := Color(0.95, 0.60, 0.12)
+const MAT_SILK      := Color(0.60, 0.22, 0.06)
+const MAT_CROWN     := Color(0.22, 0.14, 0.08)
+const MAT_RIB       := Color(0.16, 0.11, 0.08)
+var _carapace_host  : Node3D = null
+var _rib_mats       : Array[StandardMaterial3D] = []
+var _core_gem_mat   : StandardMaterial3D = null
+var _eye_mats_new   : Array[StandardMaterial3D] = []
+var _crown_horn_mats: Array[StandardMaterial3D] = []
+var _limb_roots     : Array[Node3D] = []
+var _silk_sbs       : SpringBoneSystem = null
+var _core_light     : OmniLight3D = null
+var _model_t        : float = 0.0
+
+
 func _ready() -> void:
 	# Configure derived stats before BossBase calculates phase thresholds and
 	# initializes the boss combat camera profile.
@@ -45,6 +65,7 @@ func _ready() -> void:
 	_setup_attacks()
 	_build_thorn_guard()
 	_build_arena_transform()
+	_build_matriarch_body()
 	
 	# Find summon points
 	for child in get_parent().get_children():
@@ -55,6 +76,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	super._process(delta)
+	_animate_matriarch(delta)
 	if is_defeated or vulnerability_timer <= 0.0:
 		return
 	vulnerability_timer = maxf(0.0, vulnerability_timer - delta)
@@ -648,4 +670,375 @@ func _pristine_crown_mat() -> StandardMaterial3D:
 	mat.emission                   = Color(0.76, 0.18, 0.06)
 	mat.emission_energy_multiplier = 0.35
 	return mat
+
+## === Redesigned Model Functions ===
+
+func _build_matriarch_body() -> void:
+	var visual := get_node_or_null("Visual")
+	if visual == null:
+		visual = Node3D.new(); visual.name = "Visual"; add_child(visual)
+	_carapace_host = Node3D.new()
+	_carapace_host.name = "MatriarchBody"
+	visual.add_child(_carapace_host)
+
+	_build_main_carapace()
+	_build_ribcage_core()
+	_build_limbs()
+	_build_crown_horns()
+	_build_eye_clusters()
+	_build_silk_cloak()
+	_build_matriarch_overkill()
+
+# ─── Carapace ─────────────────────────────────────────────────────────────────
+
+func _build_main_carapace() -> void:
+	var host := _carapace_host
+	# Main body segments (3 vertical bulbs — narrow at top, wide at waist)
+	var segs := [
+		[0.30, 0.82, Vector3(1.0, 0.68, 0.92)],  # lower abdomen
+		[1.22, 0.75, Vector3(1.0, 0.85, 0.88)],  # thorax
+		[2.28, 0.58, Vector3(0.90, 1.25, 0.85)], # thorax neck
+		[3.18, 0.42, Vector3(0.80, 1.10, 0.78)], # head base
+	]
+	for d in segs:
+		var seg := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = d[1]; sm.height = d[1] * 2.0; sm.radial_segments = 16; sm.rings = 10
+		seg.mesh = sm
+		seg.material_override = _chitin_mat(MAT_CHITIN, MAT_VEIN)
+		seg.position.y = d[0]
+		seg.scale = d[2]
+		host.add_child(seg)
+
+	# Back ridge of fused thorn spines (8)
+	for i in 8:
+		var t := float(i) / 7.0
+		var spine := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.0; cm.bottom_radius = 0.075 - t * 0.02; cm.height = 0.38 - t * 0.12; cm.radial_segments = 5
+		spine.mesh = cm
+		spine.material_override = _chitin_mat(MAT_THORN, MAT_VEIN)
+		spine.position = Vector3(0.0, 0.45 + t * 2.7, -0.68 + t * 0.12)
+		spine.rotation.x = 0.35 + t * 0.25
+		host.add_child(spine)
+
+	# Shoulder pauldrons (two fanned plate clusters)
+	for side in [-1.0, 1.0]:
+		var phost := Node3D.new()
+		phost.position = Vector3(side * 0.82, 2.05, 0.0)
+		host.add_child(phost)
+		for f in 5:
+			var fan := MeshInstance3D.new()
+			var fm := CylinderMesh.new()
+			var tf := float(f) / 4.0
+			fm.top_radius = 0.0; fm.bottom_radius = 0.12 - tf * 0.04
+			fm.height = 0.62 - tf * 0.18; fm.radial_segments = 6
+			fan.mesh = fm
+			fan.material_override = _chitin_mat(MAT_CHITIN, MAT_VEIN)
+			fan.position = Vector3(side * tf * 0.28, 0, 0)
+			fan.rotation = Vector3(0.0, 0.0, side * (0.4 + tf * 0.7))
+			phost.add_child(fan)
+
+# ─── Ribcage + Heart Core ─────────────────────────────────────────────────────
+
+func _build_ribcage_core() -> void:
+	var host := Node3D.new()
+	host.name = "Ribcage"
+	host.position = Vector3(0, 1.45, 0.55)
+	_carapace_host.add_child(host)
+
+	# Rib arches (8 curved bone arches forming a cage)
+	var rib_mat := StandardMaterial3D.new()
+	rib_mat.albedo_color = MAT_RIB
+	rib_mat.roughness    = 0.92
+	for i in 8:
+		var ang := (TAU * float(i) / 8.0) + PI * 0.5
+		var rib := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.bottom_radius = 0.045; cm.top_radius = 0.020; cm.height = 0.78; cm.radial_segments = 5
+		rib.mesh = cm
+		rib.material_override = rib_mat
+		_rib_mats.append(rib_mat)
+		rib.position = Vector3(cos(ang) * 0.52, 0.0, sin(ang) * 0.42)
+		rib.rotation = Vector3(cos(ang) * 0.55, 0.0, -sin(ang) * 0.45)
+		host.add_child(rib)
+
+	# Heart core (the breakable green gem visible through ribs)
+	var heart := MeshInstance3D.new()
+	var hm := SphereMesh.new()
+	hm.radius = 0.30; hm.height = 0.52; hm.radial_segments = 16
+	heart.mesh = hm
+	_core_gem_mat = StandardMaterial3D.new()
+	_core_gem_mat.albedo_color = MAT_CORE
+	_core_gem_mat.emission_enabled = true
+	_core_gem_mat.emission = MAT_CORE
+	_core_gem_mat.emission_energy_multiplier = 5.5
+	_core_gem_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	heart.material_override = _core_gem_mat
+	host.add_child(heart)
+
+	# Core point light
+	_core_light = OmniLight3D.new()
+	_core_light.light_color  = MAT_CORE
+	_core_light.light_energy = 2.8
+	_core_light.omni_range   = 7.0
+	host.add_child(_core_light)
+
+	# Lens-flare billboard
+	var flare := MeshInstance3D.new()
+	var qm := QuadMesh.new(); qm.size = Vector2(0.55, 0.55)
+	flare.mesh = qm
+	var fmat := StandardMaterial3D.new()
+	fmat.albedo_color = Color(MAT_CORE.r, MAT_CORE.g, MAT_CORE.b, 0.55)
+	fmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fmat.emission_enabled = true; fmat.emission = MAT_CORE
+	fmat.emission_energy_multiplier = 3.5
+	fmat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	fmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flare.material_override = fmat
+	flare.position.z = 0.30
+	host.add_child(flare)
+
+# ─── Insectoid Limbs ──────────────────────────────────────────────────────────
+
+func _build_limbs() -> void:
+	var positions := [
+		Vector3( 0.92, 2.10,  0.30), Vector3(-0.92, 2.10,  0.30),
+		Vector3( 1.00, 1.30, -0.10), Vector3(-1.00, 1.30, -0.10),
+		Vector3( 0.88, 0.55, -0.30), Vector3(-0.88, 0.55, -0.30),
+	]
+	for i in 6:
+		var lr := Node3D.new()
+		lr.name = "Limb_%d" % i
+		lr.position = positions[i]
+		_carapace_host.add_child(lr)
+		_limb_roots.append(lr)
+		var side := 1.0 if positions[i].x > 0 else -1.0
+		_build_insect_limb(lr, side, float(i))
+
+func _build_insect_limb(parent: Node3D, side: float, phase_off: float) -> void:
+	var mat := _chitin_mat(MAT_CHITIN, MAT_VEIN)
+	# Coxa (hip)
+	var coxa := MeshInstance3D.new()
+	var c1 := CylinderMesh.new()
+	c1.bottom_radius = 0.09; c1.top_radius = 0.06; c1.height = 0.42; c1.radial_segments = 7
+	coxa.mesh = c1; coxa.material_override = mat
+	coxa.position = Vector3(side * 0.22, -0.08, 0.0)
+	coxa.rotation = Vector3(0.15, 0.0, side * 0.55)
+	parent.add_child(coxa)
+	# Femur
+	var femur := MeshInstance3D.new()
+	var c2 := CylinderMesh.new()
+	c2.bottom_radius = 0.07; c2.top_radius = 0.045; c2.height = 0.62; c2.radial_segments = 6
+	femur.mesh = c2; femur.material_override = mat
+	femur.position = Vector3(side * 0.50, -0.34, 0.12)
+	femur.rotation = Vector3(0.55, 0.0, side * 0.42)
+	parent.add_child(femur)
+	# Tibia
+	var tibia := MeshInstance3D.new()
+	var c3 := CylinderMesh.new()
+	c3.bottom_radius = 0.050; c3.top_radius = 0.022; c3.height = 0.58; c3.radial_segments = 5
+	tibia.mesh = c3; tibia.material_override = mat
+	tibia.position = Vector3(side * 0.82, -0.75, 0.28)
+	tibia.rotation = Vector3(0.90, 0.0, side * 0.32)
+	parent.add_child(tibia)
+	# Claw (emissive tip)
+	var claw := MeshInstance3D.new()
+	var c4 := CylinderMesh.new()
+	c4.top_radius = 0.0; c4.bottom_radius = 0.030; c4.height = 0.26; c4.radial_segments = 5
+	claw.mesh = c4
+	claw.material_override = _chitin_mat(MAT_THORN, MAT_EYE)
+	claw.position = Vector3(side * 1.05, -1.05, 0.40)
+	claw.rotation = Vector3(1.10, 0.0, side * 0.22)
+	parent.add_child(claw)
+	# Idle leg sway
+	var tw := parent.create_tween().set_loops()
+	tw.tween_property(parent, "rotation:z", parent.rotation.z + side * 0.10, 1.4 + phase_off * 0.06).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(parent, "rotation:z", parent.rotation.z - side * 0.04, 1.4 + phase_off * 0.06).set_trans(Tween.TRANS_SINE)
+
+# ─── Crown Horns ─────────────────────────────────────────────────────────────
+
+func _build_crown_horns() -> void:
+	# 12 asymmetric crown horns replacing the simple thorn guard visuals
+	var host := Node3D.new()
+	host.name = "CrownHorns"
+	host.position.y = 3.65
+	_carapace_host.add_child(host)
+
+	# Each horn: [angle, radius, height, lean, twist, tip_emit]
+	var horn_defs := [
+		[0.00,   0.55, 1.15, 0.18, 0.00, true],
+		[TAU/12, 0.62, 0.88, 0.30, 0.20, false],
+		[2*TAU/12, 0.58, 1.02, 0.25, -0.18, true],
+		[3*TAU/12, 0.50, 0.78, 0.35, 0.15, false],
+		[4*TAU/12, 0.60, 0.96, 0.22, 0.28, true],
+		[5*TAU/12, 0.55, 0.85, 0.30, -0.12, false],
+		[6*TAU/12, 0.52, 1.08, 0.20, 0.0,  true],
+		[7*TAU/12, 0.58, 0.82, 0.28, 0.22, false],
+		[8*TAU/12, 0.62, 1.00, 0.24, -0.20, true],
+		[9*TAU/12, 0.50, 0.88, 0.32, 0.18, false],
+		[10*TAU/12, 0.56, 0.94, 0.26, 0.0,  true],
+		[11*TAU/12, 0.54, 0.80, 0.30, -0.15, false],
+	]
+	for d in horn_defs:
+		var ang : float = d[0]
+		var hr  : Node3D = Node3D.new()
+		hr.position = Vector3(cos(ang) * d[1], 0.0, sin(ang) * d[1])
+		hr.rotation = Vector3(d[3], ang + d[4], 0.0)
+		host.add_child(hr)
+		# 3-segment stacked horn
+		var seg_count := 3
+		var y_off := 0.0
+		for s in seg_count:
+			var seg := MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			var tf := float(s) / float(seg_count)
+			cm.top_radius = 0.0
+			cm.bottom_radius = 0.085 * (1.0 - tf * 0.55)
+			cm.height = d[2] * (0.48 - tf * 0.12)
+			cm.radial_segments = 6
+			seg.mesh = cm
+			var hmat := StandardMaterial3D.new()
+			hmat.albedo_color = MAT_CROWN
+			hmat.roughness    = 0.94
+			hmat.emission_enabled = true
+			hmat.emission = MAT_VEIN
+			hmat.emission_energy_multiplier = 0.15 + float(s) * 0.08
+			seg.material_override = hmat
+			_crown_horn_mats.append(hmat)
+			seg.position.y = y_off + cm.height * 0.5
+			seg.rotation.y = d[4] * float(s) * 0.6
+			hr.add_child(seg)
+			y_off += cm.height
+		# Emissive tip shard on every other horn
+		if bool(d[5]):
+			var tip := MeshInstance3D.new()
+			var ttsm := SphereMesh.new()
+			ttsm.radius = 0.040; ttsm.height = 0.068
+			tip.mesh = ttsm
+			var tmat := StandardMaterial3D.new()
+			tmat.albedo_color = MAT_VEIN
+			tmat.emission_enabled = true; tmat.emission = MAT_VEIN
+			tmat.emission_energy_multiplier = 3.8
+			tmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			tip.material_override = tmat
+			tip.position.y = y_off
+			hr.add_child(tip)
+
+# ─── Eye Clusters ─────────────────────────────────────────────────────────────
+
+func _build_eye_clusters() -> void:
+	# 8 eye clusters arranged in a crown arc on the head section
+	var host := Node3D.new()
+	host.name = "EyeClusters"
+	host.position = Vector3(0, 3.22, 0.60)
+	_carapace_host.add_child(host)
+
+	for i in 8:
+		var ang := (TAU * float(i) / 8.0) - PI * 0.15
+		var cluster := Node3D.new()
+		cluster.position = Vector3(cos(ang) * 0.58, sin(ang) * 0.28, 0.0)
+		host.add_child(cluster)
+		# 3 small eyes per cluster
+		for e in 3:
+			var eye := MeshInstance3D.new()
+			var esm := SphereMesh.new()
+			esm.radius = 0.038 - e * 0.008; esm.height = esm.radius * 2.0
+			eye.mesh = esm
+			var emat := StandardMaterial3D.new()
+			emat.albedo_color = MAT_EYE
+			emat.emission_enabled = true; emat.emission = MAT_EYE
+			emat.emission_energy_multiplier = 3.5 + float(e) * 0.5
+			emat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			eye.material_override = emat
+			_eye_mats_new.append(emat)
+			eye.position = Vector3((e - 1.0) * 0.055, float(e % 2) * 0.04, 0.04)
+			cluster.add_child(eye)
+		# Glow light per cluster
+		var el := OmniLight3D.new()
+		el.light_color  = MAT_EYE
+		el.light_energy = 0.42
+		el.omni_range   = 1.8
+		cluster.add_child(el)
+
+# ─── Silk Cloak (Verlet physics tendrils) ─────────────────────────────────────
+
+func _build_silk_cloak() -> void:
+	_silk_sbs = SpringBoneSystem.new()
+	_silk_sbs.name = "SilkCloak"
+	_silk_sbs.gravity        = Vector3(0.0, -5.2, 0.0)
+	_silk_sbs.damping        = 0.92
+	_silk_sbs.stiffness      = 0.08
+	_silk_sbs.wind_strength  = 0.15
+	_silk_sbs.wind_frequency = 0.48
+	_carapace_host.add_child(_silk_sbs)
+
+	# 12 trailing silk tendrils from the back of the abdomen
+	var base_pos := _carapace_host.global_position + Vector3(0, 1.2, -0.65) \
+		if _carapace_host.is_inside_tree() else Vector3(0, 1.2, -0.65)
+	for i in 12:
+		var ang := (TAU * float(i) / 12.0) - PI * 0.3
+		var spread := 0.62
+		var anchor := base_pos + Vector3(cos(ang) * spread * 0.6, 0.0, sin(ang) * spread)
+		_silk_sbs.add_chain_at(
+			anchor,
+			randi_range(5, 9),
+			randf_range(0.14, 0.22),
+			randf_range(0.018, 0.032),
+			MAT_SILK.lerp(MAT_VEIN, randf_range(0.0, 0.45)))
+
+# ─── OverkillGraphicsBoss layer ───────────────────────────────────────────────
+
+func _build_matriarch_overkill() -> void:
+	var og := OverkillGraphicsBoss.new()
+	og.name        = "OverkillMatriarch"
+	og.torso_tint  = MAT_CHITIN
+	og.crack_tint  = MAT_VEIN
+	og.horn_tint   = MAT_THORN
+	og.tendril_tint = MAT_SILK
+	og.rune_tint   = MAT_EYE
+	og.scale_factor = 1.12
+	add_child(og)
+	og.setup(self)
+
+# ─── Per-frame animation ──────────────────────────────────────────────────────
+
+func _animate_matriarch(delta: float) -> void:
+	_model_t += delta
+
+	# Core heartbeat (faster each phase)
+	if _core_gem_mat != null:
+		var rate := 1.4 + float(int(current_phase)) * 0.6
+		var breathe := 0.82 + 0.18 * sin(_model_t * rate) + 0.06 * sin(_model_t * rate * 2.8)
+		var phase_boost := 1.0 + float(int(current_phase)) * 0.4
+		_core_gem_mat.emission_energy_multiplier = breathe * 5.5 * phase_boost
+		if _core_light != null:
+			_core_light.light_energy = breathe * 2.8 * phase_boost
+
+	# Crown horn glow escalates each phase
+	var phase_col := MAT_VEIN.lerp(Color(0.95, 0.12, 0.04), float(int(current_phase)) / 3.0)
+	var horn_energy := 0.15 + float(int(current_phase)) * 0.55
+	for hmat in _crown_horn_mats:
+		if is_instance_valid(hmat):
+			hmat.emission = phase_col
+			hmat.emission_energy_multiplier = horn_energy + sin(_model_t * 2.5) * 0.12
+
+	# Eye pulse pattern + aggro
+	var eye_base := 3.5 + sin(_model_t * 4.2) * 1.8
+	var eye_mult := 1.0 + float(int(current_phase)) * 0.45
+	for emat in _eye_mats_new:
+		if is_instance_valid(emat):
+			emat.emission_energy_multiplier = eye_base * eye_mult
+
+# ─── Material helpers ─────────────────────────────────────────────────────────
+
+func _chitin_mat(base: Color, emit: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = base
+	m.roughness    = 0.88
+	m.metallic     = 0.12
+	m.emission_enabled = true
+	m.emission = emit
+	m.emission_energy_multiplier = 0.10
+	return m
 
