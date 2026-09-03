@@ -204,8 +204,15 @@ func _refresh_stats_panel() -> void:
 func _rebuild_equipment_loadout() -> void:
 	if _equipment_row == null:
 		return
+	# Detach BEFORE queue_free: re-adding a child that is still parented (or
+	# already queued for deletion) throws "already has a parent" and can abort
+	# the rebuild mid-way, leaving the equipment row stale/empty. The selected
+	# item label is a persistent member — detach it but never free it, or the
+	# next rebuild and _select_item would touch a freed instance.
 	for child in _equipment_row.get_children():
-		child.queue_free()
+		_equipment_row.remove_child(child)
+		if child != _selected_item_label:
+			child.queue_free()
 	_add_equipment_slot("WEAPON", game_state.equipped_weapon, Color(0.96, 0.72, 0.30))
 	_add_equipment_slot("ARMOR", game_state.equipped_armor, Color(0.42, 0.76, 0.96))
 	_equipment_row.add_child(_selected_item_label)
