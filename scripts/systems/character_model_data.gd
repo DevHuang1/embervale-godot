@@ -1,5 +1,5 @@
 extends RefCounted
-class_name CharacterModelData
+## class_name removed — duplicate of scripts/entities/character_model_data.gd
 
 ## === CharacterModelData — Enemy Visual / Stat Configurator ===
 ## Used by world_manager._spawn_pack_enemy() and HushlingMatriarch._summon_hushlings()
