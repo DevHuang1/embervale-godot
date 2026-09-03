@@ -341,67 +341,191 @@ func _build_thorn_guard() -> void:
 	thorn_guard = thorn_guard_max
 	var host := Node3D.new()
 	host.name = "ArmorGear_MatriarchCrown"
-	var visual := visual_root_or_body_parent()
-	if visual == null:
+	var visual_root := visual_root_or_body_parent()
+	if visual_root == null:
 		return
-	visual.add_child(host)
+	visual_root.add_child(host)
+
 	for i in 4:
+		var spike_root := Node3D.new()
+		spike_root.name = "ThornSpike_%d" % i
+		host.add_child(spike_root)
+
+		# Main spike mesh
 		var thorn := MeshInstance3D.new()
 		thorn.name = "ThornGuard_%d" % i
 		var mesh := CylinderMesh.new()
-		mesh.top_radius = 0.0
-		mesh.bottom_radius = 0.16
-		mesh.height = 0.85
+		mesh.top_radius      = 0.0
+		mesh.bottom_radius   = 0.16
+		mesh.height          = 0.85
 		mesh.radial_segments = 7
 		thorn.mesh = mesh
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = Color(0.22, 0.10, 0.07)
-		mat.roughness = 0.92
-		mat.emission_enabled = true
-		mat.emission = Color(0.76, 0.18, 0.06)
-		mat.emission_energy_multiplier = 0.35
+		var mat := _pristine_crown_mat()
 		thorn.material_override = mat
 		var angle := TAU * float(i) / 4.0
-		thorn.position = crit_zone_center + Vector3(cos(angle) * 0.72, 0.15,
-			sin(angle) * 0.72)
+		thorn.position = crit_zone_center + Vector3(
+			cos(angle) * 0.72, 0.15, sin(angle) * 0.72)
 		thorn.rotation = Vector3(sin(angle) * 0.35, 0.0, -cos(angle) * 0.35)
-		host.add_child(thorn)
+		spike_root.add_child(thorn)
 		_guard_visuals.append(thorn)
+
+		# Crack overlay — 3 thin crack-line meshes per spike, hidden at full health
+		for c in 3:
+			var crack := MeshInstance3D.new()
+			crack.name = "CrownCrack_%d_%d" % [i, c]
+			var cm := BoxMesh.new()
+			cm.size = Vector3(0.025, 0.30 + float(c) * 0.12, 0.018)
+			crack.mesh = cm
+			var crack_mat := StandardMaterial3D.new()
+			crack_mat.albedo_color = Color(0.05, 0.03, 0.02)
+			crack_mat.emission_enabled = true
+			crack_mat.emission         = Color(0.90, 0.22, 0.06)
+			crack_mat.emission_energy_multiplier = 0.0  # hidden until damage
+			crack_mat.roughness = 0.99
+			crack.material_override = crack_mat
+			crack.position = thorn.position + Vector3(
+				sin(float(c) * 1.3 + angle) * 0.06,
+				-0.12 + float(c) * 0.22,
+				cos(float(c) * 0.9 + angle) * 0.06)
+			crack.rotation = Vector3(
+				sin(float(c)) * 0.4, angle + float(c) * 0.7, cos(float(c)) * 0.3)
+			spike_root.add_child(crack)
+
 	_update_guard_visuals()
 
 func _update_guard_visuals() -> void:
-	var visible_count := ceili(float(thorn_guard) / maxf(float(thorn_guard_max), 1.0)
-		* float(_guard_visuals.size()))
+	var ratio := clampf(float(thorn_guard) / maxf(float(thorn_guard_max), 1.0), 0.0, 1.0)
+
+	# Phase 1 (ratio > 0.66) : pristine — full glow, no cracks
+	# Phase 2 (0.33–0.66)    : stressed — darkening, 1st crack layer glows
+	# Phase 3 (0–0.33)       : crumbling — very dark, all cracks bright, flicker
+	var damage_t := 1.0 - ratio  # 0 = full HP, 1 = broken
+
 	for i in _guard_visuals.size():
-		if is_instance_valid(_guard_visuals[i]):
-			_guard_visuals[i].visible = i < visible_count
+		var thorn := _guard_visuals[i]
+		if not is_instance_valid(thorn):
+			continue
+		var mat := thorn.material_override as StandardMaterial3D
+		if mat == null:
+			continue
+
+		# Darken body as guard breaks
+		var base_brightness := lerpf(0.22, 0.08, damage_t)
+		mat.albedo_color = Color(base_brightness, base_brightness * 0.45,
+			base_brightness * 0.32)
+		# Ember glow dims — becomes redder and dimmer as it cracks
+		var glow_energy := lerpf(0.35, 0.06, damage_t)
+		mat.emission     = Color(
+			lerpf(0.76, 0.55, damage_t),
+			lerpf(0.18, 0.06, damage_t),
+			lerpf(0.06, 0.02, damage_t))
+		mat.emission_energy_multiplier = glow_energy
+
+		# Reveal crack overlays
+		var spike_root := thorn.get_parent()
+		for c in 3:
+			var crack_node := spike_root.get_node_or_null("CrownCrack_%d_%d" % [i, c])
+			if crack_node == null or not (crack_node is MeshInstance3D):
+				continue
+			var crack_mat := (crack_node as MeshInstance3D).material_override as StandardMaterial3D
+			if crack_mat == null:
+				continue
+			# Each crack layer appears progressively
+			var crack_threshold := float(c) / 3.0
+			var crack_intensity := clampf((damage_t - crack_threshold) / 0.34, 0.0, 1.0)
+			crack_mat.emission_energy_multiplier = lerpf(0.0, 3.2, crack_intensity)
+			# Flicker near breaking point
+			if ratio < 0.18:
+				var flicker := 0.6 + sin(Time.get_ticks_msec() * 0.018 + float(i + c)) * 0.4
+				crack_mat.emission_energy_multiplier *= flicker
+
+	# Boss HP label
 	if boss_phase_label and vulnerability_timer <= 0.0:
-		boss_phase_label.text = "THORN GUARD %d%%" % int(round(
-			100.0 * float(thorn_guard) / maxf(float(thorn_guard_max), 1.0)))
+		boss_phase_label.text = "THORN GUARD %d%%" % int(round(ratio * 100.0))
 
 func _break_thorn_guard() -> void:
-	vulnerability_timer = vulnerability_duration
-	_guard_rearm_pending = true
+	vulnerability_timer   = vulnerability_duration
+	_guard_rearm_pending  = true
 	_update_guard_visuals()
+
+	# Per-spike fragment burst — each guard spike shatters independently
+	for i in _guard_visuals.size():
+		var thorn := _guard_visuals[i]
+		if not is_instance_valid(thorn):
+			continue
+		var spike_pos := thorn.global_position
+		CombatFx.spawn_burst(self, spike_pos,
+			Color(0.90, 0.22, 0.06, 0.9), 8, 6.0, 0.4, 0.14)
+		# Spawn 4 debris shards per spike
+		var shard_mat := StandardMaterial3D.new()
+		shard_mat.albedo_color = Color(0.16, 0.08, 0.05)
+		shard_mat.emission_enabled = true
+		shard_mat.emission = Color(0.76, 0.18, 0.06)
+		shard_mat.emission_energy_multiplier = 1.6
+		for s in 4:
+			var shard := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = Vector3(randf_range(0.04, 0.12), randf_range(0.03, 0.10),
+				randf_range(0.04, 0.09))
+			shard.mesh = bm
+			shard.material_override = shard_mat
+			shard.global_position = spike_pos + Vector3(
+				randf_range(-0.15, 0.15), randf_range(0.1, 0.4),
+				randf_range(-0.15, 0.15))
+			shard.rotation = Vector3(
+				randf_range(0.0, TAU), randf_range(0.0, TAU), randf_range(0.0, TAU))
+			add_child(shard)
+			var vel := Vector3(
+				randf_range(-4.0, 4.0), randf_range(1.5, 5.5),
+				randf_range(-4.0, 4.0))
+			var tw := shard.create_tween()
+			tw.tween_property(shard, "global_position",
+				shard.global_position + vel, 0.5).set_trans(Tween.TRANS_QUAD)
+			tw.parallel().tween_property(shard, "rotation",
+				shard.rotation + Vector3(randf_range(-TAU, TAU), randf_range(-TAU, TAU), 0), 0.5)
+			tw.tween_callback(shard.queue_free)
+		# Hide the spike itself (it will be rebuilt by _rearm)
+		thorn.visible = false
+
+	# Crown-wide shockwave + feedback
 	CombatFx.spawn_shockwave(self, global_position + Vector3.UP * 2.2, 3.4,
 		Color(0.95, 0.32, 0.10, 0.86), 0.55)
 	CombatFx.spawn_burst(self, global_position + Vector3.UP * 2.8,
-		Color(0.55, 0.22, 0.10, 0.9), 18, 5.0, 0.55, 0.16)
-	ImpactDirector.apply_feedback(self, "heavy", global_position + Vector3.UP * 2.4,
-		Vector3.DOWN, 0.8)
-	FloatingText.spawn_on_entity(self, "CROWN BROKEN — STRIKE NOW",
-		Color(1.0, 0.72, 0.28), 1.6)
+		Color(0.55, 0.22, 0.10, 0.9), 24, 6.0, 0.55, 0.14)
+	ImpactDirector.apply_feedback(self, "heavy",
+		global_position + Vector3.UP * 2.4, Vector3.DOWN, 0.8)
+	FloatingText.spawn_on_entity(self,
+		"CROWN BROKEN — STRIKE NOW", Color(1.0, 0.72, 0.28), 1.6)
 
 func _rearm_thorn_guard() -> void:
 	if is_defeated:
 		return
-	vulnerability_timer = 0.0
-	thorn_guard = thorn_guard_max
+	vulnerability_timer  = 0.0
+	thorn_guard          = thorn_guard_max
 	_guard_rearm_pending = false
+
+	# Restore spike visibility and reset materials to pristine state
+	for thorn in _guard_visuals:
+		if not is_instance_valid(thorn):
+			continue
+		thorn.visible = true
+		thorn.material_override = _pristine_crown_mat()
+		# Reset crack overlays to invisible
+		var spike_root := thorn.get_parent()
+		for c in 3:
+			var crack_node := spike_root.get_node_or_null(
+				"CrownCrack_%d_%d" % [_guard_visuals.find(thorn), c])
+			if crack_node == null:
+				continue
+			var cm := (crack_node as MeshInstance3D).material_override as StandardMaterial3D
+			if cm:
+				cm.emission_energy_multiplier = 0.0
+
+	# Regrowth burst — crown snaps back with a green bramble bloom
+	CombatFx.spawn_burst(self, global_position + Vector3.UP * 2.5,
+		Color(0.42, 0.72, 0.30, 0.8), 16, 4.0, 0.4, 0.16)
 	_update_guard_visuals()
 
-## Twelve collision-free silhouettes reshape the arena read across phases.
-## Gameplay space remains unchanged; protected attack telegraphs stay primary.
 func _build_arena_transform() -> void:
 	_arena_transform_root = Node3D.new()
 	_arena_transform_root.name = "ArenaTransformation"
@@ -513,3 +637,15 @@ func _spawn_rewards() -> void:
 		if not newly_unlocked:
 			route_note = "The Moonfen path brightens. Forge an upgrade before the next expedition."
 		game_state.quest_progress.emit(route_note)
+
+## === Crown model helpers (added by model-improvements) ===
+
+func _pristine_crown_mat() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color               = Color(0.22, 0.10, 0.07)
+	mat.roughness                  = 0.92
+	mat.emission_enabled           = true
+	mat.emission                   = Color(0.76, 0.18, 0.06)
+	mat.emission_energy_multiplier = 0.35
+	return mat
+
