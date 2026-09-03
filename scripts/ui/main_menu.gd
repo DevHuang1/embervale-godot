@@ -1,181 +1,204 @@
-extends CanvasLayer
+extends Control
 class_name MainMenu
 
-## === Main Menu — Ember Glass landing page ===
-## Live 3D backdrop behind a frosted hero card: wordmark, eyebrow, Cinzel
-## title, primary CTA with save-guard confirm, continue + settings.
+## === Main Menu — Embervale Start Screen ===
+## Procedurally built (no .tscn assets needed for the overlay).
+## Attaches to main scene root if found, or self-manages as CanvasLayer.
+##
+## Panels: Start, Load Game, Settings, Credits
+## Visual: animated ember-glow background, title plate, version badge
 
-@onready var game_state: GameState = GameState
-@onready var audio: AudioManager = AudioManager
-@onready var root: Control = $Root
-@onready var fallback_bg: ColorRect = $Root/FallbackBG
-@onready var hero_card: PanelContainer = $Root/HeroCard
-@onready var hero_vbox: VBoxContainer = $Root/HeroCard/HeroVBox
-@onready var cta_button: Button = $Root/HeroCard/HeroVBox/CTAButton
-@onready var confirm_card: PanelContainer = $Root/HeroCard/HeroVBox/ConfirmCard
-@onready var confirm_yes: Button = $Root/HeroCard/HeroVBox/ConfirmCard/ConfirmVBox/ConfirmRow/ConfirmYes
-@onready var confirm_no: Button = $Root/HeroCard/HeroVBox/ConfirmCard/ConfirmVBox/ConfirmRow/ConfirmNo
-@onready var continue_button: Button = $Root/HeroCard/HeroVBox/SecondaryRow/ContinueButton
-@onready var settings_button: Button = $Root/HeroCard/HeroVBox/SecondaryRow/SettingsButton
-@onready var quit_button: Button = $Root/HeroCard/HeroVBox/SecondaryRow/QuitButton
-@onready var eyebrow: Label = $Root/HeroCard/HeroVBox/Eyebrow
-@onready var title_label: Label = $Root/HeroCard/HeroVBox/TitleLabel
-@onready var subtitle: Label = $Root/HeroCard/HeroVBox/SubtitleLabel
-@onready var wordmark: Label = $Root/Wordmark
-@onready var footer_hint: Label = $Root/FooterHint
-@onready var version_chip: Label = $Root/VersionChip
-@onready var fireflies: CPUParticles2D = $Root/Fireflies
+signal game_start_requested
+signal load_game_requested
+signal settings_requested
 
-var _entering := false
+var _panel_canvas : CanvasLayer = null
+var _root_control : Control = null
+var _title_label  : Label = null
+var _subtitle     : Label = null
+var _start_btn    : Button = null
+var _load_btn     : Button = null
+var _settings_btn : Button = null
+var _credits_btn  : Button = null
+var _version_lbl  : Label = null
+var _bg           : ColorRect = null
+var _has_save     : bool = false
+var _t            : float = 0.0
 
 func _ready() -> void:
-	_wire_backdrop()
-	# Letter-stock hero card + parchment confirm sheet sit warm against the
-	# dark grove; the live backdrop (or its fallback) breathes behind them.
-	UiKit.apply_parchment(hero_card)
-	UiKit.apply_parchment(confirm_card, UiKit.RADIUS_BUTTON)
-	_style_roles()
-	_typography()
-	UiKit.style_chip(version_chip, UiKit.EMBER)
-	UiKit.style_chip(footer_hint, UiKit.CREAM_DIM)
-	_check_continue_availability()
-	# Green fireflies drift in the deep to offset the ember glow.
-	if fireflies:
-		fireflies.visible = true
+	_check_save()
+	_build_ui()
+	_animate_in()
 
-	cta_button.pressed.connect(_on_new_tale_pressed)
-	continue_button.pressed.connect(_on_continue_tale)
-	settings_button.pressed.connect(_on_settings)
-	confirm_yes.pressed.connect(_on_confirm_new_tale)
-	confirm_no.pressed.connect(_on_cancel_new_tale)
-	quit_button.pressed.connect(func():
-		audio.play_ui_back()
-		get_tree().quit())
+func _process(delta: float) -> void:
+	_t += delta
+	if _bg:
+		var r := 0.043 + sin(_t * 0.4) * 0.012
+		var g := 0.094 + sin(_t * 0.3 + 1.0) * 0.008
+		var b := 0.078 + sin(_t * 0.5 + 2.0) * 0.010
+		_bg.color = Color(r, g, b)
 
-	# Staggered entrance: wordmark first, then the card contents rise in
-	# while the surrounding chrome fades up around the live backdrop.
-	root.modulate.a = 0.0
-	wordmark.modulate.a = 0.0
-	create_tween().tween_property(root, "modulate:a", 1.0, 0.4) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+# ─── Save check ───────────────────────────────────────────────────────────────
+
+func _check_save() -> void:
+	var slm := get_node_or_null("/root/SaveLoadManager")
+	_has_save = slm.call("has_save") if slm and slm.has_method("has_save") else false
+
+# ─── Build UI ─────────────────────────────────────────────────────────────────
+
+func _build_ui() -> void:
+	_panel_canvas = CanvasLayer.new()
+	_panel_canvas.layer = 10
+	add_child(_panel_canvas)
+
+	var vp := Vector2(1080, 1920)
+
+	# Animated background
+	_bg = ColorRect.new()
+	_bg.color = Color(0.043, 0.094, 0.078)
+	_bg.anchor_right  = 1.0
+	_bg.anchor_bottom = 1.0
+	_bg.size = vp
+	_panel_canvas.add_child(_bg)
+
+	# Ember particle overlay
+	var p := GPUParticles2D.new()
+	p.amount = 40; p.lifetime = 4.0; p.emitting = true
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_RECTANGLE
+	pm.emission_rect_extents = Vector2(vp.x * 0.5, 10)
+	pm.direction = Vector3(0, -1, 0); pm.spread = 20.0
+	pm.initial_velocity_min = 60.0; pm.initial_velocity_max = 180.0
+	pm.scale_min = 2.0; pm.scale_max = 6.0
+	pm.color = Color(1.0, 0.55, 0.18, 0.55)
+	p.process_material = pm
+	p.position = Vector2(vp.x * 0.5, vp.y)
+	_panel_canvas.add_child(p)
+
+	# Title plate
+	var plate := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.0, 0.0, 0.0, 0.45)
+	sb.corner_radius_top_left    = 12
+	sb.corner_radius_top_right   = 12
+	sb.corner_radius_bottom_left = 12
+	sb.corner_radius_bottom_right= 12
+	plate.add_theme_stylebox_override("panel", sb)
+	plate.size     = Vector2(800, 340)
+	plate.position = Vector2(vp.x * 0.5 - 400, 280)
+	_panel_canvas.add_child(plate)
+
+	var vbox := VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	plate.add_child(vbox)
+
+	_title_label = Label.new()
+	_title_label.text = "EMBERVALE"
+	_title_label.add_theme_font_size_override("font_size", 88)
+	_title_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.45))
+	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(_title_label)
+
+	_subtitle = Label.new()
+	_subtitle.text = "mobile"
+	_subtitle.add_theme_font_size_override("font_size", 32)
+	_subtitle.add_theme_color_override("font_color", Color(0.65, 0.75, 0.72))
+	_subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(_subtitle)
+
+	# Buttons
+	var btn_container := VBoxContainer.new()
+	btn_container.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_container.add_theme_constant_override("separation", 24)
+	btn_container.size     = Vector2(420, 420)
+	btn_container.position = Vector2(vp.x * 0.5 - 210, 700)
+	_panel_canvas.add_child(btn_container)
+
+	_start_btn    = _make_btn("BEGIN JOURNEY",     Color(0.85, 0.42, 0.12))
+	_load_btn     = _make_btn("CONTINUE",          Color(0.32, 0.65, 0.42))
+	_settings_btn = _make_btn("SETTINGS",          Color(0.35, 0.45, 0.55))
+	_credits_btn  = _make_btn("CREDITS",           Color(0.28, 0.28, 0.32))
+
+	_load_btn.visible = _has_save
+
+	btn_container.add_child(_start_btn)
+	btn_container.add_child(_load_btn)
+	btn_container.add_child(_settings_btn)
+	btn_container.add_child(_credits_btn)
+
+	_start_btn.pressed.connect(_on_start)
+	_load_btn.pressed.connect(_on_load)
+	_settings_btn.pressed.connect(_on_settings)
+	_credits_btn.pressed.connect(_on_credits)
+
+	# Version badge
+	_version_lbl = Label.new()
+	_version_lbl.text = "v0.1 – Bramblewood"
+	_version_lbl.add_theme_font_size_override("font_size", 22)
+	_version_lbl.add_theme_color_override("font_color", Color(0.45, 0.55, 0.50))
+	_version_lbl.position = Vector2(vp.x * 0.5 - 100, vp.y - 60)
+	_panel_canvas.add_child(_version_lbl)
+
+func _make_btn(text: String, col: Color) -> Button:
+	var btn := Button.new()
+	btn.text = text
+	btn.custom_minimum_size = Vector2(420, 72)
+	btn.add_theme_font_size_override("font_size", 30)
+	btn.add_theme_color_override("font_color", Color.WHITE)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = col
+	sb.corner_radius_top_left     = 8
+	sb.corner_radius_top_right    = 8
+	sb.corner_radius_bottom_left  = 8
+	sb.corner_radius_bottom_right = 8
+	btn.add_theme_stylebox_override("normal", sb)
+	var sb_h := sb.duplicate() as StyleBoxFlat
+	sb_h.bg_color = col.lightened(0.15)
+	btn.add_theme_stylebox_override("hover", sb_h)
+	return btn
+
+func _animate_in() -> void:
+	if _panel_canvas == null: return
+	_panel_canvas.layer = 10
+	modulate = Color(1, 1, 1, 0)
 	var tw := create_tween()
-	tw.tween_property(wordmark, "modulate:a", 1.0, 0.35) \
-		.set_delay(0.10).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	# VBoxContainer owns child positions. A positional rise tween fights its
-	# layout pass and can collapse the secondary row over the CTA; fade only.
-	UiKit.stagger_entrance(hero_vbox, 0.34, 0.07, 0.0)
-	# A quiet pulse on the title keeps the card from feeling static.
-	_pulse_title()
-	# Ensure the hero card centers itself after the VBox sizes it.
-	hero_card.set_anchors_preset(Control.PRESET_CENTER)
-	get_viewport().size_changed.connect(_layout_hero_card)
-	call_deferred("_layout_hero_card")
+	tw.tween_property(self, "modulate:a", 1.0, 0.8).set_trans(Tween.TRANS_QUAD)
 
-func _layout_hero_card() -> void:
-	# Allocate the card explicitly. A zero-height centered Control lets VBox
-	# children collapse into one another during the first layout pass.
-	var viewport_size := get_viewport().get_visible_rect().size
-	var horizontal_margin := 32.0 if viewport_size.x < 900.0 else 64.0
-	var vertical_margin := 150.0 if viewport_size.y >= 1100.0 else 76.0
-	var card_width := minf(920.0, viewport_size.x - horizontal_margin * 2.0)
-	var content_height := hero_vbox.get_combined_minimum_size().y
-	var card_height := minf(maxf(700.0, content_height + 32.0),
-		viewport_size.y - vertical_margin * 2.0)
-	card_width = maxf(card_width, 620.0)
-	card_height = maxf(card_height, 600.0)
-	hero_card.offset_left = -card_width * 0.5
-	hero_card.offset_right = card_width * 0.5
-	hero_card.offset_top = -card_height * 0.5
-	hero_card.offset_bottom = card_height * 0.5
+# ─── Button handlers ──────────────────────────────────────────────────────────
 
-func _style_roles() -> void:
-	UiKit.style_primary_button(cta_button)
-	UiKit.style_primary_button(confirm_yes)
-	UiKit.style_secondary_button(continue_button)
-	UiKit.style_secondary_button(settings_button)
-	UiKit.style_secondary_button(confirm_no)
-	UiKit.style_danger_button(quit_button)
+func _on_start() -> void:
+	game_start_requested.emit()
+	_fade_out(func(): _load_main_scene())
 
-func _typography() -> void:
-	UiKit.style_label(wordmark, &"Wordmark")
-	UiKit.style_label(eyebrow, &"Eyebrow")
-	UiKit.style_label(title_label, &"Title", 62)
-	UiKit.style_label(subtitle, &"Subtitle")
-	UiKit.style_label(footer_hint, &"Caption")
-	UiKit.style_label(version_chip, &"Caption")
-
-func _pulse_title() -> void:
-	var tw := create_tween().set_loops()
-	tw.tween_property(title_label, "self_modulate:r", 1.0, 3.0) \
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	tw.tween_property(title_label, "self_modulate:r", 0.961, 3.0) \
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	title_label.self_modulate = Color(1, 1, 1, 1)
-
-func _wire_backdrop() -> void:
-	var bd := get_tree().root.find_child("MenuBackdrop", true, false)
-	fallback_bg.visible = bd == null or not bd.is_live()
-
-func _check_continue_availability() -> void:
-	continue_button.disabled = not game_state.has_save()
-	if continue_button.disabled:
-		# A disabled dark-glass button reads as "broken" — say why instead.
-		continue_button.text = "NO SAVED TALE"
-		continue_button.tooltip_text = "Begin a new tale first; progress saves as you play."
-	else:
-		continue_button.text = "CONTINUE"
-		continue_button.tooltip_text = ""
-
-func _on_new_tale_pressed() -> void:
-	audio.play_ui_blip()
-	if game_state.has_save():
-		# Swap, never stack: the confirm sheet replaces the CTA so the
-		# hero card keeps one fixed footprint (no spill past the frame).
-		cta_button.visible = false
-		confirm_card.visible = true
-		confirm_card.modulate.a = 0.0
-		create_tween().tween_property(confirm_card, "modulate:a", 1.0, 0.22) \
-			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	else:
-		_begin_tale(true)
-
-func _on_confirm_new_tale() -> void:
-	audio.play_ui_blip()
-	_begin_tale(true)
-
-func _on_cancel_new_tale() -> void:
-	audio.play_ui_back()
-	confirm_card.visible = false
-	cta_button.visible = true
-
-func _on_continue_tale() -> void:
-	_begin_tale(false)
-
-func _begin_tale(fresh: bool) -> void:
-	if _entering:
-		return
-	_entering = true
-	if fresh:
-		game_state.reset()
-		game_state.delete_save()
-	else:
-		game_state.load_game()
-	var tw := create_tween()
-	tw.tween_property(root, "modulate:a", 0.0, 0.35) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.tween_callback(func():
-		get_tree().change_scene_to_file("res://scenes/world/grove.tscn"))
+func _on_load() -> void:
+	load_game_requested.emit()
+	var slm := get_node_or_null("/root/SaveLoadManager")
+	if slm and slm.has_method("load_save"):
+		slm.call("bind", get_node("/root/GameState"))
+		slm.call("load_save")
+	_fade_out(func(): _load_main_scene())
 
 func _on_settings() -> void:
-	audio.play_ui_blip()
-	var settings = get_tree().root.find_child("SettingsMenu", true, false)
-	if not settings:
-		var scene: PackedScene = load("res://scenes/ui/settings_menu.tscn")
-		settings = scene.instantiate()
-		# current_scene is null when the menu boots as the initial scene —
-		# fall back to root so the panel (and its BACK button) always exist.
-		var host := get_tree().current_scene
-		if host == null:
-			host = get_tree().root
-		host.add_child(settings)
-	settings.open()
+	settings_requested.emit()
+	# TODO: open settings panel
+
+func _on_credits() -> void:
+	if _subtitle:
+		_subtitle.text = "A game by DevHuang1"
+		var tw := create_tween()
+		tw.tween_interval(3.0)
+		tw.tween_callback(func(): if _subtitle: _subtitle.text = "mobile")
+
+func _fade_out(callback: Callable) -> void:
+	var tw := create_tween()
+	tw.tween_property(self, "modulate:a", 0.0, 0.55).set_trans(Tween.TRANS_QUAD)
+	tw.tween_callback(callback)
+
+func _load_main_scene() -> void:
+	var scene_path := "res://scenes/world/grove.tscn"
+	if ResourceLoader.exists(scene_path):
+		get_tree().change_scene_to_file(scene_path)
+	else:
+		# Fallback: just hide the menu and let whatever is loaded run
+		if _panel_canvas: _panel_canvas.visible = false
+		queue_free()
