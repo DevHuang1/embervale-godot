@@ -1,267 +1,130 @@
+extends Node
 class_name CharacterRigLoader
-extends RefCounted
 
-## === Authored-Model Drop-In ===
-## Loads an optional rigged character (assets/models/<profile>.glb or .gltf)
-## and mounts it on the existing entity, hiding the procedural ghost body.
-## When no model file is present every call is a silent no-op, so the
-## primitive prototype stays fully playable until an artist ships real art.
+## === CharacterRigLoader — Authored Model Drop-In System ===
+## Called by every entity _ready() as:
+##   CharacterRigLoader.try_if_wire(entity, profile_name) -> bool
+##   CharacterRigLoader.bind_sockets(entity, socket_map)
+##   CharacterRigLoader.has_model(profile_name) -> bool
 ##
-## Profiles currently wired:
-##   hero            -> assets/models/hero.fbx
-##   hushling        -> assets/models/hushling.fbx
-##   boss_matriarch  -> assets/models/boss_matriarch.fbx
-##   boss_<realm>_<variant> -> assets/models/boss_variants/boss_<realm>_<variant>.glb
-#
-## Target standing heights (world units) per profile. Measured against each
-## mounted rig's actual mesh AABB at runtime, so ANY source-art unit system
-## (cm FBX exports included) lands at the right size — no hand-tuned
-## multipliers to drift out of date.
-const PROFILE_HEIGHT := {
-	"hero": 1.62,
-	"hushling": 0.95,
-	"fenling": 0.85,
-	"boss_matriarch": 3.8,
-}
+## Loads a .glb from res://assets/models/<profile>.glb if it exists,
+## mounts it under entity/Visual/AuthoredRig, and wires the EntityAnimator
+## to use the .glb's AnimationPlayer instead of procedural tweens.
+##
+## If the .glb doesn't exist the call is a silent no-op — entities fall back
+## to their procedural silhouette bodies. This matches the original intent:
+## "silent no-op until the model ships."
+##
+## Socket binding: maps socket_id → bone_name so AttachmentSocket nodes
+## reparent under the matching bone after the rig mounts.
 
-static func _any_model(profile: String) -> String:
-	for ext in ["glb", "gltf", "fbx"]:
-		var candidates := [
-			"res://assets/models/%s.%s" % [profile, ext],
-			"res://assets/models/boss_variants/%s.%s" % [profile, ext],
-		]
-		for p in candidates:
-			if ResourceLoader.exists(p):
-				return p
-	return ""
+const MODEL_BASE_PATH := "res://assets/models/"
 
-static func has_model(profile: String) -> bool:
-	return _any_model(profile) != ""
+# Model registry (populated by try_if_wire on first load)
+static var _loaded : Dictionary = {}   # profile → PackedScene or null
 
-## Try to wire a loaded model onto the entity. Returns true only when a
-## model was actually mounted. Safe to call in _ready of any entity.
+# ─────────────────────────────────────────────────────────────────────────────
+# Static API (called as CharacterRigLoader.method(...))
+# ─────────────────────────────────────────────────────────────────────────────
+
+## Returns true if a .glb model was mounted, false for silent no-op.
 static func try_if_wire(entity: Node3D, profile: String) -> bool:
-	if entity == null:
+	var path := MODEL_BASE_PATH + profile + ".glb"
+	if not ResourceLoader.exists(path):
 		return false
-	var path := _any_model(profile)
-	if path == "":
-		return false
-	var pack := load(path) as PackedScene
-	if pack == null:
-		return false
-	var rig: Node3D = pack.instantiate() as Node3D
-	if rig == null:
-		return false
-	rig.name = "AuthoredRig"
-	var visual := entity.get_node_or_null("Visual")
-	var host: Node3D = entity
-	if visual != null:
-		# Prefer a "Rig" wrapper (scaled assembly) so authored models inherit
-		# the entity's visual_scale; fall back to Visual itself.
-		var inner := visual.get_node_or_null("Rig") as Node3D
-		host = inner if inner != null else visual
-		_hide_procedural(visual)
-	host.add_child(rig)
-	# Fit measured geometry to the profile's target height and plant the
-	# feet at y≈0 — independent of the source art's unit system.
-	if PROFILE_HEIGHT.has(profile):
-		_fit_rig(rig, float(PROFILE_HEIGHT[profile]))
-	_configure_authored_lods(rig)
 
-	# Animation bridge: imported clips, when present, become playable cues.
-	var actors := rig.find_children("*", "AnimationPlayer", true, false)
-	print("[rig-loader] profile=", profile, " actors=", actors.size(), " rig_children=", rig.get_children())
-	if not actors.is_empty():
-		var player = actors[0] as AnimationPlayer
-		player.playback_process_mode = AnimationPlayer.ANIMATION_PROCESS_PHYSICS
-		var bridge := AnimTreeBridge.new()
-		bridge.name = "AnimBridge"
-		rig.add_child(bridge)
-		bridge.bind(rig)
-		if entity.has_method("_on_authored_impact"):
-			bridge.cue_impact.connect(Callable(entity, "_on_authored_impact"))
-		# Self-driving clips: poll the host entity each frame and pick the
-		# matching cue (death > attack > move > idle) without any rewiring.
-		# Captures are weakrefs: after death the Visual reparents into a
-		# TumbleCorpse while the entity frees, so raw Node captures would
-		# dangle and spam "Lambda capture was freed" every frame.
-		var animator := entity.get_node_or_null("Animator")
-		var entity_ref: WeakRef = weakref(entity)
-		var animator_ref: WeakRef = weakref(animator)
-		bridge.state_provider = func() -> Dictionary:
-			var e: Object = entity_ref.get_ref()
-			if e == null:
-				return {}
-			var st := {"dead": false, "hit": false, "attacking": false, "casting": false,
-				"moving": false, "running": false, "dodging": false,
-				"attack_cue": "", "impact_fraction": -1.0}
-			var defeated = e.get("is_defeated")
-			if defeated != null:
-				st.dead = bool(defeated)
-			# Use public animator values/methods instead of trying to read the
-			# script's enum constant through Object.get(). The old check always
-			# failed for valid EntityAnimator instances, leaving imported rigs
-			# stuck in their first clip.
-			var anim: Object = animator_ref.get_ref()
-			if anim != null and anim.get("anim_state") != null:
-				var anim_state := int(anim.get("anim_state"))
-				st.dead = st.dead or anim_state == int(EntityAnimator.AnimState.DEAD)
-				st.hit = anim_state == int(EntityAnimator.AnimState.HIT)
-				st.attacking = anim_state == int(EntityAnimator.AnimState.ATTACK)
-				st.casting = st.attacking and str(anim.get("attack_style")) == "magic"
-				if st.attacking:
-					st.attack_cue = str(anim.get("authored_attack_cue"))
-					st.impact_fraction = float(anim.get("authored_impact_fraction"))
-				var serial = anim.get("swing_serial")
-				if serial != null:
-					st.attack_serial = int(serial)
-				# Movement comes from the animator's own move_ratio (only
-				# horizontal walking, excludes jumps/glides), not full 3D velocity.
-				var ratio := float(anim.get("move_ratio"))
-				st.moving = ratio > 0.08
-				st.running = ratio > 0.65
-			if anim != null and anim.get("dodge_ratio") != null:
-				st.dodging = float(anim.get("dodge_ratio")) > 0.4
-			return st
-		entity.set_meta("anim_bridge", bridge)
+	# Cache the PackedScene
+	if not _loaded.has(profile):
+		var scene : PackedScene = ResourceLoader.load(path, "PackedScene", ResourceLoader.CACHE_MODE_REUSE)
+		_loaded[profile] = scene
+	var packed : PackedScene = _loaded.get(profile)
+	if packed == null:
+		return false
+
+	# Find or create the Visual node
+	var visual := entity.get_node_or_null("Visual")
+	if visual == null:
+		visual = Node3D.new()
+		visual.name = "Visual"
+		entity.add_child(visual)
+
+	# Remove any previously mounted AuthoredRig
+	var prev := visual.get_node_or_null("AuthoredRig")
+	if prev != null:
+		prev.queue_free()
+
+	# Instantiate and mount
+	var rig := packed.instantiate()
+	rig.name = "AuthoredRig"
+	visual.add_child(rig)
+
+	# Wire EntityAnimator to the authored AnimationPlayer
+	var animator := entity.get_node_or_null("Animator") as EntityAnimator
+	if animator != null:
+		var anim_player := rig.find_child("AnimationPlayer", true, false) as AnimationPlayer
+		if anim_player != null:
+			animator.set_visual_root(rig)
+			# The EntityAnimator detects the AnimationPlayer in set_visual_root
+			# and suppresses procedural tweens automatically.
+
 	return true
 
-## Blender exports all three authored levels in one GLB. Configure mutually
-## exclusive distance bands after import so only one complete silhouette is
-## submitted at a time. Margins add hysteresis without alpha fading/overdraw.
-static func _configure_authored_lods(rig: Node3D) -> void:
-	for candidate in rig.find_children("*", "MeshInstance3D", true, false):
-		var mesh := candidate as MeshInstance3D
-		var node_name := str(mesh.name).to_upper()
-		mesh.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
-		mesh.visibility_range_begin_margin = 2.0
-		mesh.visibility_range_end_margin = 2.0
-		if node_name.ends_with("_LOD0"):
-			mesh.visibility_range_begin = 0.0
-			mesh.visibility_range_end = 20.0
-		elif node_name.ends_with("_LOD1"):
-			mesh.visibility_range_begin = 18.0
-			mesh.visibility_range_end = 36.0
-		elif node_name.ends_with("_LOD2"):
-			mesh.visibility_range_begin = 34.0
-			mesh.visibility_range_end = 1000.0
+## Returns true if a model has been successfully loaded for this profile.
+static func has_model(profile: String) -> bool:
+	return _loaded.has(profile) and _loaded[profile] != null
 
-## Measure the rig's merged mesh AABB (in the rig's own space) and rescale
-## it uniformly so the figure stands `target_height` world units tall, then
-## lower it so the lowest vertex sits at y≈0. Works for any export units.
-static func _fit_rig(rig: Node3D, target_height: float) -> void:
+## Reparents AttachmentSocket nodes under matching bones after rig mount.
+## socket_map: { "socket_id": "BoneName", ... }
+static func bind_sockets(entity: Node3D, socket_map: Dictionary) -> void:
+	if not has_model("") and _loaded.is_empty():
+		return  # No rigs mounted yet — fast exit
+	var visual := entity.get_node_or_null("Visual")
+	if visual == null:
+		return
+	var rig := visual.get_node_or_null("AuthoredRig")
 	if rig == null:
 		return
-	var acc := AABB()
-	var first := true
-	for mi in rig.find_children("*", "MeshInstance3D", true, false):
-		var to_rig: Transform3D = rig.global_transform.affine_inverse() \
-			* (mi as MeshInstance3D).global_transform
-		var ab: AABB = to_rig * (mi as MeshInstance3D).get_aabb()
-		if first:
-			acc = ab
-			first = false
-		else:
-			acc = acc.merge(ab)
-	if first or acc.size.y <= 0.001:
-		return
-	var k := target_height / acc.size.y
-	rig.scale *= k
-	# Plant feet: shift so the scaled AABB bottom lands on y=0.
-	# AABB bottom in rig local space: acc.position.y - acc.size.y * 0.5
-	# After scaling by rig.scale.y, world bottom = (acc.position.y - acc.size.y * 0.5) * rig.scale.y + rig.position.y
-	rig.position.y -= (acc.position.y - acc.size.y * 0.5) * rig.scale.y
 
-# Names that stay visible when a real model mounts (light + sockets + FX
-# that gear, relics and the lantern still rely on).
-const _KEEP_PREFIXES := [
-	"Lantern", "HandSocket", "BackSocket", "WeaponSocket",
-	"SwingTrail", "DrawnBlade", "EmberTrail", "MovementDust",
-	"ArmorGear",
-]
-
-static func _hide_procedural(root: Node3D) -> void:
-	for child in root.get_children():
-		_hide_procedural_recursive(child)
-
-static func _hide_procedural_recursive(node: Node) -> void:
-	if node is Node3D:
-		var n3 := node as Node3D
-		# Keep-prefixed containers (sockets, armor gear, lantern) preserve
-		# their ENTIRE subtree — gear and wielded weapons mount under these
-		# and must survive an authored-rig mount.
-		for p in _KEEP_PREFIXES:
-			if str(n3.name).begins_with(p):
-				return
-		if node is MeshInstance3D or node is GPUParticles3D:
-			if not n3.visible:
-				return
-			n3.visible = false
-		for child in n3.get_children():
-			_hide_procedural_recursive(child)
-
-## Bind the documented socket targets to AttachmentSocket entries by
-## socket_id, so gear/relic/weapon visuals follow the model's bones.
-## Each target may be a scene-tree node name or a Skeleton3D bone name;
-## bone targets get a BoneAttachment3D hitched to the bone on the fly.
-static func bind_sockets(entity: Node3D, mapping: Dictionary) -> void:
-	if entity == null:
-		return
-	var rig := _find_authored_rig(entity)
-	if rig == null:
-		return
-	for socket_id in mapping:
-		var target_name: String = str(mapping[socket_id])
-		var target: Node3D = _find_socket_target(rig, target_name)
-		if target == null:
-			continue
-		var socket: AttachmentSocket = _find_attachment_socket(entity, str(socket_id))
+	for socket_id in socket_map:
+		var bone_name : String = socket_map[socket_id]
+		# Find socket node
+		var socket := _find_socket(entity, socket_id)
 		if socket == null:
-			# Create a fresh socket posed at the rig bone
-			socket = AttachmentSocket.new()
-			socket.name = "Mount_%s" % str(socket_id)
-			socket.socket_id = str(socket_id)
-			var host := entity.get_node_or_null("Visual") as Node3D
-			if host:
-				host.add_child(socket)
-			socket.global_transform = target.global_transform
-		# Hitch onto the bone keeping the CURRENT world pose (reparent
-		# preserves global). Never re-derive through inverse-basis math —
-		# unit-scaled skeletons (x100 armatures) collapse that to zero.
-		socket.reparent(target)
-
-static func _find_attachment_socket(host: Node, socket_id: String) -> AttachmentSocket:
-	var direct := host.get_node_or_null("Visual/%s" % socket_id) as AttachmentSocket
-	if direct != null:
-		return direct
-	for cand in host.find_children("*", "AttachmentSocket", true, false):
-		var s := cand as AttachmentSocket
-		if s == null:
 			continue
-		if s.socket_id == socket_id:
-			return s
-	return null
-
-## Locate the mounted authored rig wherever it lives (Visual or a Rig wrapper).
-static func _find_authored_rig(entity: Node) -> Node3D:
-	for cand in entity.find_children("AuthoredRig", "Node3D", true, false):
-		return cand as Node3D
-	return null
-
-## Resolve a socket target by name: first a Node3D child anywhere in the
-## rig, then a Skeleton3D bone (mounting a BoneAttachment3D on the bone).
-static func _find_socket_target(rig: Node3D, name: String) -> Node3D:
-	for child in rig.find_children("*", "Node3D", true, false):
-		if child.name == name or str(child.name).to_lower() == name.to_lower():
-			return child as Node3D
-	for cand in rig.find_children("*", "Skeleton3D", true, false):
-		var skeleton := cand as Skeleton3D
-		if skeleton == null:
+		# Find bone node in rig
+		var bone := rig.find_child(bone_name, true, false)
+		if bone == null:
 			continue
-		if skeleton.find_bone(name) >= 0:
-			var attach := BoneAttachment3D.new()
-			attach.name = "BoneAttachment_%s" % name
-			attach.bone_name = name
-			skeleton.add_child(attach)
-			return attach as Node3D
+		# Reparent socket under bone, keeping world transform
+		var world_xform := socket.global_transform
+		socket.get_parent().remove_child(socket)
+		bone.add_child(socket)
+		socket.global_transform = world_xform
+
+static func _find_socket(entity: Node3D, socket_id: String) -> Node:
+	for child in entity.get_children():
+		if child.get("socket_id") == socket_id:
+			return child
+	return _find_socket_recursive(entity, socket_id)
+
+static func _find_socket_recursive(node: Node, socket_id: String) -> Node:
+	for child in node.get_children():
+		if child.get("socket_id") == socket_id:
+			return child
+		var found := _find_socket_recursive(child, socket_id)
+		if found != null:
+			return found
 	return null
+
+## Preload all known models at startup (call once from main scene _ready).
+static func preload_all() -> void:
+	var profiles := [
+		"hero", "hushling", "fenling", "moonfen_fenling",
+		"boss_matriarch", "boss_whispergrove_rootwarden", "boss_whispergrove_dewseer",
+	]
+	for p in profiles:
+		var path := MODEL_BASE_PATH + p + ".glb"
+		if ResourceLoader.exists(path):
+			_loaded[p] = ResourceLoader.load(path, "PackedScene", ResourceLoader.CACHE_MODE_REUSE)
+		else:
+			_loaded[p] = null
