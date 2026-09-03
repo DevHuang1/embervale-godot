@@ -1,113 +1,99 @@
+extends RefCounted
 class_name RelicData
-extends Resource
 
-## === Captured Relic ===
-## A photo-forged object born from a camera scan: the silhouette of
-## whatever the lens saw, extruded into paper-craft geometry and
-## textured with the capture itself.
+## === RelicData — Forged Relic Resource ===
+## Created by ScanManager after a successful forge.
+## Mounted on Hero.current_relic and displayed in the Field Satchel.
 ##
-## Relics become wieldable weapon kits: the player names the item and its
-## three rites (Skill 1 / Skill 2 / Ultimate), while every combat number —
-## ATK, damage multipliers, cooldowns, radii — is computed here from the
-## rarity roll. Player input is strictly cosmetic.
+## The relic grants a passive modifier (stat bonus or skill enhancement)
+## and optionally displays a forged mesh on the hero's back socket.
 
-@export var title: String = "Unnamed Relic"
-@export var glyph: String = "✦"
-@export var rarity: int = 0
-@export var mesh: Mesh
-@export var texture: ImageTexture
-## Elemental identity for payload FX (fire/frost/shock/nature; "" = inert).
-@export var element: String = ""
+## Display identity
+var relic_id     : String = ""
+var relic_name   : String = ""
+var description  : String = ""
+var glyph        : String = "◈"
+var rarity       : int    = 1   # 1=common, 2=uncommon, 3=rare, 4=legendary
 
-const NAME_LIMIT := 22
+## Visual (mesh shown on back socket)
+var mesh_scene   : PackedScene = null   # optional; null = no visual
 
-const DEFAULT_ITEM_NAME := "Unnamed Relic"
-const DEFAULT_SKILL_NAMES := ["Kindled Strike", "Grove Cyclone", "Relic Cataclysm"]
-const SLOT_TITLES := ["SKILL 1", "SKILL 2", "ULTIMATE"]
+## Passive bonus type — applied by hero when relic is equipped
+## Types: "atk_flat", "atk_pct", "hp_flat", "hp_pct",
+##        "speed_pct", "crit_pct", "skill_cd_pct", "dodge_pct"
+var bonus_type   : String = ""
+var bonus_value  : float  = 0.0
 
-# App-owned kit template: fixed slots, numbers scale only with rarity.
-# Types are ones Hero._execute_skill already directs: strike / whirl /
-# explosion / comet (magic-styled relics ultimate into a comet).
-const KIT_TEMPLATE := [
-	{"type": "strike", "cooldown": 4.0, "dmg_mult_base": 2.0,
-		"desc": "A heavy crescent slash through the marked target."},
-	{"type": "whirl", "cooldown": 6.5, "radius": 3.6, "dmg_mult_base": 1.7,
-		"desc": "Spin a ring of bramble slashes around you."},
-	{"type": "explosion", "cooldown": 12.0, "radius": 4.0, "dmg_mult_base": 3.0,
-		"desc": "Detonate a relic burst on the marked target."},
-]
+## Element affinity (drives elemental status on auto-strikes)
+var element      : String = ""   # "" = none
 
-const RARITY_MULTS := [1.0, 1.15, 1.3, 1.45, 1.65]
+## Forge metadata
+var forge_seed   : int    = 0    # reproducible from scan data
+var forged_at    : float  = 0.0  # unix timestamp
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Factory
+# ─────────────────────────────────────────────────────────────────────────────
 
-## Player-facing names are cosmetic: trimmed, control-char-free, length-capped,
-## with deterministic fallbacks so the app always ships a complete kit.
-static func sanitize_name(raw: String, fallback: String) -> String:
-	var clipped := raw.strip_edges().substr(0, NAME_LIMIT)
-	var out := ""
-	for c in clipped:
-		if c.unicode_at(0) >= 32:
-			out += c
-	out = out.strip_edges()
-	return out if not out.is_empty() else fallback
+static func from_dict(d: Dictionary) -> RelicData:
+	var r := RelicData.new()
+	r.relic_id    = str(d.get("id",          "relic_unknown"))
+	r.relic_name  = str(d.get("name",        "Unknown Relic"))
+	r.description = str(d.get("description", ""))
+	r.glyph       = str(d.get("glyph",       "◈"))
+	r.rarity      = int(d.get("rarity",       1))
+	r.bonus_type  = str(d.get("bonus_type",  ""))
+	r.bonus_value = float(d.get("bonus_value", 0.0))
+	r.element     = str(d.get("element",     ""))
+	r.forge_seed  = int(d.get("forge_seed",   0))
+	r.forged_at   = float(d.get("forged_at",  0.0))
+	return r
 
-
-## Wield style derives deterministically from the item's name, so naming an
-## artifact subtly flavors how it swings without touching its numbers.
-static func style_for(item_name: String) -> String:
-	return ["slash", "blunt", "magic"][int(abs(item_name.hash())) % 3]
-
-
-## Elemental identity: explicit base field wins, else deterministic per item
-## name so a named kit keeps the same payload flavor across sessions.
-static func element_for(item_name: String, base: Dictionary = {}) -> String:
-	var explicit := str(base.get("element", ""))
-	if explicit in ["fire", "frost", "shock", "nature"]:
-		return explicit
-	return ["fire", "frost", "shock", "nature"][
-		int(abs(item_name.hash())) % 4]
-
-
-## Builds a WEAPON_DEFS-compatible kit from the detected class base stats.
-## `base` comes from ScanManager.CLASS_TO_WEAPON; `skill_names` holds the
-## player's three rite names in slot order (Skill 1, Skill 2, Ultimate).
-static func build_weapon_def(base: Dictionary, rarity: int, item_name: String,
-		skill_names: Array) -> Dictionary:
-	var tier := clampi(rarity, 0, RARITY_MULTS.size() - 1)
-	var mult := float(RARITY_MULTS[tier])
-	var name := sanitize_name(item_name, str(base.get("name", DEFAULT_ITEM_NAME)))
-	var style := style_for(name)
-	var element := element_for(name, base)
-
-	var skills := []
-	for i in KIT_TEMPLATE.size():
-		var tpl: Dictionary = KIT_TEMPLATE[i]
-		var sk := {
-			"name": sanitize_name(
-				str(skill_names[i]) if i < skill_names.size() else "",
-				DEFAULT_SKILL_NAMES[i]),
-			"type": str(tpl.type),
-			"cooldown": float(tpl.cooldown),
-			"dmg_mult": snappedf(float(tpl.dmg_mult_base) * mult, 0.01),
-			"desc": str(tpl.desc),
-		}
-		if tpl.has("radius"):
-			sk["radius"] = float(tpl.radius)
-		# Magic-flavored relics finish on a falling star instead of a blast
-		if i == 2 and style == "magic":
-			sk["type"] = "comet"
-		skills.append(sk)
-
+func to_dict() -> Dictionary:
 	return {
-		"id": "relic_%08x" % (int(abs(name.hash())) + Time.get_ticks_msec()),
-		"name": name,
-		"glyph": str(base.get("glyph", "✦")),
-		"style": style,
-		"element": element,
-		"atk": int(round(float(base.get("atk", 6)) * mult)),
-		"swing_time": float(base.get("swing_time", 0.38)),
-		"range": float(base.get("range", 8.0)),
-		"rarity": tier,
-		"relic": true,
-		"skills": skills,
+		"id":          relic_id,
+		"name":        relic_name,
+		"description": description,
+		"glyph":       glyph,
+		"rarity":      rarity,
+		"bonus_type":  bonus_type,
+		"bonus_value": bonus_value,
+		"element":     element,
+		"forge_seed":  forge_seed,
+		"forged_at":   forged_at,
 	}
+
+## Apply this relic's bonus to a hero entity.
+func apply_to_hero(hero: Node3D) -> void:
+	if hero == null or bonus_type.is_empty():
+		return
+	match bonus_type:
+		"atk_flat":
+			var gs := hero.get_node_or_null("/root/GameState")
+			if gs != null and gs.has_method("grant_atk_bonus"):
+				gs.call("grant_atk_bonus", int(bonus_value))
+		"hp_flat":
+			var gs := hero.get_node_or_null("/root/GameState")
+			if gs != null:
+				var cur := int(gs.get("max_hp") if gs.get("max_hp") != null else 60)
+				gs.set("max_hp", cur + int(bonus_value))
+				gs.set("hp",     mini(int(gs.get("hp") if gs.get("hp") != null else 60), cur + int(bonus_value)))
+		"speed_pct":
+			if hero.get("move_speed") != null:
+				hero.set("move_speed", float(hero.get("move_speed")) * (1.0 + bonus_value))
+		"dodge_pct":
+			if hero.get("dodge_chance") != null:
+				hero.set("dodge_chance", clampf(float(hero.get("dodge_chance")) + bonus_value, 0.0, 1.0))
+
+## Static: create the matriarch scepter relic from GameState definition.
+static func matriarch_scepter() -> RelicData:
+	var r := RelicData.new()
+	r.relic_id    = "matriarch_scepter"
+	r.relic_name  = "Crown of the Old Root"
+	r.description = "The Matriarch's scepter hums with dormant bramble power."
+	r.glyph       = "♛"
+	r.rarity      = 4
+	r.bonus_type  = "atk_flat"
+	r.bonus_value = 3.0
+	r.element     = "nature"
+	return r
