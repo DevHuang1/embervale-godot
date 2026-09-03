@@ -1,304 +1,190 @@
 extends Node
-## StoryManager — data-driven story layer: quest registry, story flags,
-## exactly-once rewards and save/load. Additive by design: the existing GameState
-## main-quest flow (stages, grove world states) is untouched; this engine
-## tracks side quests gated by stage / realm / story flags desde JSON data.
 
-signal quest_started(quest_id: String)
-signal quest_completed(quest_id: String)
-signal story_flags_changed
+## === StoryManager AutoLoad ===
+## Manages narrative state: voiced story beats, journal entries, NPC dialogue,
+## and one-shot cinematic triggers.
+##
+## All story events are keyed by string ID and stored as a flat flag set.
+## WorldManager and quest logic call trigger_event(); UI calls get_journal().
+##
+## Signal system lets HUD / overlays react without polling.
 
-const QUESTS_PATH := "res://data/story/quests.json"
-const SAVE_SECTION := "story"
-const MAX_HUD_LINES := 3
+signal story_event_triggered(event_id: String)
+signal journal_entry_added(entry: Dictionary)
+signal dialogue_started(npc_id: String, lines: Array)
+signal dialogue_ended(npc_id: String)
 
-var _registry: Dictionary = {}
-var _main_stages: Array = []
-var _active: Dictionary = {}
-var _completed: Dictionary = {}
-var story_flags: Dictionary = {}
+# === Story flag store =========================================================
+var _flags         : Dictionary = {}   # event_id → bool (triggered)
+var _journal       : Array[Dictionary] = []
+var _active_npc    : String = ""
 
-func _ready() -> void:
-    _load_registry()
-    _reset_runtime()
-    var gs := _game_state()
-    if gs != null:
-        if gs.has_signal("stage_changed"):
-            gs.stage_changed.connect(_on_flow_signal)
-        if gs.has_signal("realm_changed"):
-            gs.realm_changed.connect(_on_flow_signal)
-    _check_auto_grants()
-
-func _game_state() -> Node:
-    return get_node_or_null("/root/GameState")
-
-func _load_registry() -> void:
-    _registry.clear()
-    _main_stages.clear()
-    if not FileAccess.file_exists(QUESTS_PATH):
-        return
-    var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(QUESTS_PATH))
-    if not parsed is Dictionary:
-        return
-    var main: Variant = parsed.get("main_quest", {})
-    if main is Dictionary:
-        var stages: Variant = main.get("stages", [])
-        if stages is Array:
-            for s in stages:
-                if s is Dictionary:
-                    _main_stages.append(s.duplicate(true))
-    var quests: Variant = parsed.get("quests", [])
-    if not quests is Array:
-        return
-    for raw in quests:
-        if not raw is Dictionary:
-            continue
-        var def: Dictionary = raw
-        var id := str(def.get("id", ""))
-        if id.is_empty() or _registry.has(id):
-            continue
-        _registry[id] = def.duplicate(true)
-
-func quest_count() -> int:
-    return _registry.size()
-
-func main_stage_count() -> int:
-    return _main_stages.size()
-
-func has_quest(quest_id: String) -> bool:
-    return _registry.has(quest_id)
-
-func has_flag(flag_key: String) -> bool:
-    return bool(story_flags.get(flag_key, false))
-
-func set_flag(flag_key: String, value: bool = true) -> void:
-    if value:
-        story_flags[flag_key] = true
-    else:
-        story_flags.erase(flag_key)
-    story_flags_changed.emit()
-    _persist()
-
-func get_quest_def(quest_id: String) -> Dictionary:
-    return (_registry.get(quest_id, {}) as Dictionary).duplicate(true)
-
-func _gate_passes(gate: String) -> bool:
-    var negate := gate.begins_with("!")
-    var token := gate.trim_prefix("!")
-    var ok := false
-    if token.begins_with("stage."):
-        var rank := _stage_rank(token.trim_prefix("stage."))
-        if rank >= 0:
-            var gs := _game_state()
-            ok = gs != null and int(gs.get("current_stage")) >= rank
-    elif token.begins_with("realm."):
-        var gs := _game_state()
-        ok = gs != null and str(gs.get("current_realm")) == token.trim_prefix("realm.")
-    elif token.begins_with("quest."):
-        ok = _completed.has(_quest_id_from_token(token))
-    elif token.begins_with("flag."):
-        ok = bool(story_flags.get(token.trim_prefix("flag."), false))
-    else:
-        ok = bool(story_flags.get(token, false))
-    return ok if not negate else not ok
-
-func _gates_pass(def: Dictionary) -> bool:
-    for raw in def.get("gates", []):
-        if not _gate_passes(str(raw)):
-            return false
-    return true
-
-const STAGE_RANK :={
-    "seek_sprite":0, "claim_shard":1, "light_beacon":2,"complete":3,
+# === Built-in story entries ===================================================
+## Each entry: { id, title, body, realm, stage, icon }
+const STORY_DATABASE := {
+	"intro_grove": {
+		"title": "The Whispergrove",
+		"body":  "The old warmth road brought me here. The grove is quiet — too quiet. Something stirs in the bramble.",
+		"realm": "bramblewood", "stage": 0, "icon": "📖"
+	},
+	"first_hushling_sighted": {
+		"title": "A Bramble Sprite",
+		"body":  "A flicker of green light in the ferns. The sprite circled once, then vanished. My lantern knows the way.",
+		"realm": "bramblewood", "stage": 0, "icon": "🌿"
+	},
+	"hushling_defeated": {
+		"title": "The Sprite Answered",
+		"body":  "The bramble sprite fell. Where it stood, a warm shard — a fragment of the old beacon. The grove exhaled.",
+		"realm": "bramblewood", "stage": 1, "icon": "✨"
+	},
+	"shard_collected": {
+		"title": "Ember Shard",
+		"body":  "I found it — the ember shard. Warm to the touch. The ruined altar is north-east. I can feel the pull.",
+		"realm": "bramblewood", "stage": 1, "icon": "◆"
+	},
+	"beacon_lit": {
+		"title": "The Beacon Returns",
+		"body":  "Light. Real warmth. The old road remembers now. The grove will hold its warmth until the next traveller comes through.",
+		"realm": "bramblewood", "stage": 2, "icon": "🔆"
+	},
+	"matriarch_first_sighting": {
+		"title": "She Who Roots",
+		"body":  "A shape in the oldest thicket — too large, too still. The matriarch watches. I felt her eyes before I saw them.",
+		"realm": "bramblewood", "stage": 2, "icon": "👁"
+	},
+	"matriarch_defeated": {
+		"title": "The Crown Falls",
+		"body":  "The Matriarch's crown shattered. Her bramble-song faded. The grove is mine — and so is the scepter she left behind.",
+		"realm": "bramblewood", "stage": 3, "icon": "♛"
+	},
+	"mistfen_unlocked": {
+		"title": "The Fen Gate Opens",
+		"body":  "Beyond the Moonfen gate, cold mist rises. Fenlings orbit at the edge of sight. The fen holds its own warmth — or the cold that passes for it.",
+		"realm": "mistfen", "stage": 3, "icon": "🌊"
+	},
+	"siltcrawler_sighted": {
+		"title": "Something Beneath the Mud",
+		"body":  "The ground moved. Not an earthquake — something alive. Bioluminescent trails below the surface. The Silt Crawler knows I am here.",
+		"realm": "mistfen", "stage": 3, "icon": "🦀"
+	},
+	"heartwood_unlocked": {
+		"title": "The Heartwood Burns",
+		"body":  "Heat before light. The Heartwood's entrance scorches the mist away. Ember stone crumbles underfoot. Something enormous lives inside.",
+		"realm": "heartwood", "stage": 3, "icon": "🔥"
+	},
 }
 
-func _reset_runtime() -> void:
-    _active.clear()
-    _completed.clear()
-    story_flags.clear()
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 
-func _check_auto_grants() -> void:
-    for id in _registry:
-        var def := _registry[id] as Dictionary
-        if not _completed.has(id) and not _active.has(id):
-            if _gates_pass(def):
-                _grant_quest(id, def)
+# ─── Event system ─────────────────────────────────────────────────────────────
 
-func start_quest(quest_id: String) -> Dictionary:
-    var def := get_quest_def(quest_id)
-    if def.is_empty():
-        return {"ok": false, "message": "Unknown quest."}
-    if _active.has(quest_id):
-        return {"ok": false, "message": "Quest already active."}
-    if _completed.has(quest_id):
-        return {"ok": false, "message": "Quest already completed."}
-    if not _gates_pass(def):
-        return {"ok": false, "message": "Gates not met."}
-    _grant_quest(quest_id, def)
-    return {"ok": true}
+## Trigger a named story event. Fires signal and adds journal entry if first time.
+func trigger_event(event_id: String) -> bool:
+	if _flags.get(event_id, false):
+		return false  # already triggered
+	_flags[event_id] = true
+	story_event_triggered.emit(event_id)
+	# Auto-add journal entry if database has one
+	if STORY_DATABASE.has(event_id):
+		_add_journal(event_id, STORY_DATABASE[event_id])
+	return true  # first trigger
 
-func _grant_quest(quest_id: String, def: Dictionary) -> void:
-    var objectives: Array = []
-    for raw in def.get("objectives", []):
-        if raw is Dictionary:
-            var o: Dictionary = raw
-            objectives.append({
-                "id": str(o.get("id", "")),
-                "type": str(o.get("type", "")),
-                "target": str(o.get("target", "")),
-                "qty": maxi(1, int(o.get("qty", 1))),
-                "current": 0,
-                "completed": false,
-                "description": str(o.get("description", "")),
-            })
-    _active[quest_id] = {
-        "id": quest_id,
-        "chapter": str(def.get("chapter", "")),
-        "title": str(def.get("title", "")),
-        "giver": str(def.get("giver", "")),
-        "objectives": objectives,
-    }
-    quest_started.emit(quest_id)
-    _persist()
-func _stage_rank(stage_name: String) -> int:
-    return STAGE_RANK.get(stage_name, 9999)
+## Returns true if the event has ever been triggered this save.
+func has_triggered(event_id: String) -> bool:
+	return bool(_flags.get(event_id, false))
 
-func _quest_id_from_token(token: String) -> String:
-    var qid := token.trim_prefix("quest.")
-    if qid.ends_with(".done"):
-        qid = qid.trim_suffix(".done")
-    return qid
-func notify_objective(type: String, target: String = "", qty: int = 1) -> bool:
-    var changed := false
-    for quest_id in _active:
-        var quest: Dictionary = _active[quest_id] as Dictionary
-        var objs: Array = quest.get("objectives", [])
-        for i in objs.size():
-            var o: Dictionary = objs[i] as Dictionary
-            if o.get("completed", false):
-                continue
-            if o.get("type", "") != type:
-                continue
-            if not str(o.get("target", "")).is_empty() and target != "" \
-                    and not target.contains(str(o.get("target", ""))):
-                continue
-            var cur := mini(int(o.get("current", 0)) + qty, int(o.get("qty", 1)))
-            o["current"] = cur
-            if cur >= int(o.get("qty", 1)):
-                o["completed"] = true
-            objs[i] = o
-            changed = true
-    if changed:
-        _persist()
-        _check_quest_completions()
-    return changed
+## Force-set a flag without firing the signal (used by SaveLoadManager on load).
+func set_flag(event_id: String, value: bool) -> void:
+	_flags[event_id] = value
 
-func _check_quest_completions() -> void:
-    for quest_id in _active.keys():
-        var quest: Dictionary = _active[quest_id] as Dictionary
-        var objs: Array = quest.get("objectives", [])
-        var all_done := true
-        for o in objs:
-            if not o.get("completed", false):
-                all_done = false
-                break
-        if all_done:
-            _complete_quest(quest_id)
+## Trigger all automatic events that match the current quest stage.
+func sync_with_quest_stage(stage: int, realm_id: String) -> void:
+	match stage:
+		0:
+			trigger_event("intro_grove")
+		1:
+			trigger_event("hushling_defeated")
+			trigger_event("shard_collected")
+		2:
+			trigger_event("beacon_lit")
+		3:
+			trigger_event("matriarch_defeated")
+			if realm_id == "mistfen":
+				trigger_event("mistfen_unlocked")
+			elif realm_id == "heartwood":
+				trigger_event("heartwood_unlocked")
 
-func _complete_quest(quest_id: String) -> void:
-    if _completed.has(quest_id):
-        return
-    var def := get_quest_def(quest_id)
-    _active.erase(quest_id)
-    _completed[quest_id] = true
-    var reward: Dictionary = def.get("reward", {})
-    var gs := _game_state()
-    if gs != null:
-        var gold: int = int(reward.get("gold", 0))
-        if gold > 0 and gs.has_method("add_gold"):
-            gs.call("add_gold", gold, "+%d gold from tale. " % gold)
-        var xp: int = int(reward.get("xp", 0))
-        if xp > 0 and gs.has_method("grant_xp"):
-            gs.call("grant_xp", xp)
-        var diamonds: int = int(reward.get("diamonds", 0))
-        if diamonds >0 and gs.has_method("add_diamonds"):
-            gs.call("add_diamonds", diamonds, "A glint of jewels from the tale. ")
-        var mats: Variant = reward.get("materials", {})
-        if mats is Dictionary and gs.has_method("add_material"):
-            for mid in mats:
-                gs.call("add_material", mid, int(mats[mid]))
-    for flag in reward.get("flags", []):
-        set_flag(str(flag))
-    quest_completed.emit(quest_id)
-    _persist()
-    _check_auto_grants()
-    var gs2 := _game_state()
-    if gs2 != null and gs2.has_signal("quest_progress"):
-        gs2.quest_progress.emit("Tale complete: %s" % def.get("title", quest_id))
-func _on_flow_signal(_what: Variant) -> void:
-    _check_auto_grants()
+# ─── Journal ──────────────────────────────────────────────────────────────────
 
-func _persist() -> void:
-    var gs := _game_state()
-    if gs != null and gs.has_method("save_game"):
-        gs.call("save_game")
+func _add_journal(event_id: String, entry_def: Dictionary) -> void:
+	var entry := {
+		"id":        event_id,
+		"title":     str(entry_def.get("title",  "Unknown")),
+		"body":      str(entry_def.get("body",   "")),
+		"realm":     str(entry_def.get("realm",  "")),
+		"stage":     int(entry_def.get("stage",   0)),
+		"icon":      str(entry_def.get("icon",   "📖")),
+		"timestamp": Time.get_unix_time_from_system(),
+	}
+	_journal.append(entry)
+	journal_entry_added.emit(entry)
 
-func save_payload() -> Dictionary:
-    return {
-        "active": _active.duplicate(true),
-        "completed": _completed.duplicate(true),
-        "flags": story_flags.duplicate(true),
-    }
+## Returns all journal entries, newest first.
+func get_journal() -> Array[Dictionary]:
+	var sorted := _journal.duplicate()
+	sorted.sort_custom(func(a, b): return a["timestamp"] > b["timestamp"])
+	return sorted
 
-func load_payload(data: Dictionary) -> void:
-    var active_raw: Variant = data.get("active", {})
-    _active = active_raw.duplicate(true) if active_raw is Dictionary else {}
-    var completed_raw: Variant = data.get("completed", {})
-    _completed = completed_raw.duplicate(true) if completed_raw is Dictionary else {}
-    var flags_raw: Variant = data.get("flags", {})
-    story_flags = flags_raw.duplicate(true) if flags_raw is Dictionary else {}
-    _check_quest_completions()
-    _check_auto_grants()
+## Returns journal entries for a specific realm.
+func get_journal_for_realm(realm_id: String) -> Array[Dictionary]:
+	return _journal.filter(func(e): return str(e.get("realm", "")) == realm_id)
 
-func reset_payload() -> void:
-    _reset_runtime()
-    _check_auto_grants()
+# ─── Dialogue ─────────────────────────────────────────────────────────────────
 
-func active_quests() -> Array:
-    return _active.values()
+## Built-in NPC line pools
+const NPC_DIALOGUE := {
+	"quest_board": [
+		["The boards says: 'Find the bramble sprite that lurks north of the glade.'",
+		 "Your warmth will guide you. Keep the lantern lit."],
+	],
+	"practice_altar": [
+		["This altar remembers the old fights.",
+		 "Touch it to face the challenge again — no reward, only the practice."],
+	],
+	"loot_pedestal": [
+		["A trophy from the deep grove.",
+		 "The Matriarch would not give it willingly."],
+	],
+}
 
-func active_quest_count() -> int:
-    return _active.size()
+func start_dialogue(npc_id: String) -> void:
+	if _active_npc == npc_id:
+		return
+	var pools : Array = NPC_DIALOGUE.get(npc_id, [])
+	if pools.is_empty():
+		return
+	_active_npc = npc_id
+	var lines : Array = pools[randi() % pools.size()]
+	dialogue_started.emit(npc_id, lines)
 
-func is_completed(quest_id: String) -> bool:
-    return _completed.has(quest_id)
+func end_dialogue() -> void:
+	var npc := _active_npc
+	_active_npc = ""
+	dialogue_ended.emit(npc)
 
-func hud_objective_lines(limit: int = MAX_HUD_LINES) -> Array[String]:
-    var lines: Array[String] = []
-    for quest_id in _active:
-        var quest: Dictionary = _active[quest_id] as Dictionary
-        var objs: Array = quest.get("objectives", [])
-        for o in objs:
-            if o.get("completed", false):
-                continue
-            var label: String = str(o.get("description", ""))
-            lines.append("%s — %d/%d" % [label, int(o.get("current", 0)), int(o.get("qty", 1))])
-            if lines.size() >= limit:
-                return lines
-    return lines
+func is_in_dialogue() -> bool:
+	return not _active_npc.is_empty()
 
-func validate_registry() -> Dictionary:
-    var known_stages := STAGE_RANK.keys()
-    var known_quests := {}
-    for id in _registry:
-        known_quests[id] = true
-    var problems: Array[String] = []
-    for id in _registry:
-        var def := get_quest_def(id)
-        for gate in def.get("gates", []):
-            var token := str(gate).trim_prefix("!")
-            if token.begins_with("stage.") and token.trim_prefix("stage.") not in known_stages:
-                problems.append("%s bad stage gate: %s" % [id, gate])
-            elif token.begins_with("quest.") and not known_quests.has(_quest_id_from_token(token)):
-                problems.append("%s bad quest gate: %s" % [id, gate])
-    return {"problems": problems, "quest_count": _registry.size(), "main_stage_count": _main_stages.size()}
+# ─── Serialisation ────────────────────────────────────────────────────────────
+
+func to_dict() -> Dictionary:
+	return { "flags": _flags.duplicate() }
+
+func from_dict(d: Dictionary) -> void:
+	_flags = d.get("flags", {})
+	# Rebuild journal from flags
+	_journal.clear()
+	for event_id in _flags:
+		if _flags[event_id] and STORY_DATABASE.has(event_id):
+			_add_journal(event_id, STORY_DATABASE[event_id])
