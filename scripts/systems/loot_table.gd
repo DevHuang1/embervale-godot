@@ -1,178 +1,231 @@
 extends RefCounted
 class_name LootTable
 
-## Deterministic loot tables for enemies, chests, and bosses.
-## Each entry uses weighted random with rarity tiers.
+## === LootTable — Data-Driven Loot Roll System ===
+##
+## A LootTable describes what a chest, enemy, or boss can drop.
+## Each entry carries a weight, a drop definition, and optional conditions.
+##
+## Drop definition keys (all optional except "type"):
+##   type     : "gold" | "xp" | "item" | "weapon" | "armor" | "material" | "relic" | "diamond"
+##   id       : item/weapon/armor/material id (from GameState registries)
+##   min / max: quantity range (default 1/1)
+##   weight   : relative probability weight (default 1.0)
+##   rarity   : 0=common 1=uncommon 2=rare 3=epic 4=legendary (default 0)
+##   guaranteed: bool — always drops regardless of roll (default false)
+##   realm    : String — only drops in this realm (empty = any realm)
+##   min_stage: int — quest stage gate (0 = always)
+##
+## === Preset tables ===
+##   LootTable.bramblewood_common()
+##   LootTable.bramblewood_elite()
+##   LootTable.mistfen_common()
+##   LootTable.heartwood_common()
+##   LootTable.boss_matriarch()
+##   LootTable.chest_common()
+##   LootTable.chest_rare()
+##   LootTable.chest_boss()
+##
+## === Usage ===
+##   var table := LootTable.chest_rare()
+##   var drops := table.roll(realm_id, quest_stage)
+##   RewardManager.grant_drops(drops)
 
-const RARITY_NAMES := ["Common", "Uncommon", "Rare", "Epic", "Legendary"]
+const MAX_ROLLS := 8   # safety cap per single roll call
 
-# Drop entry format: { id, chance, qty_min, qty_max, rarity_min, rarity_max }
-# gold entry: { gold_min, gold_max }
+## Entry list — each entry is a Dictionary matching the spec above
+var entries : Array[Dictionary] = []
+## How many non-guaranteed items to pick per roll (randomised within range)
+var rolls_min : int = 1
+var rolls_max : int = 3
+## Luck multiplier — scales rarity weight bonus (1.0 = default)
+var luck : float = 1.0
 
-static func roll_enemy(archetype: String) -> Dictionary:
-	var table := _enemy_table(archetype)
-	return _roll(table)
+func add(entry: Dictionary) -> LootTable:
+	entries.append(entry)
+	return self
 
-static func roll_chest(chest_rarity: int) -> Dictionary:
-	var table := _chest_table(chest_rarity)
-	return _roll(table)
+func set_rolls(min_r: int, max_r: int) -> LootTable:
+	rolls_min = min_r
+	rolls_max = max_r
+	return self
 
-static func roll_boss(boss_id: String) -> Dictionary:
-	var table := _boss_table(boss_id)
-	return _roll(table)
+# ─────────────────────────────────────────────────────────────────────────────
+# Roll
+# ─────────────────────────────────────────────────────────────────────────────
 
-static func _roll(table: Dictionary) -> Dictionary:
-	var result := {"gold": 0, "materials": [], "gear": null}
-	result.gold = randi_range(table.get("gold_min", 3), table.get("gold_max", 9))
-	for drop in table.get("drops", []):
-		if randf() <= float(drop.get("chance", 0.0)):
-			var qty := randi_range(drop.get("qty_min", 1), drop.get("qty_max", 1))
-			var mat_id: String = drop.get("id", "")
-			if qty > 0 and mat_id != "" and GameState.MATERIAL_DEFS.has(mat_id):
-				result.materials.append({"id": mat_id, "qty": qty})
-	if table.has("gear"):
-		var g: Dictionary = table.gear
-		if randf() <= float(g.get("chance", 0.0)):
-			var rarity := randi_range(g.get("rarity_min", 1), g.get("rarity_max", 3))
-			result.gear = {"rarity": rarity, "kind": g.get("kind", "weapon")}
-	return result
+## Returns an Array of drop Dictionaries (type, id, quantity, rarity).
+## realm_id and stage are used to filter entries.
+func roll(realm_id: String = "", stage: int = 0) -> Array[Dictionary]:
+	var drops : Array[Dictionary] = []
 
-static func _apply_drop(drop: Dictionary, result: Dictionary) -> void:
-	if randf() <= float(drop.get("chance", 0.0)):
-		var qty := randi_range(drop.get("qty_min", 1), drop.get("qty_max", 1))
-		var mat_id: String = drop.get("id", "")
-		if qty > 0 and mat_id != "" and GameState.MATERIAL_DEFS.has(mat_id):
-			result.materials.append({"id": mat_id, "qty": qty})
+	# Collect guaranteed drops first
+	for entry in entries:
+		if bool(entry.get("guaranteed", false)):
+			if _passes_filter(entry, realm_id, stage):
+				drops.append(_resolve(entry))
 
-static func _enemy_table(archetype: String) -> Dictionary:
-	match archetype:
-		"charger":
-			return {
-				"gold_min": 5, "gold_max": 12,
-				"drops": [
-					{"id": "beast_hide", "chance": 0.35, "qty_min": 1, "qty_max": 2},
-					{"id": "iron_shard", "chance": 0.20, "qty_min": 1, "qty_max": 1},
-				],
-				"gear": {"chance": 0.03, "rarity_min": 1, "rarity_max": 2, "kind": "weapon"}
-			}
-		"ambusher":
-			return {
-				"gold_min": 4, "gold_max": 10,
-				"drops": [
-					{"id": "spore_dust", "chance": 0.40, "qty_min": 1, "qty_max": 2},
-					{"id": "moss_fiber", "chance": 0.25, "qty_min": 1, "qty_max": 1},
-				],
-				"gear": {"chance": 0.02, "rarity_min": 1, "rarity_max": 2, "kind": "armor"}
-			}
-		"elite":
-			return {
-				"gold_min": 15, "gold_max": 35,
-				"drops": [
-					{"id": "iron_shard", "chance": 0.60, "qty_min": 1, "qty_max": 3},
-					{"id": "crystal_fragment", "chance": 0.25, "qty_min": 1, "qty_max": 1},
-					{"id": "monster_core", "chance": 0.15, "qty_min": 1, "qty_max": 1},
-				],
-				"gear": {"chance": 0.12, "rarity_min": 2, "rarity_max": 4, "kind": "weapon"}
-			}
+	# Build eligible pool
+	var pool : Array[Dictionary] = []
+	for entry in entries:
+		if bool(entry.get("guaranteed", false)):
+			continue
+		if not _passes_filter(entry, realm_id, stage):
+			continue
+		pool.append(entry)
+
+	# Pick N random entries weighted by weight
+	var pick_count := clampi(randi_range(rolls_min, rolls_max), 0, MAX_ROLLS)
+	for _i in pick_count:
+		var picked := _weighted_pick(pool)
+		if picked != null:
+			drops.append(_resolve(picked))
+
+	return drops
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Internals
+# ─────────────────────────────────────────────────────────────────────────────
+
+func _passes_filter(entry: Dictionary, realm_id: String, stage: int) -> bool:
+	var req_realm : String = str(entry.get("realm", ""))
+	if not req_realm.is_empty() and req_realm != realm_id:
+		return false
+	var min_stage : int = int(entry.get("min_stage", 0))
+	if stage < min_stage:
+		return false
+	return true
+
+func _weighted_pick(pool: Array[Dictionary]) -> Dictionary:
+	if pool.is_empty():
+		return {}
+	var total := 0.0
+	for e in pool:
+		var rarity_bonus := float(int(e.get("rarity", 0))) * 0.25 * luck
+		total += float(e.get("weight", 1.0)) + rarity_bonus
+	var r := randf() * total
+	var cumulative := 0.0
+	for e in pool:
+		var rarity_bonus := float(int(e.get("rarity", 0))) * 0.25 * luck
+		cumulative += float(e.get("weight", 1.0)) + rarity_bonus
+		if r <= cumulative:
+			return e
+	return pool[-1]
+
+func _resolve(entry: Dictionary) -> Dictionary:
+	var qty_min := int(entry.get("min", 1))
+	var qty_max := int(entry.get("max", qty_min))
+	return {
+		"type":     str(entry.get("type",   "gold")),
+		"id":       str(entry.get("id",     "")),
+		"quantity": randi_range(qty_min, qty_max),
+		"rarity":   int(entry.get("rarity", 0)),
+	}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Preset tables
+# ─────────────────────────────────────────────────────────────────────────────
+
+static func bramblewood_common() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(1, 2)
+	t.add({"type":"gold",     "min":4,  "max":12,  "weight":3.0})
+	t.add({"type":"xp",       "min":8,  "max":18,  "weight":2.5})
+	t.add({"type":"material", "id":"bramble_wood", "weight":1.8, "realm":"bramblewood"})
+	t.add({"type":"material", "id":"moss_fiber",   "weight":1.8, "realm":"bramblewood"})
+	t.add({"type":"material", "id":"beast_hide",   "weight":1.2, "realm":"bramblewood"})
+	t.add({"type":"item",     "id":"moss_tonic",   "weight":0.8, "rarity":0})
+	return t
+
+static func bramblewood_elite() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(2, 3)
+	t.add({"type":"gold",     "min":12, "max":28,  "weight":2.5})
+	t.add({"type":"xp",       "min":22, "max":40,  "weight":2.0})
+	t.add({"type":"material", "id":"iron_shard",   "weight":1.5, "rarity":1, "realm":"bramblewood"})
+	t.add({"type":"material", "id":"bramble_wood", "weight":1.2})
+	t.add({"type":"item",     "id":"hushling_thorn","weight":0.9,"rarity":1})
+	t.add({"type":"item",     "id":"moss_tonic",   "weight":0.6, "rarity":0})
+	t.add({"type":"diamond",  "min":1,  "max":2,   "weight":0.3, "rarity":2})
+	return t
+
+static func mistfen_common() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(1, 2)
+	t.add({"type":"gold",     "min":6,  "max":16,  "weight":2.8})
+	t.add({"type":"xp",       "min":12, "max":24,  "weight":2.2})
+	t.add({"type":"material", "id":"fen_reed",   "weight":2.0, "realm":"mistfen"})
+	t.add({"type":"material", "id":"spore_dust", "weight":1.6, "realm":"mistfen"})
+	t.add({"type":"item",     "id":"moss_tonic", "weight":0.9, "rarity":0})
+	return t
+
+static func heartwood_common() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(2, 3)
+	t.add({"type":"gold",     "min":10, "max":25,  "weight":2.5})
+	t.add({"type":"xp",       "min":18, "max":35,  "weight":2.0})
+	t.add({"type":"material", "id":"emberstone", "weight":1.8, "rarity":1, "realm":"heartwood"})
+	t.add({"type":"material", "id":"monster_core","weight":1.0,"rarity":2, "realm":"heartwood"})
+	t.add({"type":"item",     "id":"moss_tonic", "weight":0.7, "rarity":0})
+	t.add({"type":"diamond",  "min":1,  "max":2,   "weight":0.5, "rarity":2})
+	return t
+
+static func boss_matriarch() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(3, 4)
+	t.add({"type":"gold",    "min":80,  "max":150, "weight":1.0, "guaranteed":true})
+	t.add({"type":"xp",      "min":350, "max":500, "weight":1.0, "guaranteed":true})
+	t.add({"type":"weapon",  "id":"matriarch_scepter", "weight":1.0, "rarity":4, "guaranteed":true})
+	t.add({"type":"diamond", "min":4,   "max":6,   "weight":1.0, "rarity":3,  "guaranteed":true})
+	t.add({"type":"item",    "id":"hushling_thorn","min":4,"max":8,"weight":2.0,"rarity":1})
+	t.add({"type":"item",    "id":"moss_tonic","min":2,"max":3,"weight":1.5,"rarity":0})
+	t.add({"type":"material","id":"monster_core","min":2,"max":4","weight":1.2,"rarity":2})
+	return t
+
+static func chest_common() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(2, 3)
+	t.add({"type":"gold",     "min":15, "max":35,  "weight":3.0})
+	t.add({"type":"xp",       "min":20, "max":45,  "weight":2.5})
+	t.add({"type":"item",     "id":"moss_tonic",   "weight":1.5, "rarity":0})
+	t.add({"type":"material", "id":"bramble_wood", "weight":1.2, "realm":"bramblewood"})
+	t.add({"type":"material", "id":"fen_reed",     "weight":1.2, "realm":"mistfen"})
+	t.add({"type":"material", "id":"emberstone",   "weight":1.0, "rarity":1, "realm":"heartwood"})
+	t.add({"type":"diamond",  "min":1,  "max":2,   "weight":0.4, "rarity":2})
+	return t
+
+static func chest_rare() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(3, 5)
+	t.add({"type":"gold",    "min":50,  "max":120, "weight":2.5})
+	t.add({"type":"xp",      "min":60,  "max":120, "weight":2.0})
+	t.add({"type":"diamond", "min":2,   "max":5,   "weight":1.5, "rarity":2})
+	t.add({"type":"item",    "id":"moss_tonic","min":2,"max":3","weight":1.2,"rarity":0})
+	t.add({"type":"material","id":"iron_shard","weight":1.3,"rarity":1})
+	t.add({"type":"material","id":"monster_core","weight":0.9,"rarity":2})
+	t.add({"type":"material","id":"crystal_fragment","weight":0.6,"rarity":2})
+	t.add({"type":"weapon",  "id":"ember_sword",   "weight":0.5, "rarity":2})
+	t.add({"type":"weapon",  "id":"arcane_staff",  "weight":0.4, "rarity":2})
+	t.add({"type":"armor",   "id":"warden_plate",  "weight":0.5, "rarity":2})
+	return t
+
+static func chest_boss() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(4, 6)
+	t.add({"type":"gold",    "min":100, "max":220, "weight":1.0, "guaranteed":true})
+	t.add({"type":"diamond", "min":3,   "max":8,   "weight":1.0, "rarity":3,  "guaranteed":true})
+	t.add({"type":"xp",      "min":150, "max":300, "weight":1.0, "guaranteed":true})
+	t.add({"type":"material","id":"monster_core","min":2,"max":4","weight":2.0,"rarity":2})
+	t.add({"type":"material","id":"crystal_fragment","weight":1.5,"rarity":2})
+	t.add({"type":"weapon",  "id":"matriarch_scepter","weight":0.8,"rarity":4})
+	t.add({"type":"armor",   "id":"warden_plate",  "weight":0.9, "rarity":2})
+	t.add({"type":"item",    "id":"hushling_thorn","min":4,"max":8","weight":1.2,"rarity":1})
+	return t
+
+## Build a table for a specific realm and tier (used by RewardManager)
+static func for_enemy(realm_id: String, tier: String) -> LootTable:
+	match realm_id:
+		"mistfen":   return mistfen_common() if tier != "elite" else bramblewood_elite()
+		"heartwood": return heartwood_common()
 		_:
-			return {
-				"gold_min": 3, "gold_max": 9,
-				"drops": [
-					{"id": "moss_fiber", "chance": 0.30, "qty_min": 1, "qty_max": 2},
-					{"id": "bramble_wood", "chance": 0.20, "qty_min": 1, "qty_max": 1},
-				],
-				"gear": {"chance": 0.02, "rarity_min": 1, "rarity_max": 2, "kind": "weapon"}
-			}
-
-static func _chest_table(chest_rarity: int) -> Dictionary:
-	match chest_rarity:
-		1: # Common
-			return {
-				"gold_min": 18, "gold_max": 40,
-				"drops": [
-					{"id": "moss_fiber", "chance": 0.50, "qty_min": 1, "qty_max": 3},
-					{"id": "bramble_wood", "chance": 0.40, "qty_min": 1, "qty_max": 2},
-				],
-				"gear": {"chance": 0.08, "rarity_min": 1, "rarity_max": 2, "kind": "weapon"}
-			}
-		2: # Uncommon
-			return {
-				"gold_min": 30, "gold_max": 60,
-				"drops": [
-					{"id": "iron_shard", "chance": 0.50, "qty_min": 1, "qty_max": 3},
-					{"id": "fen_reed", "chance": 0.35, "qty_min": 1, "qty_max": 2},
-					{"id": "beast_hide", "chance": 0.25, "qty_min": 1, "qty_max": 2},
-				],
-				"gear": {"chance": 0.15, "rarity_min": 2, "rarity_max": 3, "kind": "weapon"}
-			}
-		3: # Rare
-			return {
-				"gold_min": 50, "gold_max": 100,
-				"drops": [
-					{"id": "emberstone", "chance": 0.45, "qty_min": 1, "qty_max": 3},
-					{"id": "moonmoss", "chance": 0.35, "qty_min": 1, "qty_max": 2},
-					{"id": "crystal_fragment", "chance": 0.20, "qty_min": 1, "qty_max": 1},
-				],
-				"gear": {"chance": 0.25, "rarity_min": 3, "rarity_max": 4, "kind": "weapon"}
-			}
-		4: # Epic
-			return {
-				"gold_min": 80, "gold_max": 160,
-				"drops": [
-					{"id": "crystal_fragment", "chance": 0.50, "qty_min": 1, "qty_max": 2},
-					{"id": "emberstone", "chance": 0.40, "qty_min": 2, "qty_max": 4},
-					{"id": "monster_core", "chance": 0.25, "qty_min": 1, "qty_max": 1},
-				],
-				"gear": {"chance": 0.35, "rarity_min": 3, "rarity_max": 5, "kind": "weapon"}
-			}
-		_: # Legendary
-			return {
-				"gold_min": 120, "gold_max": 250,
-				"drops": [
-					{"id": "monster_core", "chance": 0.60, "qty_min": 1, "qty_max": 2},
-					{"id": "crystal_fragment", "chance": 0.50, "qty_min": 2, "qty_max": 3},
-					{"id": "emberstone", "chance": 0.40, "qty_min": 2, "qty_max": 4},
-				],
-				"gear": {"chance": 0.50, "rarity_min": 4, "rarity_max": 5, "kind": "weapon"}
-			}
-
-static func _boss_table(boss_id: String) -> Dictionary:
-	match boss_id:
-		"thornhide_alpha":
-			return {
-				"gold_min": 70, "gold_max": 150,
-				"drops": [
-					{"id": "monster_core", "chance": 1.0, "qty_min": 1, "qty_max": 2},
-					{"id": "bramble_wood", "chance": 0.80, "qty_min": 3, "qty_max": 5},
-					{"id": "iron_shard", "chance": 0.60, "qty_min": 2, "qty_max": 4},
-				],
-				"gear": {"chance": 0.40, "rarity_min": 3, "rarity_max": 5, "kind": "weapon"}
-			}
-		"fenmaw":
-			return {
-				"gold_min": 80, "gold_max": 160,
-				"drops": [
-					{"id": "monster_core", "chance": 1.0, "qty_min": 1, "qty_max": 2},
-					{"id": "fen_reed", "chance": 0.80, "qty_min": 3, "qty_max": 5},
-					{"id": "spore_dust", "chance": 0.60, "qty_min": 2, "qty_max": 4},
-				],
-				"gear": {"chance": 0.45, "rarity_min": 3, "rarity_max": 5, "kind": "armor"}
-			}
-		"matriarch":
-			return {
-				"gold_min": 120, "gold_max": 220,
-				"drops": [
-					{"id": "monster_core", "chance": 1.0, "qty_min": 2, "qty_max": 3},
-					{"id": "crystal_fragment", "chance": 1.0, "qty_min": 2, "qty_max": 4},
-					{"id": "moonmoss", "chance": 0.70, "qty_min": 3, "qty_max": 5},
-				],
-				"gear": {"chance": 0.60, "rarity_min": 4, "rarity_max": 5, "kind": "weapon"}
-			}
-		_:
-			return {
-				"gold_min": 50, "gold_max": 120,
-				"drops": [
-					{"id": "monster_core", "chance": 1.0, "qty_min": 1, "qty_max": 2},
-				],
-				"gear": {"chance": 0.30, "rarity_min": 3, "rarity_max": 5, "kind": "weapon"}
-			}
+			return bramblewood_common() if tier == "normal" else bramblewood_elite()
