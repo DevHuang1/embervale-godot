@@ -11,7 +11,7 @@ script = ExtResource("1_0")
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-color = Color(0.008, 0.02, 0.014, 0.66)
+color = Color(0.002, 0.006, 0.005, 0.88)
 
 [node name="Root" type="PanelContainer" parent="."]
 anchors_preset = 8
@@ -34,6 +34,11 @@ layout_mode = 2
 theme_type_variation = &"MenuTitle"
 text = "EMBER TRADER"
 
+[node name="MerchantMark" type="Label" parent="Root/VBox/Header"]
+layout_mode = 2
+theme_type_variation = &"Eyebrow"
+text = "  ◈  THE ASHEN EXCHANGE"
+
 [node name="GoldLabel" type="Label" parent="Root/VBox/Header"]
 layout_mode = 2
 text = "◆ 30"
@@ -51,6 +56,9 @@ layout_mode = 2
 theme_type_variation = &"Subtitle"
 text = "Steel and starlight, traded for embers gathered from the fallen."
 autowrap_mode = 2
+
+[node name="Rule" type="HSeparator" parent="Root/VBox"]
+layout_mode = 2
 
 [node name="ItemsScroll" type="ScrollContainer" parent="Root/VBox"]
 layout_mode = 2

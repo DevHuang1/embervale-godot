@@ -35,9 +35,31 @@ exports/
 user_*.cfg
 
 # Hackathon plan (keep untracked)
+# Stray local junk (crash dump + downloaded reference image)
+crash_log.txt
+images (1).jpeg
+images (1).jpeg.import
+
+# AI tooling configs / agent state (may contain provider settings; never publish)
+.mcp.json
+opencode.json
+.captures/
+.agents/
+.claude/
+.codex/
+.cursor/
+.gemini/
+.kilo/
+.opencode/
 SHIPATON_PLAN.md
 
 # Stray local junk (crash dump + downloaded reference image)
 crash_log.txt
 images (1).jpeg
 images (1).jpeg.import
+# Local session logs, editor backups, and Python caches
+session-ses_*.md
+project.godot.bak
+__pycache__/
+# Local MCP plugin cache
+addons/godot_mcp/cache/

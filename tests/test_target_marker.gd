@@ -113,10 +113,11 @@ func _run() -> void:
 	scene_root.add_child(lantern)
 	marker_script.bind_lantern(lantern)
 	# Signal choreography: mark_locked on engage, mark_released on drop.
-	var locked_seen := 0
-	var released_seen := 0
-	gs.mark_locked.connect(func(_e): locked_seen += 1)
-	gs.mark_released.connect(func(): released_seen += 1)
+	# GDScript lambdas capture locals by value, so count through a Dictionary
+	# (captured by reference) or the counters would stay 0 forever.
+	var seen := {"locked": 0, "released": 0}
+	gs.mark_locked.connect(func(_e): seen.locked += 1)
+	gs.mark_released.connect(func(): seen.released += 1)
 	if not gs.engage_enemy(enemy):
 		failures += 1
 		print("FAIL: re-engage for tether test should succeed")
@@ -139,10 +140,10 @@ func _run() -> void:
 	if tether != null and tether.visible:
 		failures += 1
 		print("FAIL: tether should hide once the mark drops")
-	if locked_seen != 1 or released_seen != 1:
+	if seen.locked != 1 or seen.released != 1:
 		failures += 1
 		print("FAIL: expected 1 mark_locked + 1 mark_released (got %d/%d)"
-			% [locked_seen, released_seen])
+			% [seen.locked, seen.released])
 
 	# --- Dead foes never hold a stale ring ---
 	gs.engage_enemy(enemy)
@@ -152,6 +153,10 @@ func _run() -> void:
 	if is_instance_valid(marker) and marker.visible:
 		failures += 1
 		print("FAIL: marker should hide when the marked foe leaves the tree")
+	# The foe was removed from the tree above; free it so the test itself
+	# does not leak an ObjectDB instance at exit.
+	if is_instance_valid(enemy):
+		enemy.free()
 
 	if failures == 0:
 		print("ALL TARGET MARKER TESTS PASSED")

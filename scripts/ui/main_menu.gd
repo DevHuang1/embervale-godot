@@ -61,9 +61,32 @@ func _ready() -> void:
 	var tw := create_tween()
 	tw.tween_property(wordmark, "modulate:a", 1.0, 0.35) \
 		.set_delay(0.10).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	UiKit.stagger_entrance(hero_vbox, 0.34, 0.07, 30.0)
+	# VBoxContainer owns child positions. A positional rise tween fights its
+	# layout pass and can collapse the secondary row over the CTA; fade only.
+	UiKit.stagger_entrance(hero_vbox, 0.34, 0.07, 0.0)
 	# A quiet pulse on the title keeps the card from feeling static.
 	_pulse_title()
+	# Ensure the hero card centers itself after the VBox sizes it.
+	hero_card.set_anchors_preset(Control.PRESET_CENTER)
+	get_viewport().size_changed.connect(_layout_hero_card)
+	call_deferred("_layout_hero_card")
+
+func _layout_hero_card() -> void:
+	# Allocate the card explicitly. A zero-height centered Control lets VBox
+	# children collapse into one another during the first layout pass.
+	var viewport_size := get_viewport().get_visible_rect().size
+	var horizontal_margin := 32.0 if viewport_size.x < 900.0 else 64.0
+	var vertical_margin := 150.0 if viewport_size.y >= 1100.0 else 76.0
+	var card_width := minf(920.0, viewport_size.x - horizontal_margin * 2.0)
+	var content_height := hero_vbox.get_combined_minimum_size().y
+	var card_height := minf(maxf(700.0, content_height + 32.0),
+		viewport_size.y - vertical_margin * 2.0)
+	card_width = maxf(card_width, 620.0)
+	card_height = maxf(card_height, 600.0)
+	hero_card.offset_left = -card_width * 0.5
+	hero_card.offset_right = card_width * 0.5
+	hero_card.offset_top = -card_height * 0.5
+	hero_card.offset_bottom = card_height * 0.5
 
 func _style_roles() -> void:
 	UiKit.style_primary_button(cta_button)
@@ -95,6 +118,13 @@ func _wire_backdrop() -> void:
 
 func _check_continue_availability() -> void:
 	continue_button.disabled = not game_state.has_save()
+	if continue_button.disabled:
+		# A disabled dark-glass button reads as "broken" — say why instead.
+		continue_button.text = "NO SAVED TALE"
+		continue_button.tooltip_text = "Begin a new tale first; progress saves as you play."
+	else:
+		continue_button.text = "CONTINUE"
+		continue_button.tooltip_text = ""
 
 func _on_new_tale_pressed() -> void:
 	audio.play_ui_blip()

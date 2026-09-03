@@ -8,12 +8,29 @@ enum CombatState { EXPLORING, COMBAT, VICTORY, DEFEATED }
 enum ItemKind { CONSUMABLE, RELIC, QUEST }
 enum ItemRarity { COMMON, UNCOMMON, RARE }
 
+# === Raw materials: realm-specific gathering resources ===
+const MATERIAL_DEFS := {
+	"bramble_wood": { "name": "Bramblewood", "realm": "bramblewood", "rarity": 0 },
+	"moss_fiber": { "name": "Moss Fiber", "realm": "bramblewood", "rarity": 0 },
+	"fen_reed": { "name": "Fen Reed", "realm": "mistfen", "rarity": 0 },
+	"emberstone": { "name": "Emberstone", "realm": "heartwood", "rarity": 1 },
+	"moonmoss": { "name": "Moonmoss", "realm": "moonfen", "rarity": 1 },
+	"iron_shard": { "name": "Iron Shard", "realm": "bramblewood", "rarity": 1 },
+	"beast_hide": { "name": "Beast Hide", "realm": "bramblewood", "rarity": 0 },
+	"spore_dust": { "name": "Spore Dust", "realm": "mistfen", "rarity": 0 },
+	"crystal_fragment": { "name": "Crystal Fragment", "realm": "moonfen", "rarity": 2 },
+	"monster_core": { "name": "Monster Core", "realm": "heartwood", "rarity": 2 },
+}
+var raw_materials: Dictionary = {}
+var gathered_nodes: Dictionary = {}
+var discovered_landmarks: Dictionary = {}
+
 # === Weapon registry: each style drives its own attack animation + FX kit ===
 const WEAPON_DEFS := {
 	"mug_mace": {
 		"id": "mug_mace", "name": "MUG MACE", "glyph": "☕", "style": "blunt",
 		"element": "fire",
-		"atk": 7, "swing_time": 0.38, "range": 8.2,
+		"atk": 7, "swing_time":     0.32, "range": 8.2,
 		"skills": [
 			{"name": "MUG SLAM", "type": "aoe", "cooldown": 2.0, "radius": 13.0, "dmg_mult": 1.5},
 			{"name": "EMBER FLIGHT", "type": "explosion", "cooldown": 2.5, "radius": 2.6, "dmg_mult": 1.7,
@@ -24,7 +41,7 @@ const WEAPON_DEFS := {
 	},
 	"ember_sword": {
 		"id": "ember_sword", "name": "EMBERFANG", "glyph": "🗡", "style": "slash",
-		"atk": 8, "swing_time": 0.30, "range": 8.6,
+		"atk": 8, "swing_time":     0.26, "range": 8.6,
 		"skills": [
 			{"name": "CRESCENT CUT", "type": "strike", "cooldown": 1.5, "dmg_mult": 2.2,
 				"desc": "A heavy crescent slash through the marked target."},
@@ -36,7 +53,7 @@ const WEAPON_DEFS := {
 	},
 	"arcane_staff": {
 		"id": "arcane_staff", "name": "MOONBOUGH", "glyph": "🪄", "style": "magic",
-		"atk": 6, "swing_time": 0.44, "range": 10.5,
+		"atk": 6, "swing_time":     0.38, "range": 10.5,
 		"skills": [
 			{"name": "EMBER NOVA", "type": "explosion", "cooldown": 2.0, "radius": 3.0, "dmg_mult": 1.9,
 				"desc": "Detonate an ember burst on the marked target."},
@@ -44,6 +61,24 @@ const WEAPON_DEFS := {
 				"desc": "Call down a slow comet; a wide explosion follows."},
 			{"name": "VERDANT BLOOM", "type": "heal_bloom", "cooldown": 4.5, "heal": 14,
 				"desc": "Bloom verdant light, restoring warmth."}
+		]
+	},
+	"matriarch_scepter": {
+		"id": "matriarch_scepter", "name": "CROWN OF THE OLD ROOT", "glyph": "♛",
+		"style": "magic", "element": "nature", "rarity": 4,
+		"atk": 11, "swing_time":     0.42, "range": 11.0,
+		"auto_bloom_every": 2, "auto_bloom_bonus": 5,
+		"passive_name": "QUEEN'S GERMINATION",
+		"passive_desc": "Every second basic strike blooms for +5 damage and applies Nature.",
+		"source": "Defeat the Hushling Matriarch",
+		"skills": [
+			{"name": "THORN LANCE", "type": "strike", "cooldown": 1.8,
+				"dmg_mult": 2.1, "desc": "Drive a focused thorn through the marked foe."},
+			{"name": "BRAMBLE DOMINION", "type": "aoe", "cooldown": 6.0,
+				"radius": 16.0, "dmg_mult": 1.7,
+				"desc": "Command an entangling crown of roots around you."},
+			{"name": "VERDANT REPRIEVE", "type": "heal_bloom", "cooldown": 7.0,
+				"heal": 18, "desc": "Turn the old root's vigor into restored warmth."}
 		]
 	}
 }
@@ -180,6 +215,10 @@ signal defeated
 signal victory
 signal mark_locked(target: Node3D)
 signal mark_released
+signal materials_changed
+signal gathered_nodes_changed
+signal upgrade_completed(item_id: String, new_level: int)
+signal objective_completed(objective_id: String)
 
 # Constants
 const MAX_HP_BASE = 100
@@ -223,6 +262,12 @@ func reset() -> void:
 	boss_first_kills = {}
 	opened_chests = {}
 	active_cosmetic_ids = {}
+	raw_materials = {}
+	gathered_nodes = {}
+	discovered_landmarks = {}
+	quest_objectives = []
+	onboarding_completed = false
+	onboarding_step = 0
 	current_stage = QuestStage.SEEK_SPRITE
 	combat_state = CombatState.EXPLORING
 	shard_collected = false
@@ -250,7 +295,11 @@ func reset() -> void:
 	
 	loot_notice = ""
 	loot_count = 0
-	loot_pulse = 0
+	loot_pulse =  0
+	
+	var sm := get_node_or_null("/root/StoryManager")
+	if sm != null and sm.has_method("reset_payload"):
+		sm.reset_payload()
 	
 	hp_changed.emit(0, hp)
 	xp_changed.emit(xp, level)
@@ -289,6 +338,109 @@ func get_quest_copy(stage: QuestStage) -> Dictionary:
 	if stage == QuestStage.COMPLETE: return {"chapter": "IV. A Path Relit", "title": "The Grove Remembers", "instruction": "The old road will hold its warmth until the next traveler comes through."}
 	return {"chapter": "", "title": "", "instruction": ""}
 
+# === Quest Objectives ===
+var quest_objectives: Array[Dictionary] = []
+const OBJECTIVE_TYPES := ["kill", "gather", "reach", "craft", "equip", "upgrade", "open_chest"]
+
+func add_objective(id: String, description: String, type: String = "kill", target_qty: int = 1) -> void:
+	if id.is_empty() or type not in OBJECTIVE_TYPES:
+		return
+	for obj in quest_objectives:
+		if obj.get("id", "") == id:
+			return
+	quest_objectives.append({
+		"id": id, "description": description, "type": type,
+		"target_qty": target_qty, "current_qty": 0, "completed": false
+	})
+	inventory_changed.emit()
+	save_game()
+
+func update_objective(type: String, item_id: String = "", qty: int = 1,
+		persist: bool = true) -> void:
+	var sm := get_node_or_null("/root/StoryManager")
+	if sm != null and sm.has_method("notify_objective"):
+		sm.notify_objective(type, item_id, qty)
+	var changed := false
+	for obj in quest_objectives:
+		if obj.get("type", "") == type and not obj.completed:
+			if item_id == "" or obj.get("id", "").contains(item_id):
+				obj.current_qty = mini(int(obj.get("current_qty", 0)) + qty, int(obj.get("target_qty", 1)))
+				changed = true
+				if obj.current_qty >= int(obj.get("target_qty", 1)):
+					obj.completed = true
+					objective_completed.emit(obj.id)
+					quest_progress.emit("Objective complete: %s" % obj.description)
+	inventory_changed.emit()
+	if changed and persist:
+		save_game()
+
+func get_active_objectives() -> Array:
+	var active := []
+	for obj in quest_objectives:
+		if not obj.get("completed", false):
+			active.append(obj)
+	return active
+
+func clear_completed_objectives() -> void:
+	quest_objectives = quest_objectives.filter(func(o): return not o.get("completed", false))
+	save_game()
+
+# === Expedition Rewards ===
+func complete_expedition(realm_id: String) -> Dictionary:
+	var gold_reward := randi_range(70, 150)
+	var xp_reward := randi_range(80, 150)
+	add_gold(gold_reward, " +%d gold from expedition." % gold_reward)
+	grant_xp(xp_reward)
+	var mat_bonus := ["moss_fiber", "bramble_wood", "iron_shard", "beast_hide"]
+	for mat_id in mat_bonus:
+		var qty := randi_range(1, 3)
+		add_material(mat_id, qty)
+	quest_progress.emit("Expedition complete — %d gold, %d XP earned." % [gold_reward, xp_reward])
+	return {"gold": gold_reward, "xp": xp_reward}
+
+# === Onboarding ===
+var onboarding_completed: bool = false
+var onboarding_step: int = 0
+
+const ONBOARDING_STEPS := [
+	{"id": "move", "hint": "Drag the left control or use WASD to move", "trigger": "movement"},
+	{"id": "attack", "hint": "Tap a foe or press Attack to mark and strike", "trigger": "combat"},
+	{"id": "dodge", "hint": "Use Dodge as an enemy telegraph closes", "trigger": "dodge"},
+	{"id": "pickup", "hint": "Claim the reward left by a defeated foe", "trigger": "loot"},
+	{"id": "gather", "hint": "Interact with a glowing resource node and hold position", "trigger": "gather"},
+	{"id": "craft", "hint": "Use gathered materials to craft your first upgrade", "trigger": "craft"},
+]
+
+func get_onboarding_hint() -> String:
+	if onboarding_completed or onboarding_step >= ONBOARDING_STEPS.size():
+		return ""
+	return str(ONBOARDING_STEPS[onboarding_step].get("hint", ""))
+
+func advance_onboarding() -> String:
+	if onboarding_completed:
+		return ""
+	if onboarding_step >= ONBOARDING_STEPS.size():
+		onboarding_completed = true
+		save_game()
+		return ""
+	onboarding_step += 1
+	if onboarding_step >= ONBOARDING_STEPS.size():
+		onboarding_completed = true
+	save_game()
+	return get_onboarding_hint()
+
+func check_onboarding_trigger(trigger: String) -> String:
+	if onboarding_completed:
+		return ""
+	if onboarding_step < ONBOARDING_STEPS.size():
+		var step: Dictionary = ONBOARDING_STEPS[onboarding_step]
+		if step.get("trigger", "") == trigger:
+			var next_hint := advance_onboarding()
+			quest_progress.emit("Trail basics complete." if next_hint.is_empty()
+				else "Next: %s" % next_hint)
+			return next_hint
+	return ""
+
 # === Combat ===
 func engage_enemy(enemy: Node3D) -> bool:
 	if combat_state != CombatState.EXPLORING:
@@ -318,19 +470,26 @@ func perform_auto_strike() -> Dictionary:
 		return {}
 	
 	auto_strike_count += 1
-	var is_bloom = (auto_strike_count % PASSIVE_BLOOM_EVERY == 0)
+	var bloom_every := maxi(1, int(equipped_weapon.get(
+		"auto_bloom_every", PASSIVE_BLOOM_EVERY)))
+	var bloom_bonus := int(equipped_weapon.get(
+		"auto_bloom_bonus", PASSIVE_BLOOM_BONUS))
+	var is_bloom := auto_strike_count % bloom_every == 0
 	var base_damage = get_base_auto_damage()
-	var damage = base_damage + (PASSIVE_BLOOM_BONUS if is_bloom else 0)
+	var damage = base_damage + (bloom_bonus if is_bloom else 0)
 	
 	var hit_time = 0.52 if is_bloom else 0.4
 	var enemy_hit_time = 0.42 if is_bloom else 0.3
+	var bloom_name := str(equipped_weapon.get("passive_name", "EMBER CIRCUIT"))
 	
 	return {
 		"damage": damage,
 		"is_bloom": is_bloom,
 		"hit_time": hit_time,
 		"enemy_hit_time": enemy_hit_time,
-		"log": "Ember Circuit blooms: your third auto-strike lands for %d." % damage if is_bloom else "Your lantern-sabre strikes automatically for %d." % damage
+		"log": "%s blooms: strike %d lands for %d." % [
+			bloom_name.capitalize(), bloom_every, damage] if is_bloom \
+			else "Your lantern-sabre strikes automatically for %d." % damage
 	}
 
 func get_base_auto_damage() -> int:
@@ -438,6 +597,8 @@ func equip_armor(armor_id: String) -> void:
 				break
 		equipped_armor = found.duplicate(true)
 	armor_changed.emit(equipped_armor)
+	if not equipped_armor.is_empty():
+		check_onboarding_trigger("equip")
 	save_game()
 
 func add_armor(armor: Dictionary, equip_if_none: bool = true) -> void:
@@ -581,19 +742,29 @@ func mark_boss_killed(boss_key: String) -> bool:
 	save_game()
 	return true
 
+func has_boss_killed(boss_key: String) -> bool:
+	return bool(boss_first_kills.get(boss_key, false))
+
 # === Realm travel ===
 @export var current_realm: String = "bramblewood"
 var unlocked_realms: Array[String] = ["bramblewood", "mistfen", "heartwood"]
 
 ## Old saves used "whispergrove" for the starting grove.
 func _normalize_realm(realm_id: String) -> String:
-	return "bramblewood" if realm_id == "whispergrove" else realm_id
+	realm_id = "bramblewood" if realm_id == "whispergrove" else realm_id
+	# Save/UI only ever reference known realms; anything else on load is a
+	# corrupt or hand-edited save and must not drive dynamic scene loads.
+	return realm_id if realm_id in ["bramblewood", "mistfen", "heartwood", "moonfen"] \
+		else "bramblewood"
 
-func unlock_realm(realm_id: String) -> void:
+## Returns true only when this call creates a new unlock. Existing call sites
+## may continue ignoring the result.
+func unlock_realm(realm_id: String) -> bool:
 	if realm_id in unlocked_realms:
-		return
+		return false
 	unlocked_realms.append(realm_id)
 	save_game()
+	return true
 
 func set_current_realm(realm_id: String) -> void:
 	if current_realm == realm_id:
@@ -740,7 +911,122 @@ func add_loot(item_id: String, amount: int, notice: String = "", display_count: 
 		loot_count = display_count if display_count > 0 else amount
 		loot_pulse += 1
 		loot_received.emit(loot_notice, loot_count)
+	check_onboarding_trigger("loot")
 	save_game()
+
+# === Raw materials ===
+func add_material(material_id: String, qty: int = 1) -> void:
+	if not MATERIAL_DEFS.has(material_id):
+		return
+	raw_materials[material_id] = int(raw_materials.get(material_id, 0)) + maxi(1, qty)
+	materials_changed.emit()
+	save_game()
+
+func remove_material(material_id: String, qty: int = 1) -> bool:
+	var current: int = int(raw_materials.get(material_id, 0))
+	if current < qty:
+		return false
+	raw_materials[material_id] = current - qty
+	if raw_materials[material_id] <= 0:
+		raw_materials.erase(material_id)
+	materials_changed.emit()
+	save_game()
+	return true
+
+func has_material(material_id: String, qty: int = 1) -> bool:
+	return int(raw_materials.get(material_id, 0)) >= qty
+
+func get_material_qty(material_id: String) -> int:
+	return int(raw_materials.get(material_id, 0))
+
+## Persist gathering depletion by stable realm/node id. World nodes must use
+## this dictionary instead of attempting to create dynamic GameState fields.
+func set_gathered_node_state(node_id: String, state: Dictionary) -> void:
+	if node_id.is_empty():
+		return
+	if state.is_empty():
+		gathered_nodes.erase(node_id)
+	else:
+		gathered_nodes[node_id] = state.duplicate(true)
+	gathered_nodes_changed.emit()
+	save_game()
+
+func get_gathered_node_state(node_id: String) -> Dictionary:
+	var state = gathered_nodes.get(node_id, {})
+	return state.duplicate(true) if state is Dictionary else {}
+
+## One-save crafting transaction. Validate the output and complete cost before
+## mutating anything, then grant the correct inventory/gear type atomically in
+## memory. This prevents weapon recipes from consuming materials and vanishing
+## through the consumable-only add_loot path.
+func craft_transaction(category: String, output_id: String, output_qty: int,
+		crafted_name: String, rarity: int, materials: Dictionary,
+		gold_cost: int) -> Dictionary:
+	var gear_def: Dictionary = {}
+	var inventory_item: Dictionary = {}
+	match category:
+		"weapon":
+			gear_def = WEAPON_DEFS.get(output_id, {}).duplicate(true)
+		"armor":
+			gear_def = ARMOR_DEFS.get(output_id, {}).duplicate(true)
+		"potion", "utility":
+			inventory_item = get_item(output_id)
+		_:
+			return {"success": false, "message": "Unsupported recipe category."}
+	if gear_def.is_empty() and inventory_item.is_empty():
+		return {"success": false, "message": "Crafting output is not defined."}
+	if gold_cost < 0 or gold < gold_cost:
+		return {"success": false, "message": "Need %d gold." % maxi(gold_cost, 0)}
+	for mat_id in materials:
+		var needed := int(materials[mat_id])
+		if needed < 0 or not MATERIAL_DEFS.has(mat_id):
+			return {"success": false, "message": "Recipe contains an invalid material."}
+		if not has_material(str(mat_id), needed):
+			var material_name := str(MATERIAL_DEFS[mat_id].get("name", mat_id))
+			return {"success": false,
+				"message": "Need %d %s." % [needed, material_name]}
+
+	gold -= gold_cost
+	for mat_id in materials:
+		var remaining := get_material_qty(str(mat_id)) - int(materials[mat_id])
+		if remaining > 0:
+			raw_materials[mat_id] = remaining
+		else:
+			raw_materials.erase(mat_id)
+
+	var qty := maxi(output_qty, 1)
+	if category == "weapon":
+		gear_def["name"] = crafted_name
+		gear_def["rarity"] = rarity
+		gear_def["crafted"] = true
+		_upsert_crafted_gear(forged_weapons, gear_def)
+	elif category == "armor":
+		gear_def["name"] = crafted_name
+		gear_def["rarity"] = rarity
+		gear_def["crafted"] = true
+		_upsert_crafted_gear(forged_armors, gear_def)
+	else:
+		inventory_item.quantity = int(inventory_item.get("quantity", 0)) + qty
+
+	gold_changed.emit(gold)
+	materials_changed.emit()
+	inventory_changed.emit()
+	loot_notice = "Crafted %s." % crafted_name
+	loot_count = qty
+	loot_pulse += 1
+	loot_received.emit(loot_notice, qty)
+	update_objective("craft", output_id, 1, false)
+	check_onboarding_trigger("craft")
+	save_game()
+	return {"success": true, "name": crafted_name, "qty": qty,
+		"category": category, "output_id": output_id}
+
+func _upsert_crafted_gear(collection: Array[Dictionary], gear: Dictionary) -> void:
+	for i in collection.size():
+		if collection[i].get("id", "") == gear.get("id", ""):
+			collection[i] = gear.duplicate(true)
+			return
+	collection.append(gear.duplicate(true))
 
 func add_weapon(weapon: Dictionary, equip: bool = false, notice: String = "") -> void:
 	if not weapon.has("id"):
@@ -764,15 +1050,159 @@ func add_weapon(weapon: Dictionary, equip: bool = false, notice: String = "") ->
 		loot_received.emit(loot_notice, loot_count)
 	save_game()
 
+## Grants a named drop once without replacing its saved upgrades on repeat
+## clears. Returns true only when ownership was newly created.
+func grant_unique_weapon(weapon_id: String, equip: bool = false,
+		notice: String = "") -> bool:
+	if not WEAPON_DEFS.has(weapon_id):
+		return false
+	if forged_weapons.any(func(item: Dictionary) -> bool:
+		return str(item.get("id", "")) == weapon_id):
+		return false
+	add_weapon(WEAPON_DEFS[weapon_id].duplicate(true), equip, notice)
+	return true
+
 func equip_weapon_by_id(id: String) -> bool:
 	for weapon in forged_weapons:
 		if weapon.get("id", "") == id:
 			equipped_weapon = weapon.duplicate(true)
 			_refresh_skill_slots()
 			weapon_changed.emit(equipped_weapon)
+			update_objective("equip", id, 1, false)
+			check_onboarding_trigger("equip")
 			save_game()
 			return true
 	return false
+
+# === Equipment Upgrades ===
+const MAX_UPGRADE_LEVEL := 5
+
+static func upgrade_material_cost(base_cost: int, level: int) -> int:
+	return ceili(float(base_cost) * pow(1.55, float(level)))
+
+static func upgrade_gold_cost(base_gold: int, level: int) -> int:
+	return ceili(float(base_gold) * pow(1.42, float(level)))
+
+static func upgrade_stat_gain(base_stat: int, level: int) -> int:
+	return ceili(float(base_stat) * (0.08 + 0.025 * float(level)))
+
+func get_weapon_upgrade_cost(weapon: Dictionary) -> Dictionary:
+	var level: int = int(weapon.get("upgrade_level", 0))
+	if level >= MAX_UPGRADE_LEVEL:
+		return {"can_upgrade": false}
+	var base_atk: int = int(weapon.get("atk", 8))
+	var material_cost := upgrade_material_cost(4, level)
+	var gold_cost := upgrade_gold_cost(30, level)
+	var stat_gain := upgrade_stat_gain(base_atk, level)
+	return {
+		"can_upgrade": true,
+		"level": level,
+		"next_level": level + 1,
+		"material_id": "iron_shard",
+		"material_cost": material_cost,
+		"gold_cost": gold_cost,
+		"stat_gain": stat_gain,
+		"current_atk": base_atk,
+		"next_atk": base_atk + stat_gain,
+	}
+
+func upgrade_weapon(weapon_id: String) -> Dictionary:
+	var weapon := {}
+	for w in forged_weapons:
+		if w.get("id", "") == weapon_id:
+			weapon = w
+			break
+	if weapon.is_empty():
+		return {"success": false, "message": "Weapon not found."}
+	var cost := get_weapon_upgrade_cost(weapon)
+	if not cost.get("can_upgrade", false):
+		return {"success": false, "message": "Already at max upgrade level."}
+	var mat_id: String = cost.get("material_id", "iron_shard")
+	var mat_cost: int = cost.get("material_cost", 0)
+	var gold_cost: int = cost.get("gold_cost", 0)
+	if not has_material(mat_id, mat_cost):
+		return {"success": false, "message": "Need %d %s." % [mat_cost, MATERIAL_DEFS.get(mat_id, {}).get("name", mat_id)]}
+	if not spend_gold(gold_cost):
+		return {"success": false, "message": "Need %d gold." % gold_cost}
+	remove_material(mat_id, mat_cost)
+	var new_level: int = int(weapon.get("upgrade_level", 0)) + 1
+	weapon["upgrade_level"] = new_level
+	weapon["atk"] = int(weapon.get("atk", 8)) + cost.get("stat_gain", 0)
+	for i in forged_weapons.size():
+		if forged_weapons[i].get("id", "") == weapon_id:
+			forged_weapons[i] = weapon.duplicate(true)
+			break
+	if equipped_weapon.get("id", "") == weapon_id:
+		equipped_weapon = weapon.duplicate(true)
+		_refresh_skill_slots()
+		weapon_changed.emit(equipped_weapon)
+	inventory_changed.emit()
+	upgrade_completed.emit(weapon_id, new_level)
+	update_objective("upgrade", weapon_id, 1, false)
+	loot_notice = "Upgraded to +%d" % new_level
+	loot_count = 0
+	loot_pulse += 1
+	loot_received.emit(loot_notice, 0)
+	save_game()
+	return {"success": true, "level": new_level, "atk": weapon.get("atk", 0)}
+
+func get_armor_upgrade_cost(armor: Dictionary) -> Dictionary:
+	var level: int = int(armor.get("upgrade_level", 0))
+	if level >= MAX_UPGRADE_LEVEL:
+		return {"can_upgrade": false}
+	var base_def: int = int(armor.get("defense", 3))
+	var material_cost := upgrade_material_cost(5, level)
+	var gold_cost := upgrade_gold_cost(35, level)
+	var stat_gain := upgrade_stat_gain(base_def, level)
+	return {
+		"can_upgrade": true,
+		"level": level,
+		"next_level": level + 1,
+		"material_id": "iron_shard",
+		"material_cost": material_cost,
+		"gold_cost": gold_cost,
+		"stat_gain": stat_gain,
+		"current_def": base_def + level,
+		"next_def": base_def + (level + 1) + stat_gain,
+	}
+
+func upgrade_armor(armor_id: String) -> Dictionary:
+	var armor := {}
+	for a in forged_armors:
+		if a.get("id", "") == armor_id:
+			armor = a
+			break
+	if armor.is_empty():
+		return {"success": false, "message": "Armor not found."}
+	var cost := get_armor_upgrade_cost(armor)
+	if not cost.get("can_upgrade", false):
+		return {"success": false, "message": "Already at max upgrade level."}
+	var mat_id: String = cost.get("material_id", "iron_shard")
+	var mat_cost: int = cost.get("material_cost", 0)
+	var gold_cost: int = cost.get("gold_cost", 0)
+	if not has_material(mat_id, mat_cost):
+		return {"success": false, "message": "Need %d %s." % [mat_cost, MATERIAL_DEFS.get(mat_id, {}).get("name", mat_id)]}
+	if not spend_gold(gold_cost):
+		return {"success": false, "message": "Need %d gold." % gold_cost}
+	remove_material(mat_id, mat_cost)
+	var new_level: int = int(armor.get("upgrade_level", 0)) + 1
+	armor["upgrade_level"] = new_level
+	armor["defense"] = int(armor.get("defense", 3)) + cost.get("stat_gain", 0)
+	for i in forged_armors.size():
+		if forged_armors[i].get("id", "") == armor_id:
+			forged_armors[i] = armor.duplicate(true)
+			break
+	if equipped_armor.get("id", "") == armor_id:
+		equipped_armor = armor.duplicate(true)
+		armor_changed.emit(equipped_armor)
+	inventory_changed.emit()
+	upgrade_completed.emit(armor_id, new_level)
+	loot_notice = "Armor upgraded to +%d" % new_level
+	loot_count = 0
+	loot_pulse += 1
+	loot_received.emit(loot_notice, 0)
+	save_game()
+	return {"success": true, "level": new_level, "defense": armor.get("defense", 0)}
 
 const ELEMENT_SWITCH_COST := 24
 const ELEMENT_SWITCHES := ["fire", "frost", "shock", "nature"]
@@ -867,12 +1297,23 @@ func is_quest_complete() -> bool:
 
 # === Persistence ===
 const SAVE_PATH := "user://embervale_save.cfg"
+## Bump when the on-disk save layout changes. Loads refuse a file whose schema
+## is NEWER than this build supports (it may contain fields we cannot honor).
+const SAVE_SCHEMA_VERSION := 3
+## Hard ceilings applied on load so a torn or hand-edited save cannot push the
+## player into absurd values (e.g. a negative wallet or 64-bit stat overflow).
+const MAX_LEVEL := 99
+const MAX_CURRENCY := 999_999
+const MAX_STAT_VALUE := 999
+const MAX_STAT_POINTS := 999
+var save_path: String = SAVE_PATH
 
 func has_save() -> bool:
-	return FileAccess.file_exists(SAVE_PATH)
+	return FileAccess.file_exists(save_path)
 
 func save_game() -> void:
 	var cfg := ConfigFile.new()
+	cfg.set_value("meta", "schema_version", SAVE_SCHEMA_VERSION)
 	cfg.set_value("progress", "current_stage", int(current_stage))
 	cfg.set_value("progress", "xp", xp)
 	cfg.set_value("progress", "level", level)
@@ -903,18 +1344,32 @@ func save_game() -> void:
 	cfg.set_value("progress", "boss_first_kills", boss_first_kills)
 	cfg.set_value("progress", "opened_chests", opened_chests)
 	cfg.set_value("progress", "active_cosmetic_ids", active_cosmetic_ids)
-	cfg.save(SAVE_PATH)
+	cfg.set_value("progress", "raw_materials", raw_materials)
+	cfg.set_value("progress", "gathered_nodes", gathered_nodes)
+	cfg.set_value("progress", "discovered_landmarks", discovered_landmarks)
+	cfg.set_value("progress", "onboarding_completed", onboarding_completed)
+	cfg.set_value("progress", "onboarding_step", onboarding_step)
+	cfg.set_value("progress", "quest_objectives", quest_objectives)
+	var sm := get_node_or_null("/root/StoryManager")
+	if sm != null and sm.has_method("save_payload"):
+		cfg.set_value("story", "payload", sm.save_payload())
+	cfg.save(save_path)
 
 func load_game() -> bool:
 	if not has_save():
 		return false
 	var cfg := ConfigFile.new()
-	if cfg.load(SAVE_PATH) != OK:
+	if cfg.load(save_path) != OK:
+		return false
+	# Refuse a save written by a NEWER schema: fields it carries could not be
+	# interpreted as this build expects, and honoring them would corrupt state.
+	if int(cfg.get_value("meta", "schema_version", 0)) > SAVE_SCHEMA_VERSION:
 		return false
 	reset()
-	current_stage = cfg.get_value("progress", "current_stage", QuestStage.SEEK_SPRITE)
-	xp = cfg.get_value("progress", "xp", 0)
-	level = cfg.get_value("progress", "level", 1)
+	current_stage = clamp(int(cfg.get_value("progress", "current_stage",
+		QuestStage.SEEK_SPRITE)), 0, QuestStage.COMPLETE)
+	xp = clampi(int(cfg.get_value("progress", "xp", 0)), 0, 100_000_000)
+	level = clampi(int(cfg.get_value("progress", "level", 1)), 1, MAX_LEVEL)
 	hp = cfg.get_value("progress", "hp", MAX_HP_BASE)
 	shard_collected = cfg.get_value("progress", "shard_collected", false)
 	beacon_lit = cfg.get_value("progress", "beacon_lit", false)
@@ -935,9 +1390,10 @@ func load_game() -> bool:
 	else:
 		equipped_weapon = _get_default_weapon()
 	_refresh_skill_slots()
-	gold = int(cfg.get_value("progress", "gold",
-		int(cfg.get_value("progress", "embers", gold))))
-	diamonds = int(cfg.get_value("progress", "diamonds", diamonds))
+	gold = clampi(int(cfg.get_value("progress", "gold",
+		int(cfg.get_value("progress", "embers", gold)))), 0, MAX_CURRENCY)
+	diamonds = clampi(int(cfg.get_value("progress", "diamonds", diamonds)),
+		0, MAX_CURRENCY)
 	gold_changed.emit(gold)
 	diamonds_changed.emit(diamonds)
 	forged_armors.clear()
@@ -955,14 +1411,15 @@ func load_game() -> bool:
 	scans_changed.emit(scans_remaining)
 	var saved_customs = cfg.get_value("progress", "boss_customs", {})
 	boss_customs = saved_customs.duplicate(true) if saved_customs is Dictionary else {}
-	stat_points = int(cfg.get_value("progress", "stat_points", 0))
+	stat_points = clampi(int(cfg.get_value("progress", "stat_points", 0)),
+		0, MAX_STAT_POINTS)
 	var saved_stats = cfg.get_value("progress", "stats", {})
 	if saved_stats is Dictionary:
-		stat_str = int(saved_stats.get("str", 0))
-		stat_dex = int(saved_stats.get("dex", 0))
-		stat_vit = int(saved_stats.get("vit", 0))
-		stat_luk = int(saved_stats.get("luk", 0))
-		stat_end = int(saved_stats.get("end", 0))
+		stat_str = clampi(int(saved_stats.get("str", 0)), 0, MAX_STAT_VALUE)
+		stat_dex = clampi(int(saved_stats.get("dex", 0)), 0, MAX_STAT_VALUE)
+		stat_vit = clampi(int(saved_stats.get("vit", 0)), 0, MAX_STAT_VALUE)
+		stat_luk = clampi(int(saved_stats.get("luk", 0)), 0, MAX_STAT_VALUE)
+		stat_end = clampi(int(saved_stats.get("end", 0)), 0, MAX_STAT_VALUE)
 	max_hp = max_hp_total()
 	# Rebalance heal: bring HP up to the (possibly larger) capacity so the
 	# bigger health pool reads immediately after the base-HP change.
@@ -991,6 +1448,20 @@ func load_game() -> bool:
 	opened_chests = saved_chests.duplicate(true) if saved_chests is Dictionary else {}
 	var saved_ids = cfg.get_value("progress", "active_cosmetic_ids", {})
 	active_cosmetic_ids = saved_ids.duplicate(true) if saved_ids is Dictionary else {}
+	var saved_mats = cfg.get_value("progress", "raw_materials", {})
+	raw_materials = saved_mats.duplicate(true) if saved_mats is Dictionary else {}
+	var saved_gn = cfg.get_value("progress", "gathered_nodes", {})
+	gathered_nodes = saved_gn.duplicate(true) if saved_gn is Dictionary else {}
+	var saved_lm = cfg.get_value("progress", "discovered_landmarks", {})
+	discovered_landmarks = saved_lm.duplicate(true) if saved_lm is Dictionary else {}
+	onboarding_completed = bool(cfg.get_value("progress", "onboarding_completed", false))
+	onboarding_step = clampi(int(cfg.get_value("progress", "onboarding_step", 0)),
+		0, ONBOARDING_STEPS.size())
+	var saved_objectives = cfg.get_value("progress", "quest_objectives", [])
+	quest_objectives = _sanitize_quest_objectives(saved_objectives)
+	var sm := get_node_or_null("/root/StoryManager")
+	if sm != null and sm.has_method("load_payload"):
+		sm.load_payload(cfg.get_value("story", "payload", {}))
 	stats_changed.emit()
 	hp_changed.emit(hp, hp)
 	xp_changed.emit(xp, level)
@@ -999,9 +1470,33 @@ func load_game() -> bool:
 	weapon_changed.emit(equipped_weapon)
 	return true
 
+func _sanitize_quest_objectives(saved) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if not saved is Array:
+		return result
+	for raw in saved:
+		if not raw is Dictionary:
+			continue
+		var objective: Dictionary = raw
+		var objective_id := str(objective.get("id", ""))
+		var objective_type := str(objective.get("type", ""))
+		if objective_id.is_empty() or objective_type not in OBJECTIVE_TYPES:
+			continue
+		var target := maxi(1, int(objective.get("target_qty", 1)))
+		var current := clampi(int(objective.get("current_qty", 0)), 0, target)
+		result.append({
+			"id": objective_id,
+			"description": str(objective.get("description", objective_id)),
+			"type": objective_type,
+			"target_qty": target,
+			"current_qty": current,
+			"completed": bool(objective.get("completed", false)) or current >= target,
+		})
+	return result
+
 func delete_save() -> void:
 	if has_save():
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(save_path))
 
 
 # === Interface world-freeze (ref-counted) ===

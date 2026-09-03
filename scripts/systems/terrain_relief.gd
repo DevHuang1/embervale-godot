@@ -7,7 +7,10 @@ class_name TerrainRelief
 ## zones around every landmark. Faithful to the layout (paths, quest
 ## nodes, gates) so collision and quest ranges are unaffected.
 
-@export var subdivisions: int = 320
+## Keep the default grid below 65,535 vertices. Some mobile/compatibility
+## drivers otherwise truncate the indexed surface into rectangular strips.
+## 240 subdivisions produce 58,081 vertices.
+@export_range(32, 254, 1) var subdivisions: int = 240
 ## Flat-world presentation: hills and ridges are intentionally disabled.
 ## Keep the parameters exposed for saved-scene compatibility and future toggles.
 @export var ridge_amplitude: float = 0.0
@@ -59,7 +62,7 @@ const REALM_TERRAIN := {
 			"accent_strength": 0.35, "realm_tint": Color(0.88, 1.0, 0.72),
 			"realm_tint_strength": 0.16, "moisture_strength": 0.12,
 			"moss_color": Color(0.20, 0.52, 0.22), "moss_strength": 0.34,
-			"terrain_brightness": 1.34, "uv_world_scale": 0.82,
+			"terrain_brightness": 1.55, "uv_world_scale": 0.34, "tex_gain": 1.9,
 	},
 	"whispergrove": {
 		"grass_color": Color(0.32, 0.50, 0.22),
@@ -71,7 +74,7 @@ const REALM_TERRAIN := {
 			"accent_strength": 0.22, "realm_tint": Color(0.76, 0.98, 0.82),
 			"realm_tint_strength": 0.22, "moisture_strength": 0.28,
 			"moss_color": Color(0.28, 0.72, 0.40), "moss_strength": 0.58,
-			"terrain_brightness": 1.38, "uv_world_scale": 0.68,
+			"terrain_brightness": 1.52, "uv_world_scale": 0.30, "tex_gain": 1.9,
 	},
 	"mistfen": {
 		"grass_color": Color(0.18, 0.32, 0.26),
@@ -84,7 +87,7 @@ const REALM_TERRAIN := {
 			"accent_strength": 0.28, "realm_tint": Color(0.54, 0.78, 0.82),
 			"realm_tint_strength": 0.30, "moisture_strength": 0.86,
 			"moss_color": Color(0.22, 0.62, 0.58), "moss_strength": 0.48,
-			"terrain_brightness": 1.20, "uv_world_scale": 1.05,
+			"terrain_brightness": 1.38, "uv_world_scale": 0.33, "tex_gain": 2.0,
 	},
 	"heartwood": {
 		"grass_color": Color(0.36, 0.28, 0.16),
@@ -96,7 +99,7 @@ const REALM_TERRAIN := {
 			"accent_strength": 0.50, "realm_tint": Color(1.0, 0.62, 0.34),
 			"realm_tint_strength": 0.20, "moisture_strength": 0.08,
 			"moss_color": Color(0.48, 0.20, 0.08), "moss_strength": 0.22,
-			"terrain_brightness": 1.30, "uv_world_scale": 0.74,
+			"terrain_brightness": 1.48, "uv_world_scale": 0.31, "tex_gain": 1.8,
 	},
 	"moonfen": {
 		"grass_color": Color(0.28, 0.22, 0.42),
@@ -108,7 +111,7 @@ const REALM_TERRAIN := {
 			"accent_strength": 0.55, "realm_tint": Color(0.58, 0.46, 1.0),
 			"realm_tint_strength": 0.34, "moisture_strength": 0.42,
 			"moss_color": Color(0.30, 0.22, 0.62), "moss_strength": 0.34,
-			"terrain_brightness": 1.26, "uv_world_scale": 0.92,
+			"terrain_brightness": 1.42, "uv_world_scale": 0.32, "tex_gain": 1.9,
 	},
 }
 
@@ -130,7 +133,7 @@ func _ready() -> void:
 		_on_quality_level(qs.level)
 
 ## Realm material from assets/materials/terrain_<realm>.tres (binds the
-## scanned PBR layer sets); falls back to a bare shader material so the
+## stylized PBR layer sets); falls back to a bare shader material so the
 ## palette override below still produces valid ground.
 func _load_realm_material() -> ShaderMaterial:
 	var realm := _realm_id()
@@ -154,7 +157,8 @@ func _apply_palette(ground: ShaderMaterial) -> void:
 	if pal.has("dirt_amount"):
 		ground.set_shader_parameter("dirt_amount", pal["dirt_amount"])
 	for key in ["realm_tint", "realm_tint_strength", "moisture_strength",
-			"moss_color", "moss_strength", "terrain_brightness", "uv_world_scale"]:
+			"moss_color", "moss_strength", "terrain_brightness",
+			"uv_world_scale", "tex_gain"]:
 		if pal.has(key):
 			ground.set_shader_parameter(key, pal[key])
 	ground.set_shader_parameter("accent_color",
@@ -249,7 +253,7 @@ func prop_anchor_points() -> Array[Vector2]:
 	return _flatten_points
 
 func _build_mesh() -> ArrayMesh:
-	var n := subdivisions
+	var n := clampi(subdivisions, 32, 254)
 	var step := HALF_EXTENT * 2.0 / float(n)
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
@@ -304,7 +308,8 @@ func _build_heightfield_collision() -> void:
 		if child is CollisionShape3D:
 			child.queue_free()
 
-	const GRID := 320
+	# Collision does not need visual-grid density on this flat terrain.
+	const GRID := 128
 	var cell := (HALF_EXTENT * 2.0) / float(GRID)
 	var faces := PackedVector3Array()
 	faces.resize(GRID * GRID * 6)

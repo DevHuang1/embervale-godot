@@ -3,6 +3,8 @@ class_name SatchelUI
 
 ## === Field Satchel ===
 ## Inventory, forged gear + armor, the equipped weapon's skill kit
+## Albion Online-inspired UX with equipment slots, item detail panel,
+## and improved readability.
 
 @onready var game_state: GameState = GameState
 @onready var items_vbox: Container = $Root/VBox/ItemsList/ItemsVBox
@@ -20,6 +22,11 @@ var _equipment_row: HBoxContainer
 var _selected_item_label: Label
 var _stats_panel: PanelContainer
 var _stats_grid: GridContainer
+var _detail_panel: PanelContainer
+var _detail_name: Label
+var _detail_desc: Label
+var _detail_stats: Label
+var _detail_action: Button
 
 func _ready() -> void:
 	UiKit.apply_glass($Root)
@@ -95,6 +102,7 @@ func _build_albion_layout() -> void:
 	UiKit.style_label(_selected_item_label, &"Caption", 15)
 	_rebuild_equipment_loadout()
 	_build_stats_panel(root_vbox)
+	_build_detail_panel(root_vbox)
 
 func _build_stats_panel(root_vbox: VBoxContainer) -> void:
 	_stats_panel = PanelContainer.new()
@@ -109,6 +117,65 @@ func _build_stats_panel(root_vbox: VBoxContainer) -> void:
 	_stats_grid.add_theme_constant_override("v_separation", 2)
 	_stats_panel.add_child(_stats_grid)
 	_refresh_stats_panel()
+
+func _build_detail_panel(root_vbox: VBoxContainer) -> void:
+	_detail_panel = PanelContainer.new()
+	_detail_panel.name = "ItemDetail"
+	_detail_panel.custom_minimum_size = Vector2(0, 140)
+	_detail_panel.visible = false
+	_detail_panel.add_theme_stylebox_override("panel", UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON))
+	root_vbox.add_child(_detail_panel)
+
+	var hbox := HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 16)
+	_detail_panel.add_child(hbox)
+
+	var info_vbox := VBoxContainer.new()
+	info_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(info_vbox)
+
+	_detail_name = Label.new()
+	_detail_name.text = ""
+	UiKit.style_label(_detail_name, &"MenuTitle", 20)
+	info_vbox.add_child(_detail_name)
+
+	_detail_desc = Label.new()
+	_detail_desc.text = ""
+	_detail_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	UiKit.style_label(_detail_desc, &"Body", 15)
+	info_vbox.add_child(_detail_desc)
+
+	_detail_stats = Label.new()
+	_detail_stats.text = ""
+	UiKit.style_label(_detail_stats, &"Caption", 14)
+	info_vbox.add_child(_detail_stats)
+
+	_detail_action = Button.new()
+	_detail_action.text = "USE"
+	_detail_action.custom_minimum_size = Vector2(140, 48)
+	UiKit.style_primary_button(_detail_action)
+	hbox.add_child(_detail_action)
+
+func _show_item_detail(item: Dictionary) -> void:
+	_detail_panel.visible = true
+	_detail_name.text = str(item.get("name", "UNKNOWN"))
+	_detail_desc.text = str(item.get("desc", "No description available."))
+
+	var rarity_names := ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"]
+	var rarity := clampi(int(item.get("rarity", 0)), 0, 4)
+	var kind_names := ["Consumable", "Relic", "Quest"]
+	var kind := clampi(int(item.get("kind", 0)), 0, 2)
+	_detail_stats.text = "%s %s" % [rarity_names[rarity], kind_names[kind]]
+
+	if item.get("kind", 0) == 0 and item.get("quantity", 0) > 0:
+		_detail_action.visible = true
+		_detail_action.text = item.get("use_label", "USE")
+		_detail_action.pressed.connect(func():
+			_on_use_item(str(item.get("id", "")))
+			_detail_panel.visible = false
+		, CONNECT_ONE_SHOT)
+	else:
+		_detail_action.visible = false
 
 func _refresh_stats_panel() -> void:
 	if _stats_grid == null:
@@ -147,7 +214,25 @@ func _rebuild_equipment_loadout() -> void:
 func _add_equipment_slot(slot_name: String, gear: Dictionary, tint: Color) -> void:
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(230, 84)
-	panel.add_theme_stylebox_override("panel", UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON))
+
+	# Rarity-colored border
+	var rarity := clampi(int(gear.get("rarity", 0)), 0, 4)
+	var rarity_colors := [
+		Color(0.58, 0.67, 0.65),  # Common
+		Color(0.56, 0.67, 0.45),  # Uncommon
+		Color(0.4, 0.72, 0.7),    # Rare
+		Color(0.62, 0.48, 0.82),  # Epic
+		Color(0.96, 0.72, 0.30),  # Legendary
+	]
+	var border_color: Color
+	if not gear.is_empty():
+		border_color = rarity_colors[rarity]
+	else:
+		border_color = tint
+
+	var sb := UiKit.item_card_stylebox(border_color, not gear.is_empty())
+	panel.add_theme_stylebox_override("panel", sb)
+
 	var vbox := VBoxContainer.new()
 	panel.add_child(vbox)
 	var slot_label := Label.new()
@@ -160,7 +245,10 @@ func _add_equipment_slot(slot_name: String, gear: Dictionary, tint: Color) -> vo
 	UiKit.style_label(name_label, &"MenuTitle", 17)
 	vbox.add_child(name_label)
 	var stat_label := Label.new()
-	stat_label.text = "ATK %d  ·  DEF %d" % [int(gear.get("atk", 0)), int(gear.get("defense", 0))]
+	if not gear.is_empty():
+		stat_label.text = "ATK %d  ·  DEF %d" % [int(gear.get("atk", 0)), int(gear.get("defense", 0))]
+	else:
+		stat_label.text = "Visit the Ember Trader"
 	UiKit.style_label(stat_label, &"Caption", 14)
 	vbox.add_child(stat_label)
 	_equipment_row.add_child(panel)
@@ -168,37 +256,86 @@ func _add_equipment_slot(slot_name: String, gear: Dictionary, tint: Color) -> vo
 func _add_weapon_card(weapon: Dictionary) -> void:
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(210, 126)
-	panel.add_theme_stylebox_override("panel", UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON))
+
+	# Rarity-colored border
+	var rarity := clampi(int(weapon.get("rarity", 0)), 0, 4)
+	var rarity_colors := [
+		Color(0.58, 0.67, 0.65),  # Common
+		Color(0.56, 0.67, 0.45),  # Uncommon
+		Color(0.4, 0.72, 0.7),    # Rare
+		Color(0.62, 0.48, 0.82),  # Epic
+		Color(0.96, 0.72, 0.30),  # Legendary
+	]
+	var sb := UiKit.item_card_stylebox(rarity_colors[rarity],
+		str(game_state.equipped_weapon.get("id", "")) == str(weapon.get("id", "")))
+	panel.add_theme_stylebox_override("panel", sb)
+
 	var vbox := VBoxContainer.new()
 	panel.add_child(vbox)
 	var rarity_names := ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"]
-	var rarity := clampi(int(weapon.get("rarity", 0)), 0, 4)
 	var title := Label.new()
 	title.text = "%s  %s" % [str(weapon.get("glyph", "⚔")), str(weapon.get("name", "WEAPON"))]
 	UiKit.style_label(title, &"MenuTitle", 15)
 	vbox.add_child(title)
 	var meta := Label.new()
-	meta.text = "%s  ·  ATK %d" % [rarity_names[rarity], int(weapon.get("atk", 0))]
+	var equipped_atk := int(game_state.equipped_weapon.get("atk", 0))
+	var candidate_atk := int(weapon.get("atk", 0))
+	var delta := candidate_atk - equipped_atk
+	meta.text = "%s · ATK %d (%+d) · %s" % [rarity_names[rarity], candidate_atk,
+		delta, str(weapon.get("style", "gear")).to_upper()]
 	UiKit.style_label(meta, &"Caption", 13)
 	vbox.add_child(meta)
+	var identity := Label.new()
+	identity.text = str(weapon.get("passive_desc",
+		"%d bound skills" % weapon.get("skills", []).size()))
+	identity.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	UiKit.style_label(identity, &"Caption", 12)
+	vbox.add_child(identity)
 	var equip := Button.new()
-	equip.text = "EQUIP"
+	var weapon_id := str(weapon.get("id", ""))
+	var is_equipped := str(game_state.equipped_weapon.get("id", "")) == weapon_id
+	equip.text = "EQUIPPED" if is_equipped else "EQUIP"
+	equip.disabled = is_equipped
 	UiKit.style_secondary_button(equip)
 	equip.custom_minimum_size = Vector2(0, 42)
-	equip.pressed.connect(_on_equip_weapon.bind(str(weapon.get("id", ""))))
+	equip.pressed.connect(_on_equip_weapon.bind(weapon_id))
 	vbox.add_child(equip)
+	var upgrade_cost: Dictionary = game_state.get_weapon_upgrade_cost(weapon)
+	var upgrade := Button.new()
+	if bool(upgrade_cost.get("can_upgrade", false)):
+		upgrade.text = "UPGRADE +%d  ·  %d IRON / %d GOLD" % [
+			int(upgrade_cost.get("next_level", 1)),
+			int(upgrade_cost.get("material_cost", 0)),
+			int(upgrade_cost.get("gold_cost", 0))]
+		upgrade.pressed.connect(_on_upgrade_weapon.bind(weapon_id))
+	else:
+		upgrade.text = "MAXIMUM FORGE"
+		upgrade.disabled = true
+	UiKit.style_secondary_button(upgrade)
+	upgrade.custom_minimum_size = Vector2(0, 42)
+	vbox.add_child(upgrade)
 	items_vbox.add_child(panel)
 
 func _on_equip_weapon(weapon_id: String) -> void:
 	if game_state.equip_weapon_by_id(weapon_id):
-		_selected_item_label.text = "Equipped %s" % weapon_id
+		var weapon := game_state.equipped_weapon
+		_selected_item_label.text = "Equipped %s — %s" % [
+			str(weapon.get("name", weapon_id)),
+			str(weapon.get("passive_desc", "Its combat kit is now active."))]
 		_rebuild_equipment_loadout()
+
+func _on_upgrade_weapon(weapon_id: String) -> void:
+	var result: Dictionary = game_state.upgrade_weapon(weapon_id)
+	_selected_item_label.text = "ATK %d · upgrade +%d complete" % [
+		int(result.get("atk", 0)), int(result.get("level", 0))] \
+		if bool(result.get("success", false)) else str(result.get("message", "Upgrade failed."))
+	_rebuild_inventory()
 
 func _rebuild_inventory() -> void:
 	# Clear
 	for child in items_vbox.get_children():
 		child.queue_free()
-	
+
 	var total = 0
 	for weapon in game_state.forged_weapons:
 		_add_weapon_card(weapon)
@@ -206,48 +343,69 @@ func _rebuild_inventory() -> void:
 		total += item.quantity
 		if item.quantity > 0:
 			_add_item_row(item)
-	
+
 	count_label.text = "%d items carried" % total
 
 func _add_item_row(item: Dictionary) -> void:
 	var panel = PanelContainer.new()
 	panel.add_theme_constant_override("panel_inset", 14)
-	panel.add_theme_stylebox_override("panel", UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON))
-	
+
+	# Rarity-colored border
+	var rarity_colors := [
+		Color(0.58, 0.67, 0.65),  # Common
+		Color(0.56, 0.67, 0.45),  # Uncommon
+		Color(0.4, 0.72, 0.7),    # Rare
+		Color(0.62, 0.48, 0.82),  # Epic
+		Color(0.96, 0.72, 0.30),  # Legendary
+	]
+	var rarity := clampi(int(item.get("rarity", 0)), 0, 4)
+	var sb := UiKit.item_card_stylebox(rarity_colors[rarity])
+	panel.add_theme_stylebox_override("panel", sb)
+
 	var hbox = HBoxContainer.new()
 	panel.add_child(hbox)
-	
+
+	var glyph_well := PanelContainer.new()
+	glyph_well.custom_minimum_size = Vector2(64, 64)
+	glyph_well.add_theme_stylebox_override("panel", UiKit.icon_well_stylebox(rarity_colors[rarity]))
+	hbox.add_child(glyph_well)
 	var glyph = Label.new()
 	glyph.text = item.glyph
+	glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	glyph.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	UiKit.style_label(glyph, "", 26)
-	hbox.add_child(glyph)
-	
+	glyph_well.add_child(glyph)
+
 	var info = VBoxContainer.new()
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hbox.add_child(info)
-	
+
 	var name_label = Label.new()
 	name_label.text = "%s ×%d" % [item.name, item.quantity]
 	UiKit.style_label(name_label, &"MenuTitle", 18)
 	info.add_child(name_label)
-	
-	var rarity_colors = {
-		0: Color(0.58, 0.67, 0.65),  # Common
-		1: Color(0.56, 0.67, 0.45),  # Uncommon
-		2: Color(0.4, 0.72, 0.7),    # Rare
-	}
-	var rarity_color = rarity_colors.get(item.rarity, Color(1, 1, 1))
-	
+
+	var rarity_color = rarity_colors[rarity]
 	var meta_label = Label.new()
-	meta_label.text = "%s · %s" % [["Common", "Uncommon", "Rare"][item.rarity], ["Consumable", "Relic", "Quest"][item.kind]]
+	meta_label.text = "%s · %s" % [["Common", "Uncommon", "Rare", "Epic", "Legendary"][rarity], ["Consumable", "Relic", "Quest"][item.kind]]
 	UiKit.style_label(meta_label, &"Caption", 15)
 	meta_label.add_theme_color_override("font_color", rarity_color)
 	info.add_child(meta_label)
-	
+
 	var stats_label = Label.new()
-	stats_label.text = " · ".join(item.stats)
+	if item.get("stats") is Array:
+		stats_label.text = " · ".join(item.stats)
+	else:
+		stats_label.text = ""
 	UiKit.style_label(stats_label, &"Caption", 15)
 	info.add_child(stats_label)
-	
+
+	# Click to show detail panel
+	panel.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			_show_item_detail(item)
+	)
+
 	if item.kind == 0 and item.quantity > 0 and item.use_label:  # Consumable
 		var use_btn = Button.new()
 		use_btn.text = item.use_label
@@ -255,7 +413,7 @@ func _add_item_row(item: Dictionary) -> void:
 		UiKit.style_secondary_button(use_btn)
 		use_btn.pressed.connect(_on_use_item.bind(item.id))
 		hbox.add_child(use_btn)
-	
+
 	items_vbox.add_child(panel)
 
 func _on_inventory_changed(_notice: String = "", _count: int = 0) -> void:
@@ -303,7 +461,7 @@ func _rebuild_armor_row() -> void:
 	var row := HBoxContainer.new()
 	row.name = "ArmorRow"
 	forged_vbox.add_child(row)
-	
+
 	var armor: Dictionary = game_state.equipped_armor
 	var glyph := Label.new()
 	glyph.text = armor.get("glyph", "○") if not armor.is_empty() else "○"
@@ -323,46 +481,60 @@ func _rebuild_armor_row() -> void:
 	info.add_child(desc)
 
 ## One panel per skill in the equipped weapon's kit (1..3 slots)
+## Uses GridContainer for proper wrapping on narrow screens.
 func _rebuild_skill_kit() -> void:
 	_skill_cd_labels.clear()
 	for child in skill_kit.get_children():
 		child.queue_free()
-	
-	var skills: Array = game_state.equipped_weapon.get("skills", [])
-	for i in skills.size():
-		var sk: Dictionary = skills[i]
-		var panel := PanelContainer.new()
-		panel.add_theme_constant_override("panel_inset", 8)
-		skill_kit.add_child(panel)
-		
-		var vbox := VBoxContainer.new()
-		panel.add_child(vbox)
-		
-		var header := HBoxContainer.new()
-		vbox.add_child(header)
-		var rune := Label.new()
-		rune.text = "%d. %s" % [i + 1, sk.get("name", "?")]
-		var rune_tint := Color(0.62, 0.55, 0.96) \
-			if str(game_state.equipped_weapon.get("style")) == "magic" \
-			else Color(0.96, 0.84, 0.47)
-		UiKit.style_label(rune, "", 16)
-		rune.add_theme_color_override("font_color", rune_tint)
-		header.add_child(rune)
-		var cd := Label.new()
-		cd.text = game_state.get_slot_cooldown_text(i)
-		cd.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		cd.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		UiKit.style_label(cd, &"Caption", 14)
-		header.add_child(cd)
-		_skill_cd_labels.append(cd)
 
-		var desc := Label.new()
-		var fallback := "Cooldown %ds." % int(sk.get("cooldown", 0))
-		desc.text = str(sk.get("desc", fallback))
-		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		desc.custom_minimum_size = Vector2(180, 0)
-		UiKit.style_label(desc, &"Caption", 15)
-		vbox.add_child(desc)
+	var skills: Array = game_state.equipped_weapon.get("skills", [])
+	# Switch to GridContainer for better wrapping if 3 skills
+	if skills.size() >= 3:
+		var grid := GridContainer.new()
+		grid.columns = 3
+		grid.add_theme_constant_override("h_separation", 8)
+		grid.add_theme_constant_override("v_separation", 8)
+		skill_kit.add_child(grid)
+		for i in skills.size():
+			_add_skill_card(grid, skills[i], i)
+	else:
+		for i in skills.size():
+			_add_skill_card(skill_kit, skills[i], i)
+
+func _add_skill_card(parent: Container, sk: Dictionary, index: int) -> void:
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(180, 0)
+	panel.add_theme_constant_override("panel_inset", 8)
+	parent.add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	panel.add_child(vbox)
+
+	var header := HBoxContainer.new()
+	vbox.add_child(header)
+	var rune := Label.new()
+	rune.text = "%d. %s" % [index + 1, sk.get("name", "?")]
+	var rune_tint := Color(0.62, 0.55, 0.96) \
+		if str(game_state.equipped_weapon.get("style")) == "magic" \
+		else Color(0.96, 0.84, 0.47)
+	UiKit.style_label(rune, "", 16)
+	rune.add_theme_color_override("font_color", rune_tint)
+	header.add_child(rune)
+	var cd := Label.new()
+	cd.text = game_state.get_slot_cooldown_text(index)
+	cd.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	cd.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UiKit.style_label(cd, &"Caption", 14)
+	header.add_child(cd)
+	_skill_cd_labels.append(cd)
+
+	var desc := Label.new()
+	var fallback := "Cooldown %ds." % int(sk.get("cooldown", 0))
+	desc.text = str(sk.get("desc", fallback))
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.custom_minimum_size = Vector2(160, 0)
+	UiKit.style_label(desc, &"Caption", 14)
+	vbox.add_child(desc)
 
 func _on_close_pressed() -> void:
 	visible = false

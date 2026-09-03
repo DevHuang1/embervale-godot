@@ -114,6 +114,9 @@ func _ready() -> void:
 		if lbl:
 			lbl.visible = false
 	_build_lock_chip()
+	var onboarding_hint := game_state.get_onboarding_hint()
+	if not onboarding_hint.is_empty():
+		field_note.text = "✦ %s" % onboarding_hint
 
 func _build_elemental_hud() -> void:
 	var combat_vbox := combat_card.get_node_or_null("CombatVBox")
@@ -217,6 +220,12 @@ func _update_quest_ledger() -> void:
 	chapter_label.text = copy.chapter
 	title_label.text = copy.title
 	instruction_label.text = copy.instruction
+
+	var sm := get_node_or_null("/root/StoryManager")
+	if sm != null and sm.has_method("hud_objective_lines"):
+		var lines: Array[String] = sm.hud_objective_lines()
+		if lines.size() > 0:
+			instruction_label.text = instruction_label.text + "\n\n" + "\n".join(lines)
 
 func _update_level_xp() -> void:
 	level_badge.text = "LV %02d" % game_state.level

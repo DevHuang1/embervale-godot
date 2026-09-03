@@ -17,15 +17,24 @@ func _ready() -> void:
 	var visual := boss.get_node_or_null("Visual") as Node3D
 	_assert_true(visual != null, "boss Visual node exists before phase transition")
 	_assert_true(boss.is_visible_in_tree(), "boss is visible before phase transition")
-	boss.take_damage(460, Vector3.ZERO, false)
+	_assert_true(int(boss.thorn_guard) == int(boss.thorn_guard_max),
+		"Matriarch begins with a full breakable thorn guard")
+	# Damage amounts calibrated to max_hp = 1100: crossing 0.7 / 0.3 / 0.1
+	# thresholds (770 / 330 / 110) into phase 2 -> 3 -> enrage.
+	boss.take_damage(660, Vector3.ZERO, false)
 	await _wait_frames(4)
+	_assert_true(boss.vulnerability_timer > 0.0,
+		"breaking the thorn guard opens a bounded vulnerability window")
 	_assert_phase_state(boss, visual, start_pos, 1, "phase two")
 
+	var before_exposed_hit: int = boss.hp
 	boss.take_damage(100, Vector3.ZERO, false)
 	await _wait_frames(4)
+	_assert_true(before_exposed_hit - boss.hp == 125,
+		"exposed crown applies the documented 1.25x damage window")
 	_assert_phase_state(boss, visual, start_pos, 2, "phase three")
 
-	boss.take_damage(160, Vector3.ZERO, false)
+	boss.take_damage(220, Vector3.ZERO, false)
 	await _wait_frames(4)
 	_assert_phase_state(boss, visual, start_pos, 3, "enrage")
 	print("phase probe start=", start_pos, " after=", boss.global_position,

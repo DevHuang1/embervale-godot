@@ -24,6 +24,21 @@ var _bed_bus := -1
 var _cue_live := 0
 const CUE_PLAYER_CAP := 14
 
+## Every transient one-shot voice joins this group so stop_one_shots() can
+## hard-stop and free them (teardown must never leave an AudioServer playback
+## alive after its host scene is gone).
+const ONE_SHOT_GROUP := "audio_one_shot"
+
+# === Synchronized boss score (three fixed voices, one shared loop clock) ===
+const BOSS_SCORE_DURATION := 12.0
+const BOSS_SCORE_LAYER_CAP := 3
+var _boss_score_players: Array[AudioStreamPlayer] = []
+var _boss_score_streams: Array[AudioStreamWAV] = []
+var _boss_score_targets: Array[float] = [-14.0, -60.0, -60.0]
+var boss_score_phase: int = -1
+var boss_score_active := false
+var _boss_score_fading := false
+
 # === Synth cue engine state ===
 const SYNTH_SR := 44100
 var cue_config: AudioCueConfig = null
@@ -38,6 +53,7 @@ func _ready() -> void:
 	_load_cue_config()
 
 func _process(delta: float) -> void:
+	_update_boss_score(delta)
 	# Ease the combat bed toward its intensity target; stop when idle long.
 	if _combat_player == null:
 		return
@@ -56,6 +72,8 @@ func _process(delta: float) -> void:
 ## intensity; `night` muffles the bed's highs (dread reads better muffled).
 func update_combat_beds(intensity: float, night: float = 0.0) -> void:
 	_bed_target_db = lerpf(-52.0, -8.0, pow(clampf(intensity, 0.0, 1.0), 1.4))
+	if boss_score_active:
+		_bed_target_db = minf(_bed_target_db, -24.0)
 	if intensity <= 0.02:
 		_bed_live = false
 		return
@@ -115,6 +133,122 @@ func _render_combat_bed(b: PackedFloat32Array, duration: float) -> void:
 		var bt := fposmod(rng.randf(), duration - 0.3)
 		_tone_at(b, bt, 0.18, 1244.5 + rng.randf() * 300.0, 0.012, 12.0, 2)
 
+## Starts all three layers on the same audio frame. Repeated calls reuse the
+## cached streams and never create more voices.
+func start_boss_score(_boss_id: String = "matriarch") -> void:
+	if _boss_score_streams.is_empty():
+		for layer in BOSS_SCORE_LAYER_CAP:
+			var samples := PackedFloat32Array()
+			samples.resize(int(BOSS_SCORE_DURATION * SYNTH_SR))
+			_render_boss_score_layer(samples, layer)
+			var stream := _to_wav(samples)
+			stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+			stream.loop_begin = 0
+			stream.loop_end = samples.size()
+			_boss_score_streams.append(stream)
+	while _boss_score_players.size() < BOSS_SCORE_LAYER_CAP:
+		var player := AudioStreamPlayer.new()
+		player.name = "BossScoreLayer%d" % _boss_score_players.size()
+		player.bus = "Music" if AudioServer.get_bus_index("Music") >= 0 else "Master"
+		player.process_mode = Node.PROCESS_MODE_ALWAYS
+		add_child(player)
+		_boss_score_players.append(player)
+	for i in BOSS_SCORE_LAYER_CAP:
+		var player := _boss_score_players[i]
+		player.stream = _boss_score_streams[i]
+		player.volume_db = -60.0
+		player.play(0.0)
+	boss_score_active = true
+	_boss_score_fading = false
+	set_boss_score_phase(0)
+
+func set_boss_score_phase(phase: int) -> void:
+	if _boss_score_players.is_empty():
+		return
+	boss_score_phase = clampi(phase, 0, 3)
+	match boss_score_phase:
+		0: _boss_score_targets = [-14.0, -40.0, -60.0]
+		1: _boss_score_targets = [-13.0, -22.0, -42.0]
+		2: _boss_score_targets = [-12.0, -15.0, -22.0]
+		_: _boss_score_targets = [-10.0, -9.0, -11.0]
+
+func reset_boss_score() -> void:
+	if boss_score_active:
+		set_boss_score_phase(0)
+
+func finish_boss_score(victory: bool = true) -> void:
+	if not _boss_score_players.is_empty():
+		_boss_score_targets = [-60.0, -60.0, -60.0]
+		_boss_score_fading = true
+	if victory:
+		play_boss_victory_stinger()
+
+func stop_boss_score_immediate() -> void:
+	for player in _boss_score_players:
+		if is_instance_valid(player):
+			player.stop()
+			player.volume_db = -60.0
+	boss_score_active = false
+	_boss_score_fading = false
+	boss_score_phase = -1
+
+func _update_boss_score(delta: float) -> void:
+	if _boss_score_players.is_empty():
+		return
+	var all_silent := true
+	for i in mini(_boss_score_players.size(), _boss_score_targets.size()):
+		var player := _boss_score_players[i]
+		if not is_instance_valid(player):
+			continue
+		player.volume_db = move_toward(player.volume_db,
+			_boss_score_targets[i], delta * 26.0)
+		if player.volume_db > -55.0:
+			all_silent = false
+	if _boss_score_fading and all_silent:
+		stop_boss_score_immediate()
+
+## Loop-locked layers: root drone, bark-heart percussion, then thorn ostinato.
+func _render_boss_score_layer(buffer: PackedFloat32Array, layer: int) -> void:
+	var duration := BOSS_SCORE_DURATION
+	match layer:
+		0:
+			for i in buffer.size():
+				var t := i / float(SYNTH_SR)
+				var swell := 0.72 + 0.28 * sin(TAU * t / duration)
+				buffer[i] = 0.052 * swell * (sin(TAU * 55.0 * t)
+					+ 0.56 * sin(TAU * 82.5 * t + 0.4)
+					+ 0.28 * sin(TAU * 110.0 * t + 1.0))
+		1:
+			for beat in 8:
+				var at := float(beat) * 1.5
+				_sweep_tone(buffer, at, 0.22, 76.0, 43.0, 0.30, 10.0)
+				_sweep_tone(buffer, at + 0.20, 0.16, 62.0, 38.0, 0.22, 12.0)
+		2:
+			var notes := [220.0, 233.333333, 165.0, 220.0]
+			for step in 24:
+				var at := float(step) * 0.5
+				_tone_at(buffer, at, 0.24, notes[step % notes.size()],
+					0.042, 9.0, 3)
+
+## Escalating boss stage roar: pitch and dissonance rise with the stage.
+## Bounded voice count (4 chimes max) so stage transitions never flood the bus.
+func play_boss_phase_roar(phase_rank: int = 0) -> void:
+	var rank := clampi(phase_rank, 0, 3)
+	var base: float = [55.0, 65.4, 77.8, 92.5][rank]
+	play_chime(base, 0.0, 0.34 + 0.04 * float(rank), 0.07)
+	play_chime(base * 1.5, 0.03, 0.28, 0.05)
+	if rank >= 2:
+		play_chime(base * 2.02, 0.06, 0.24, 0.04)  # dissonant beat = fury
+	if rank >= 3:
+		play_chime(base * 3.01, 0.09, 0.2, 0.035)
+
+func play_boss_victory_stinger() -> void:
+	play_chime(220.0, 0.0, 0.32, 0.055)
+	await get_tree().create_timer(0.12, true, false, true).timeout
+	play_chime(329.63, 0.0, 0.34, 0.06)
+	await get_tree().create_timer(0.14, true, false, true).timeout
+	play_chime(440.0, 0.0, 0.48, 0.065)
+
 func _load_cue_config() -> void:
 	if ResourceLoader.exists("res://assets/audio/audio_config.tres"):
 		cue_config = load("res://assets/audio/audio_config.tres")
@@ -149,6 +283,7 @@ func save_settings() -> void:
 # === Procedural Chimes (embervale-style) ===
 func play_chime(frequency: float, start_offset: float = 0.0, duration: float = 0.15, volume: float = 0.05, wave_type: int = AudioStreamWAV.FORMAT_16_BITS) -> void:
 	var player = AudioStreamPlayer.new()
+	player.add_to_group(ONE_SHOT_GROUP)
 	add_child(player)
 	
 	# Generate simple sine chime as 16-bit stereo PCM
@@ -271,6 +406,16 @@ func play_heal() -> void:
 const SFX_CACHE_DIR := "user://sfx_cache"
 const SFX_PACK_URL := "https://opengameart.org/sites/default/files/rpg_sound_pack.zip"
 const SFX_ZIP_PREFIX := "RPG Sound Pack/battle/"
+## Known foley variant ids — the exact set referenced by play_fx() call sites.
+## The lazy download only ever reads these fixed entries from the pack.
+const SOUND_VARIANTS := [
+	"swipe_mid", "swipe_heavy", "swipe_light",
+	"swing", "swing2", "swing3", "magic1", "spell",
+]
+## Bounds for the download and the extracted wav, so a mutated oversized remote
+## pack cannot inflate memory or write an oversized blob into the user cache.
+const SFX_PACK_MAX_BYTES := 32 * 1024 * 1024
+const SFX_ENTRY_MAX_BYTES := 8 * 1024 * 1024
 var _sfx_fetching := {}
 
 func play_fx(variants: Array, volume_db: float = -6.0) -> void:
@@ -300,6 +445,7 @@ func _play_wav_from_disk(path: String, volume_db: float) -> AudioStreamPlayer:
 	if wav == null:
 		return null
 	var player := AudioStreamPlayer.new()
+	player.add_to_group(ONE_SHOT_GROUP)
 	add_child(player)
 	player.stream = wav
 	player.volume_db = volume_db + linear_to_db(sfx_volume)
@@ -312,6 +458,11 @@ func _play_wav_from_disk(path: String, volume_db: float) -> AudioStreamPlayer:
 ## returns; a future call retries from where it left off.
 func _fetch_sfx(name: String) -> void:
 	if _sfx_fetching.has(name):
+		return
+	# `name` must be one of the known variant ids so the zip entry we read is a
+	# fixed, bundled path — never a path assembled from player input.
+	if name.is_empty() or name.count("/") > 0 or not _known_sfx_variant(name):
+		_sfx_release(name)
 		return
 	_sfx_fetching[name] = true
 	DirAccess.make_dir_recursive_absolute(SFX_CACHE_DIR)
@@ -329,20 +480,34 @@ func _fetch_sfx(name: String) -> void:
 		if int(resp[0]) != HTTPRequest.RESULT_SUCCESS or int(resp[1]) != 200:
 			_sfx_release(name)
 			return
+		var body: PackedByteArray = resp[3]
+		# Guard the lazy pack download so a mutated/oversized remote payload
+		# cannot inflate memory or write an oversized blob to the user cache.
+		if body.size() > SFX_PACK_MAX_BYTES:
+			push_warning("AudioManager: sound pack download rejected (too large)")
+			_sfx_release(name)
+			return
 		var wf := FileAccess.open(zip_path, FileAccess.WRITE)
-		wf.store_buffer(resp[3])
+		wf.store_buffer(body)
 		wf.close()
 	var zipped := "%s/%s.wav" % [SFX_ZIP_PREFIX, name]
 	var zip := ZIPReader.new()
 	var ok_open := zip.open(zip_path) == OK
 	if ok_open and zip.file_exists(zipped):
-		var out := "%s/%s.wav" % [SFX_CACHE_DIR, name]
-		var of := FileAccess.open(out, FileAccess.WRITE)
-		of.store_buffer(zip.read_file(zipped))
-		of.close()
+		var wav := zip.read_file(zipped)
+		if wav.size() > SFX_ENTRY_MAX_BYTES:
+			push_warning("AudioManager: sfx entry rejected (too large) -> %s" % name)
+		elif wav.size() > 0:
+			var out := "%s/%s.wav" % [SFX_CACHE_DIR, name]
+			var of := FileAccess.open(out, FileAccess.WRITE)
+			of.store_buffer(wav)
+			of.close()
 	if ok_open:
 		zip.close()
 	_sfx_release(name)
+
+func _known_sfx_variant(name: String) -> bool:
+	return SOUND_VARIANTS.has(name)
 
 func _sfx_release(name: String, node_to_free: Node = null) -> void:
 	_sfx_fetching.erase(name)
@@ -559,6 +724,7 @@ func play_cue(cue_name: String) -> void:
 	var stream: AudioStreamWAV = streams[randi() % streams.size()]
 	var cfg := _cue_cfg(cue_name)
 	var player := AudioStreamPlayer.new()
+	player.add_to_group(ONE_SHOT_GROUP)
 	add_child(player)
 	player.stream = stream
 	player.volume_db = float(cfg.get("volume_db", -8.0))
@@ -574,9 +740,46 @@ func _on_cue_finished(player: AudioStreamPlayer) -> void:
 	_cue_live = maxi(0, _cue_live - 1)
 	player.queue_free()
 
+## Hard cleanup for every transient one-shot voice: cues, chimes, positional
+## synth-at players and disk foley. Stops playback immediately (so the
+## AudioServer releases its AudioStreamPlaybackWAV instead of leaking it when
+## the host scene dies mid-play) and queues the players for freeing.
+## Idempotent; safe to call during scene teardown or on quit.
+func stop_one_shots() -> void:
+	if not is_inside_tree():
+		return
+	for node in get_tree().get_nodes_in_group(ONE_SHOT_GROUP):
+		var player := node as Node
+		if not is_instance_valid(player):
+			continue
+		if player is AudioStreamPlayer:
+			(player as AudioStreamPlayer).stop()
+		elif player is AudioStreamPlayer3D:
+			(player as AudioStreamPlayer3D).stop()
+		player.queue_free()
+	# Freed one-shots never reach `finished`, so release the voice counter
+	# here or the CUE_PLAYER_CAP would stay consumed for the session.
+	_cue_live = 0
+
+## Full session/realm teardown: looping beds (ambient + reactive combat bed),
+## boss score voices, and every one-shot. Anything still playing at quit or
+## realm swap would leak its AudioStreamPlaybackWAV even though the player
+## node itself is freed correctly, so teardown must stop playback first.
+func stop_all_playback() -> void:
+	stop_one_shots()
+	if music_player != null and is_instance_valid(music_player):
+		music_player.stop()
+		ambient_playing = false
+	if _combat_player != null and is_instance_valid(_combat_player):
+		_combat_player.stop()
+		_bed_live = false
+	stop_boss_score_immediate()
+
 ## Positional playback for world-space events (stomps, bursts, deaths).
 func play_synth_at(host: Node, cue_name: String, volume_db_offset := 0.0) -> void:
-	if host == null or not host.is_inside_tree():
+	# is_instance_valid first: a freed host reference must fall back to the
+	# non-positional cue instead of erroring on is_inside_tree().
+	if host == null or not is_instance_valid(host) or not host.is_inside_tree():
 		play_cue(cue_name)
 		return
 	var streams := _get_cue_streams(cue_name)
@@ -584,6 +787,7 @@ func play_synth_at(host: Node, cue_name: String, volume_db_offset := 0.0) -> voi
 		return
 	var cfg := _cue_cfg(cue_name)
 	var p := AudioStreamPlayer3D.new()
+	p.add_to_group(ONE_SHOT_GROUP)
 	host.add_child(p)
 	p.global_position = host.global_position
 	p.stream = streams[randi() % streams.size()]
@@ -976,6 +1180,7 @@ func _to_wav(b: PackedFloat32Array) -> AudioStreamWAV:
 # === Streamed SFX (for imported files) ===
 func play_sfx(resource_path: String, volume_db: float = 0.0) -> AudioStreamPlayer:
 	var player = AudioStreamPlayer.new()
+	player.add_to_group(ONE_SHOT_GROUP)
 	add_child(player)
 	player.stream = load(resource_path)
 	player.volume_db = volume_db + linear_to_db(sfx_volume)

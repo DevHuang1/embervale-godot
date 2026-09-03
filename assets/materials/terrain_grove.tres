@@ -1,24 +1,61 @@
-[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+[gd_resource type="ShaderMaterial" load_steps=14 format=3]
 
-[ext_resource type="Shader" path="res://assets/shaders/terrain_moss.gdshader" id="1_terrain"]
+[ext_resource type="Shader" path="res://assets/shaders/terrain_ground.gdshader" id="1_sh"]
+[ext_resource type="Texture2D" path="res://assets/textures/samples/sample_grass.png" id="2_ga"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/grass/normal.jpg" id="3_gn"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/grass/roughness.jpg" id="4_gr"]
+[ext_resource type="Texture2D" path="res://assets/textures/samples/sample_dirt_a.png" id="5_da"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/dirt/normal.jpg" id="6_dn"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/dirt/roughness.jpg" id="7_dr"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/sand/albedo.jpg" id="8_sa"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/sand/normal.jpg" id="9_sn"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/sand/roughness.jpg" id="10_sr"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/albedo.jpg" id="11_ra"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/normal.jpg" id="12_rn"]
+[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/roughness.jpg" id="13_rr"]
 
 [resource]
 render_priority = 0
-shader = ExtResource("1_terrain")
-shader_parameter/tile_scale = 16.0
-shader_parameter/macro_scale = 0.9
-shader_parameter/detail_scale = 46.0
-shader_parameter/moss_color = Vector3(0.22, 0.38, 0.14)
-shader_parameter/grass_color = Vector3(0.42, 0.64, 0.20)
-shader_parameter/dry_grass_color = Vector3(0.56, 0.49, 0.20)
-shader_parameter/soil_color = Vector3(0.23, 0.20, 0.13)
-shader_parameter/grass_coverage = 0.62
-shader_parameter/damp_amount = 0.28
-shader_parameter/dry_patch_amount = 0.18
-shader_parameter/roughness_min = 0.68
-shader_parameter/roughness_max = 0.95
-shader_parameter/bump_strength = 0.78
-shader_parameter/terrain_brightness = 1.28
-shader_parameter/ember_fleck_color = Vector3(0.96, 0.72, 0.29)
+shader = ExtResource("1_sh")
+shader_parameter/tile_scale = 0.18
+shader_parameter/slope_start = 0.55
+shader_parameter/slope_end = 0.85
+shader_parameter/patch_scale = 6.0
+shader_parameter/dirt_amount = 0.40
+shader_parameter/speckle_strength = 0.35
+shader_parameter/uv_world_scale = 1.1
+shader_parameter/tex_blend = 0.85
+shader_parameter/sand_amount = 0.25
+shader_parameter/height_contrast = 1.65
+shader_parameter/pom_mode = 2
+shader_parameter/depth_scale = 0.018
+shader_parameter/pom_near = 10.0
+shader_parameter/normal_strength = 1.05
+shader_parameter/bump_strength = 0.42
+shader_parameter/detail_scale = 0.85
+shader_parameter/roughness = 1.0
+shader_parameter/grass_color = Color(0.38, 0.56, 0.22, 1)
+shader_parameter/grass_dry = Color(0.56, 0.49, 0.20, 1)
+shader_parameter/dirt_color = Color(0.30, 0.24, 0.16, 1)
+shader_parameter/stone_color = Color(0.38, 0.38, 0.35, 1)
+shader_parameter/crest_color = Color(0.45, 0.44, 0.40, 1)
+shader_parameter/accent_color = Color(0.96, 0.72, 0.29, 1)
+shader_parameter/accent_strength = 0.30
+shader_parameter/terrain_brightness = 1.55
+shader_parameter/tex_gain = 1.9
+shader_parameter/tex_saturation = 0.85
+shader_parameter/detail_warp_amount = 0.9
 shader_parameter/ember_fleck_density = 0.045
 shader_parameter/ember_fleck_intensity = 0.85
+shader_parameter/grass_tex = ExtResource("2_ga")
+shader_parameter/grass_norm = ExtResource("3_gn")
+shader_parameter/grass_rough = ExtResource("4_gr")
+shader_parameter/dirt_tex = ExtResource("5_da")
+shader_parameter/dirt_norm = ExtResource("6_dn")
+shader_parameter/dirt_rough = ExtResource("7_dr")
+shader_parameter/sand_tex = ExtResource("8_sa")
+shader_parameter/sand_norm = ExtResource("9_sn")
+shader_parameter/sand_rough = ExtResource("10_sr")
+shader_parameter/rock_tex = ExtResource("11_ra")
+shader_parameter/rock_norm = ExtResource("12_rn")
+shader_parameter/rock_rough = ExtResource("13_rr")

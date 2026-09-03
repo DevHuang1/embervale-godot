@@ -180,7 +180,7 @@ static func spawn_slash(context: Node, pos: Vector3,
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.albedo_texture = _slash_texture()
+	material.albedo_texture = sprite_texture("crescent")
 	material.albedo_color = color
 	material.disable_receive_shadows = true
 	quad.material = material
@@ -735,7 +735,7 @@ static func spawn_core_flash(context: Node, pos: Vector3,
 	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	material.albedo_texture = radial_glow_texture()
+	material.albedo_texture = sprite_texture("impact_star")
 	material.albedo_color = color
 	material.disable_receive_shadows = true
 	quad.material = material
@@ -781,7 +781,7 @@ static func _get_quad_mesh() -> QuadMesh:
 		material.vertex_color_use_as_albedo = true
 		material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 		material.disable_receive_shadows = true
-		material.albedo_texture = radial_glow_texture()
+		material.albedo_texture = sprite_texture("spark")
 		_quad_mesh.material = material
 	return _quad_mesh
 
@@ -823,33 +823,31 @@ static func _fx_root(node: Node) -> Node:
 	var scene := node.get_tree().current_scene
 	return scene if scene else node.get_tree().root
 
-# === Ember scorch decal ===
-# A soft ground-hugging ember patch that expands and fades. Uses the same
-# additive radial-glow sprite as every other CombatFx quad, so it never
-# renders as a hard-edged black square (MUL blend quad is unreliable across
-# renderers). Read as a warm scorch mark, not a shadow blob.
+# === Ground impact mark ===
+# Procedural clipped scorch + branching fissures. The shader discards outside
+# its irregular radial boundary, so the supporting quad cannot appear as a
+# square on compatibility/mobile renderers.
 static func spawn_decal(context: Node, pos: Vector3, radius: float = 0.8,
 		color: Color = Color(0.92, 0.5, 0.2, 0.55), duration: float = 2.4,
-		ground_y: float = 0.06) -> void:
+		ground_y: float = 0.06, style: String = "burn") -> void:
 	if context == null or not context.is_inside_tree():
 		return
 	var quad := QuadMesh.new()
 	quad.size = Vector2(radius * 2.0, radius * 2.0)
-	var material := StandardMaterial3D.new()
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.billboard_mode = BaseMaterial3D.BILLBOARD_DISABLED
-	material.albedo_texture = radial_glow_texture()
-	material.albedo_color = color
-	material.disable_receive_shadows = true
+	var material := ShaderMaterial.new()
+	material.shader = load("res://assets/shaders/ground_impact.gdshader")
+	material.set_shader_parameter("impact_color", color)
+	material.set_shader_parameter("char_color", Color(0.045, 0.022, 0.015, 0.82))
+	material.set_shader_parameter("seed", fmod(absf(pos.x * 1.73 + pos.z * 2.41), 17.0) + 1.0)
+	material.set_shader_parameter("crack_amount", 1.0 if style == "crack" else 0.72)
+	material.set_shader_parameter("burn_amount", 0.28 if style == "crack" else 0.88)
 	quad.material = material
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.mesh = quad
 	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_fx_root(context).add_child(mesh_instance)
 	mesh_instance.global_position = Vector3(pos.x, pos.y + ground_y, pos.z)
-	# Lay flat against the ground with a soft radial falloff; bloom outward.
+	# Lay flat just above terrain; random rotation makes repeated hits distinct.
 	mesh_instance.rotation.x = -PI / 2.0
 	mesh_instance.rotation.z = randf() * TAU
 	mesh_instance.scale = Vector3(0.6, 0.6, 1.0)
@@ -858,7 +856,9 @@ static func spawn_decal(context: Node, pos: Vector3, radius: float = 0.8,
 	tween.tween_property(mesh_instance, "scale",
 		Vector3(1.0, 1.0, 1.0), duration * 0.4) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(material, "albedo_color:a", 0.0, duration) \
+	tween.tween_method(func(value: float):
+		if is_instance_valid(material):
+			material.set_shader_parameter("fade", value), 1.0, 0.0, duration) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tween.chain().tween_callback(mesh_instance.queue_free)
 

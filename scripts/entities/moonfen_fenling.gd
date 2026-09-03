@@ -41,6 +41,50 @@ func _enter_mire_phase() -> void:
 		Color(0.25, 0.78, 1.0, 0.9), 24, 5.0, 0.55, 0.16)
 	game_state.quest_progress.emit("A Fenling tears open the mire phase — its thorns move with the tide.")
 
+## Fenling signature overrides the bramble burst with a cold tide-volley:
+## 4 frost spikes chase the player's position, and the mire phase doubles
+## the pressure with an extra spike and colder rings.
+func _perform_bramble_burst(player: Node3D) -> void:
+	if not burst_active:
+		return
+	burst_active = false
+	burst_timer = burst_cooldown
+	if sfx_profile == "vanilla":
+		audio.play_enemy_special()
+	else:
+		audio.play_profile_cue(sfx_profile, "cast")
+	# Cold announce ring at the sprite itself, then the missile volley.
+	CombatFx.spawn_ring(self, global_position + Vector3(0, 0.4, 0),
+		burst_radius, Color(0.3, 0.8, 1.0, 0.5), 0.7)
+	_frost_volley(player)
+
+func _frost_volley(player: Node3D) -> void:
+	if sfx_profile == "vanilla":
+		audio.play_enemy_telegraph()
+	else:
+		audio.play_profile_cue(sfx_profile, "telegraph")
+	var count := 4
+	if mire_phase:
+		count += 1
+	for s in count:
+		var target_pos: Vector3 = player.global_position
+		var damage := clampi(burst_damage - 1 + (1 if mire_phase else 0), 3, 8)
+		var timer := get_tree().create_timer(0.28 + 0.26 * s, false)
+		timer.timeout.connect(_frost_spike.bind(player, target_pos, damage))
+
+func _frost_spike(player: Node3D, pos: Vector3, damage: int) -> void:
+	if is_defeated or player == null or not is_instance_valid(player):
+		return
+	var cold: Color = Color(0.45, 0.88, 1.0, 0.9) if mire_phase else Color(0.62, 0.85, 1.0, 0.85)
+	CombatFx.spawn_ring(self, pos, 2.0, Color(0.35, 0.82, 1.0, 0.6), 0.45)
+	CombatFx.spawn_burst(self, pos + Vector3(0, 0.3, 0), cold, 12, 4.8, 0.4, 0.15)
+	if pos.distance_to(player.global_position) <= 2.0:
+		if player.has_method("is_airborne") and player.is_airborne():
+			return
+		if player.has_method("take_damage"):
+			player.take_damage(damage, pos.direction_to(player.global_position))
+			FloatingText.spawn_on_entity(player, str(damage), Color(0.55, 0.85, 1.0))
+
 func _update_visuals(delta: float) -> void:
 	super._update_visuals(delta)
 	if mire_phase:

@@ -10,7 +10,7 @@ script = ExtResource("1_0")
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-color = Color(0.006, 0.012, 0.02, 0.76)
+color = Color(0.002, 0.005, 0.010, 0.90)
 
 [node name="Center" type="CenterContainer" parent="Root"]
 layout_mode = 1

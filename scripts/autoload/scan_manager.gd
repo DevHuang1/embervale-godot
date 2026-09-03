@@ -15,11 +15,16 @@ signal scan_failed(error: String)
 static var reveal_stamp_msec: int = -999999
 
 @export var scan_duration: float = 2.5
+@export var skill_range_grid: Array = []
+
 @export var min_confidence: float = 0.65
 
 var last_capture: Image = null
 var last_relic: RelicData = null
-var _capture_viewport: SubViewport = null
+var skill_range: SkillRange = null
+
+func _ready() -> void:
+	skill_range = SkillRange.new()
 
 # Coco-SSD style classes mapped to weapons
 const CLASS_TO_WEAPON: Dictionary = {
@@ -41,9 +46,7 @@ const RARITY_WEIGHTS: Array = [
 var camera_feed: CameraFeed = null
 var is_scanning: bool = false
 var scan_tween: Tween = null
-
-func _ready() -> void:
-	pass
+var _capture_viewport: SubViewport = null
 
 func start_scan() -> void:
 	if is_scanning:

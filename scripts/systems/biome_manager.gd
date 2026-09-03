@@ -102,7 +102,9 @@ func _spawn_biome_pack(origin: Vector3) -> void:
 func _build_gates() -> void:
 	var dests: Array = _biome_def.get("gates", [])
 	var origin := player_spawn.global_position
-	# Deterministic per-biome spread so terrain flattening matches the gates
+	var route: Array = RealmLayoutData.profile(_visual_realm_id()).get("route", [])
+	# Gates occupy authored route endpoints, keeping travel flow distinct while
+	# falling back to the old deterministic ring for incomplete profiles.
 	var base_angle := float(abs(int(biome_id.hash())) % 628) / 100.0
 	for i in dests.size():
 		var dest := str(dests[i])
@@ -110,31 +112,85 @@ func _build_gates() -> void:
 			continue
 		var angle := base_angle + TAU * float(i) / maxf(float(dests.size()), 1.0)
 		var pos := origin + Vector3(cos(angle) * 15.0, 0, sin(angle) * 15.0)
+		if route.size() > 1:
+			var route_index := 1 + (i * maxi(route.size() - 2, 1)) / maxi(dests.size(), 1)
+			pos = route[mini(route_index, route.size() - 1)]
 		pos.y = 0.1
 		_gates.append({"node": _make_monolith(dest, pos), "dest": dest})
 
 func _make_monolith(dest: String, pos: Vector3) -> Node3D:
 	var gate := Node3D.new()
 	gate.name = "Gate_%s" % dest
-	var slab := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = Vector3(1.7, 3.4, 0.5)
-	slab.mesh = box
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.13, 0.12, 0.11)
-	mat.emission_enabled = true
 	var dest_tint: Color = Bestiary.REALMS.get(dest, {}).get("mist_tint", Color(0.7, 0.8, 0.75))
-	mat.emission = dest_tint
-	mat.emission_energy_multiplier = 0.55
-	slab.material_override = mat
-	gate.add_child(slab)
+	var stone_mat := StandardMaterial3D.new()
+	stone_mat.albedo_texture = load("res://assets/textures/stylized/rock/albedo.png")
+	stone_mat.normal_enabled = true
+	stone_mat.normal_texture = load("res://assets/textures/stylized/rock/normal.png")
+	stone_mat.roughness_texture = load("res://assets/textures/stylized/rock/roughness.png")
+	stone_mat.albedo_color = Color(0.32, 0.30, 0.28).lerp(dest_tint, 0.16)
+	stone_mat.roughness = 0.9
+	var arch := Node3D.new()
+	arch.name = "GroundedTravelArch"
+	gate.add_child(arch)
+	var stones: Array[Vector4] = [
+		Vector4(-1.05, 0.48, 0.62, -0.10), Vector4(1.05, 0.48, 0.66, 0.12),
+		Vector4(-0.95, 1.25, 0.58, -0.14), Vector4(0.92, 1.28, 0.60, 0.13),
+		Vector4(-0.62, 2.02, 0.55, -0.12), Vector4(0.58, 2.06, 0.57, 0.10),
+		Vector4(0.0, 2.34, 0.61, 0.02),
+	]
+	for i in stones.size():
+		var spec: Vector4 = stones[i]
+		var rock := MeshInstance3D.new()
+		rock.name = "ArchStone_%d" % i
+		var rock_mesh := SphereMesh.new()
+		rock_mesh.radius = 0.68
+		rock_mesh.height = 1.0
+		rock_mesh.radial_segments = 7
+		rock_mesh.rings = 4
+		rock.mesh = rock_mesh
+		rock.position = Vector3(spec.x, spec.y, 0.0)
+		rock.scale = Vector3(spec.z * 1.12, spec.z, spec.z * 0.72)
+		rock.rotation = Vector3(spec.w, float(i) * 0.73, -spec.w * 0.5)
+		rock.material_override = stone_mat
+		arch.add_child(rock)
+	var threshold := MeshInstance3D.new()
+	threshold.name = "TravelThreshold"
+	var threshold_mesh := CylinderMesh.new()
+	threshold_mesh.top_radius = 1.16
+	threshold_mesh.bottom_radius = 1.32
+	threshold_mesh.height = 0.12
+	threshold_mesh.radial_segments = 9
+	threshold.mesh = threshold_mesh
+	threshold.scale.z = 0.52
+	threshold.position.y = 0.03
+	threshold.material_override = stone_mat
+	arch.add_child(threshold)
+	var veil := MeshInstance3D.new()
+	veil.name = "PortalMistVolume"
+	var veil_mesh := SphereMesh.new()
+	veil_mesh.radius = 1.0
+	veil_mesh.height = 2.0
+	veil_mesh.radial_segments = 12
+	veil_mesh.rings = 6
+	veil.mesh = veil_mesh
+	veil.position = Vector3(0, 1.18, 0.18)
+	veil.scale = Vector3(0.70, 0.96, 0.10)
+	var veil_mat := StandardMaterial3D.new()
+	veil_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	veil_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	veil_mat.albedo_color = Color(dest_tint.r, dest_tint.g, dest_tint.b, 0.22)
+	veil_mat.emission_enabled = true
+	veil_mat.emission = dest_tint
+	veil_mat.emission_energy_multiplier = 0.45
+	veil.material_override = veil_mat
+	arch.add_child(veil)
 	var label := Label3D.new()
 	label.text = str(Bestiary.WORLD_REALMS.get(dest, {}).get("name", dest)).to_upper()
-	label.font_size = 96
+	label.font_size = 62
 	label.pixel_size = 0.004
 	label.modulate = dest_tint
-	label.outline_size = 18
-	label.position = Vector3(0, 2.2, 0.3)
+	label.outline_size = 11
+	label.position = Vector3(0, 3.05, 0.3)
 	gate.add_child(label)
 	var glow := OmniLight3D.new()
 	glow.light_color = dest_tint
@@ -185,7 +241,8 @@ func _build_arena() -> void:
 	label.position = Vector3(0, 2.3, 0)
 	_arena_stone.add_child(label)
 	add_child(_arena_stone)
-	_arena_stone.global_position = player_spawn.global_position + Vector3(0, 0.1, -20)
+	_arena_stone.global_position = RealmLayoutData.profile(_visual_realm_id()).get(
+		"arena", player_spawn.global_position + Vector3(0, 0.1, -20))
 
 func _engage_arena_boss() -> void:
 	var boss_id := str(_biome_def.get("boss_id", ""))

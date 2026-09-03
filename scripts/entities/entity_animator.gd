@@ -30,14 +30,18 @@ signal anim_event(event_name: String)
 @export var foot_r: Node3D
 @export var lantern: Node3D
 
+@export var anim_state: AnimState = AnimState.IDLE
+@export var move_ratio: float = 0.0
+@export var attack_style: String = "slash"
+@export var dodge_ratio: float = 0.0
+@export var swing_serial: int = 0
+
 @export var walk_frequency: float = 8.0
 @export var stride_amplitude: float = 0.8
 @export var arm_amplitude: float = 0.45
 @export var bob_amplitude: float = 0.045
 @export var hop_height: float = 0.16
 
-var anim_state: AnimState = AnimState.IDLE
-var move_ratio: float = 0.0
 var phase: float = randf() * TAU
 
 var _time: float = 0.0
@@ -46,6 +50,15 @@ var _hit_tween: Tween
 var _base_arm_l_rot := Vector3.ZERO
 var _base_arm_r_rot := Vector3.ZERO
 var _base_visual_pos := Vector3.ZERO
+var _base_forearm_l_rot := Vector3.ZERO
+var _base_forearm_r_rot := Vector3.ZERO
+var _base_visual_scale := Vector3.ONE
+# Swing clock shared with the weapon arc (Hero._animate_weapon_swing): the
+# body's windup/snap/settle mirror the arc's anticipation/contact/recovery so
+# arm, blade, impact FX, and damage all land on one beat.
+var _swing_windup := 0.12
+var _swing_snap := 0.05
+var _swing_settle := 0.18
 
 # Lantern pendulum spring state
 var _pend_angle := Vector2.ZERO
@@ -77,9 +90,6 @@ var _air_target := 0.0
 # Gait ramp ("striding out"): sustained direction lengthens the stride
 var gait_ramp := 0.0
 
-# Dodge limb tuck (0..1 fed from hero.dodge_timer)
-var dodge_ratio := 0.0
-
 # Foot planting: per-foot ground correction fed by hero raycasts
 var _foot_dy := Vector2.ZERO       # x = left, y = right
 var _foot_pitch := Vector2.ZERO    # slope-matched pitch per foot
@@ -92,19 +102,22 @@ var _head_pitch := 0.0
 
 # Attack variety: alternate swing sides
 var _swing_right := true
+## Bumped on every trigger_attack so authored-rig bridges can restart the
+## swing clip per press, even when the cue id repeats.
 
 # 3-hit melee combo (BIPED slash only): strike -> reverse strike -> overhead
 # finisher. Chaining requires the next swing to start within COMBO_WINDOW
 # seconds after the previous recovery ends; the finisher always resets.
 var combo_step := 0
-const COMBO_WINDOW := 0.6
+const COMBO_WINDOW :=      0.7
 var _combo_clock := 0.0
 var _impact_emitted := false
 var _in_recovery := false
 
 # Weapon style drives the one-shot pose kit: "slash" swings a blade,
 # "magic" raises and snaps a casting arm for detonations
-var attack_style := "slash"
+var authored_attack_cue := ""
+var authored_impact_fraction := 0.48
 
 func _ready() -> void:
 	if arm_l:
@@ -113,6 +126,11 @@ func _ready() -> void:
 		_base_arm_r_rot = arm_r.rotation
 	if visual_root:
 		_base_visual_pos = visual_root.position
+		_base_visual_scale = visual_root.scale
+	if forearm_l:
+		_base_forearm_l_rot = forearm_l.rotation
+	if forearm_r:
+		_base_forearm_r_rot = forearm_r.rotation
 	if foot_l:
 		_base_foot_pos[foot_l] = foot_l.position
 	if foot_r:
@@ -321,11 +339,24 @@ func notify_land(impact: float = 0.0) -> void:
 		knees.parallel().tween_property(leg_r, "rotation:x", 0.0, 0.26) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
 
+## Feed the swing clock from the same source as the weapon arc so the body's
+## windup/snap/settle land exactly on the arc's anticipation/contact/recovery.
+func set_swing_clock(total: float, anticipation: float, contact: float,
+		recovery: float) -> void:
+	# Per-phase floor keeps sub-3-frame phases from strobing on low-end mobile.
+	_swing_windup = maxf(total * anticipation, 0.045)
+	_swing_snap = maxf(total * contact, 0.045)
+	_swing_settle = maxf(total * recovery, 0.045)
+
 func trigger_attack(kind: String = "") -> void:
 	_cancel_fidget()
 	if _dead_check():
 		return
+	swing_serial += 1
 	anim_state = AnimState.ATTACK
+	authored_attack_cue = _authored_cue_for_attack(kind)
+	authored_impact_fraction = float(WeaponCombatProfiles.for_style(attack_style) \
+		.get("authored_impact_fraction", 0.48))
 	_impact_emitted = false
 	if _attack_tween and _attack_tween.is_valid():
 		_attack_tween.kill()
@@ -353,6 +384,16 @@ func trigger_attack(kind: String = "") -> void:
 			_play_pounce()
 		Mode.BRUTE:
 			_play_slam()
+
+func _authored_cue_for_attack(kind: String) -> String:
+	match kind:
+		"heavy": return "heavy"
+		"buff": return "buff"
+		"hurl", "sky": return "cast"
+		"spin": return "heavy"
+	if attack_style == "magic":
+		return "cast"
+	return "light_%d" % clampi(combo_step + 1, 1, 3)
 
 func trigger_hit() -> void:
 	_cancel_fidget()
@@ -413,8 +454,10 @@ func _animate_biped(delta: float) -> void:
 	# writes below must stand down or they visually cancel the tween.
 	var acting := (_attack_tween != null and _attack_tween.is_valid()) or _in_recovery
 
-	# Dodge-roll squash→stretch: compress through the mid-roll, ease out clean
-	if visual_root:
+	# Dodge-roll squash→stretch: compress through the mid-roll, ease out clean.
+	# Stands down while a swing owns the body so the impact squash tween and
+	# the locomotion lerp never fight over visual_root.scale.
+	if visual_root and (tuck > 0.001 or not acting):
 		var sq := sin(clampf(tuck, 0.0, 1.0) * PI) if tuck > 0.001 else 0.0
 		var sq_target := Vector3(1.0 + 0.13 * sq, 1.0 - 0.17 * sq, 1.0 + 0.13 * sq)
 		visual_root.scale = visual_root.scale.lerp(sq_target, minf(delta * 14.0, 1.0))
@@ -541,7 +584,9 @@ func _update_head(delta: float) -> void:
 	var tp := 0.0
 	if not busy:
 		var look_dir := Vector3.ZERO
-		var enemy: Node3D = GameState.enemy_target
+		var game_state := get_node_or_null("/root/GameState")
+		var enemy := game_state.get("enemy_target") as Node3D \
+			if game_state != null else null
 		if enemy != null and is_instance_valid(enemy):
 			look_dir = (enemy.global_position + Vector3(0, 0.6, 0)
 				- head.global_position).normalized()
@@ -640,42 +685,70 @@ func _play_heavy() -> void:
 	_attack_tween = create_tween()
 	_attack_tween.set_parallel(true)
 	# Wind-up: both arms coil high, torso twists back, weight drops
-	_attack_tween.tween_property(arm_r, "rotation:x", br.x - 3.0, 0.30) \
+	_attack_tween.tween_property(arm_r, "rotation:x", br.x - 3.0, 0.26) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_attack_tween.tween_property(arm_l, "rotation:x", bl.x - 2.7, 0.30) \
+	_attack_tween.tween_property(arm_l, "rotation:x", bl.x - 2.7, 0.26) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	if torso:
-		_attack_tween.tween_property(torso, "rotation:y", 0.35, 0.30) \
+	if forearm_l:
+		_attack_tween.tween_property(forearm_l, "rotation:x",
+			_base_forearm_l_rot.x - 1.4, 0.26) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		_attack_tween.tween_property(torso, "rotation:x", -0.16, 0.30)
+	if forearm_r:
+		_attack_tween.tween_property(forearm_r, "rotation:x",
+			_base_forearm_r_rot.x - 1.4, 0.26) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if torso:
+		_attack_tween.tween_property(torso, "rotation:y", 0.35, 0.26) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		_attack_tween.tween_property(torso, "rotation:x", -0.16, 0.26)
 	if visual_root:
 		_attack_tween.tween_property(visual_root, "position:y",
-			_base_visual_pos.y - 0.05, 0.30)
-	_attack_tween.chain().tween_interval(0.09)
+			_base_visual_pos.y - 0.05, 0.26)
+	_attack_tween.chain().tween_interval(0.08)
 	# Crash: full-body overhead slam
-	_attack_tween.chain().tween_property(arm_r, "rotation:x", br.x + 1.05, 0.09) \
+	_attack_tween.chain().tween_property(arm_r, "rotation:x", br.x + 1.05, 0.08) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	_attack_tween.parallel().tween_property(arm_l, "rotation:x", bl.x + 0.95, 0.09) \
+	_attack_tween.parallel().tween_property(arm_l, "rotation:x", bl.x + 0.95, 0.08) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	if forearm_l:
+		_attack_tween.parallel().tween_property(forearm_l, "rotation:x",
+			_base_forearm_l_rot.x + 1.1, 0.08) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	if forearm_r:
+		_attack_tween.parallel().tween_property(forearm_r, "rotation:x",
+			_base_forearm_r_rot.x + 1.1, 0.08) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	if torso:
-		_attack_tween.parallel().tween_property(torso, "rotation:y", -0.18, 0.09)
-		_attack_tween.parallel().tween_property(torso, "rotation:x", 0.26, 0.09)
+		_attack_tween.parallel().tween_property(torso, "rotation:y", -0.18, 0.08)
+		_attack_tween.parallel().tween_property(torso, "rotation:x", 0.26, 0.08)
 	if visual_root:
 		_attack_tween.parallel().tween_property(visual_root, "position:z",
-			_base_visual_pos.z + 0.28, 0.09).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+			_base_visual_pos.z + 0.28, 0.08).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	_attack_tween.chain().tween_callback(func():
 		_in_recovery = true
 		_emit_impact()
+		if visual_root:
+			# Heavier squash than a light swing — the slam lands.
+			visual_root.scale = _base_visual_scale * Vector3(1.08, 0.88, 1.08)
+			var sq := create_tween()
+			sq.tween_property(visual_root, "scale", _base_visual_scale, 0.16) \
+				.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		anim_event.emit("heavy_impact"))
 	# Long committed recovery
-	_attack_tween.tween_property(arm_r, "rotation:x", br.x, 0.42) \
+	_attack_tween.tween_property(arm_r, "rotation:x", br.x, 0.36) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_attack_tween.parallel().tween_property(arm_l, "rotation:x", bl.x, 0.42)
+	_attack_tween.parallel().tween_property(arm_l, "rotation:x", bl.x, 0.36)
+	if forearm_l:
+		_attack_tween.parallel().tween_property(forearm_l, "rotation:x",
+			_base_forearm_l_rot.x, 0.36)
+	if forearm_r:
+		_attack_tween.parallel().tween_property(forearm_r, "rotation:x",
+			_base_forearm_r_rot.x, 0.36)
 	if torso:
-		_attack_tween.parallel().tween_property(torso, "rotation", Vector3.ZERO, 0.40)
+		_attack_tween.parallel().tween_property(torso, "rotation", Vector3.ZERO, 0.34)
 	if visual_root:
 		_attack_tween.parallel().tween_property(visual_root, "position:z",
-			_base_visual_pos.z, 0.34)
+			_base_visual_pos.z, 0.30)
 	_attack_tween.chain().tween_callback(func():
 		_in_recovery = false
 		combo_step = 0
@@ -932,22 +1005,41 @@ func _play_swing_opening() -> void:
 		return
 	var base_drive := _base_arm_r_rot if _swing_right else _base_arm_l_rot
 	var base_guard := _base_arm_l_rot if _swing_right else _base_arm_r_rot
-	var twist := 0.22 if _swing_right else -0.22
-	# Telegraphed three-phase swing: anticipation -> impact -> recovery,
-	# alternating sides, with a small root lunge synced to the impact frame
+	var drive_forearm := forearm_r if _swing_right else forearm_l
+	var base_drive_forearm := _base_forearm_r_rot if _swing_right else _base_forearm_l_rot
+	var side := 1.0 if _swing_right else -1.0
+	var twist := 0.22 * side
+	# Telegraphed three-phase swing: anticipation -> impact -> recovery.
+	# Every wind-up tweener runs in parallel so the torso, arms, forearm coil
+	# and weight shift share one clock; the forearm whips through a beat late
+	# (overlapping action) and the root shifts weight into the strike.
 	_attack_tween = create_tween()
 	if visual_root:
-		_attack_tween.parallel().tween_property(visual_root, "rotation:y", twist, 0.16) \
+		_attack_tween.parallel().tween_property(visual_root, "rotation:y", twist, _swing_windup) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_attack_tween.tween_property(drive, "rotation:x", base_drive.x - 2.5, 0.16) \
+		_attack_tween.parallel().tween_property(visual_root, "position:x",
+			_base_visual_pos.x + 0.05 * side, _swing_windup) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		_attack_tween.parallel().tween_property(visual_root, "rotation:z",
+			-0.05 * side, _swing_windup) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_attack_tween.parallel().tween_property(drive, "rotation:x", base_drive.x - 2.5, _swing_windup) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	if guard:
 		_attack_tween.parallel().tween_property(guard, "rotation:x",
-			base_guard.x - 0.55, 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_attack_tween.tween_property(drive, "rotation:x", base_drive.x + 1.15, 0.06) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+			base_guard.x - 0.55, _swing_windup).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if drive_forearm:
+		_attack_tween.parallel().tween_property(drive_forearm, "rotation:x",
+			base_drive_forearm.x - 1.5, _swing_windup) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_attack_tween.tween_property(drive, "rotation:x", base_drive.x + 1.15, _swing_snap) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	if drive_forearm:
+		_attack_tween.parallel().tween_property(drive_forearm, "rotation:x",
+			base_drive_forearm.x + 1.7, _swing_snap) \
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	_attack_tween.tween_callback(_swing_impact.bind(twist, 0.14))
-	_finish_swing(base_drive, base_guard, drive, guard, 0.22)
+	_finish_swing(base_drive, base_guard, drive, guard, _swing_settle)
 	_swing_right = not _swing_right
 
 ## Combo step 1: mirrored reverse diagonal — opposite torso twist, deeper
@@ -961,20 +1053,37 @@ func _play_swing_reverse() -> void:
 		return
 	var base_drive := _base_arm_r_rot if _swing_right else _base_arm_l_rot
 	var base_guard := _base_arm_l_rot if _swing_right else _base_arm_r_rot
+	var drive_forearm := forearm_r if _swing_right else forearm_l
+	var base_drive_forearm := _base_forearm_r_rot if _swing_right else _base_forearm_l_rot
+	var side := 1.0 if _swing_right else -1.0
 	var twist := -0.30 if _swing_right else 0.30
 	_attack_tween = create_tween()
 	if visual_root:
-		_attack_tween.parallel().tween_property(visual_root, "rotation:y", twist, 0.18) \
+		_attack_tween.parallel().tween_property(visual_root, "rotation:y", twist, _swing_windup) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_attack_tween.tween_property(drive, "rotation:x", base_drive.x - 2.8, 0.18) \
+		_attack_tween.parallel().tween_property(visual_root, "position:x",
+			_base_visual_pos.x - 0.06 * side, _swing_windup) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		_attack_tween.parallel().tween_property(visual_root, "rotation:z",
+			0.06 * side, _swing_windup) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_attack_tween.parallel().tween_property(drive, "rotation:x", base_drive.x - 2.8, _swing_windup) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	if guard:
 		_attack_tween.parallel().tween_property(guard, "rotation:x",
-			base_guard.x - 0.70, 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_attack_tween.tween_property(drive, "rotation:x", base_drive.x + 1.25, 0.07) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+			base_guard.x - 0.70, _swing_windup).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if drive_forearm:
+		_attack_tween.parallel().tween_property(drive_forearm, "rotation:x",
+			base_drive_forearm.x - 1.7, _swing_windup) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_attack_tween.tween_property(drive, "rotation:x", base_drive.x + 1.25, _swing_snap) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	if drive_forearm:
+		_attack_tween.parallel().tween_property(drive_forearm, "rotation:x",
+			base_drive_forearm.x + 1.9, _swing_snap) \
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	_attack_tween.tween_callback(_swing_impact.bind(twist, 0.20))
-	_finish_swing(base_drive, base_guard, drive, guard, 0.24)
+	_finish_swing(base_drive, base_guard, drive, guard, _swing_settle)
 	_swing_right = not _swing_right
 
 ## Combo step 2 finisher: both arms coil overhead (~0.22s), then slam down
@@ -986,34 +1095,66 @@ func _play_overhead_finisher() -> void:
 		return
 	var bl := _base_arm_l_rot
 	var br := _base_arm_r_rot
+	# Finisher runs the shared clock at a heavier pace: slower coil,
+	# committed crash, long settle. Both forearms coil with the arms and
+	# whip down together with the slam.
+	var windup := _swing_windup * 1.5
+	var snap := _swing_snap * 1.2
+	var settle := _swing_settle * 1.55
 	_attack_tween = create_tween()
 	_attack_tween.set_parallel(true)
-	_attack_tween.tween_property(arm_r, "rotation:x", br.x - 2.9, 0.22) \
+	_attack_tween.tween_property(arm_r, "rotation:x", br.x - 2.9, windup) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_attack_tween.tween_property(arm_l, "rotation:x", bl.x - 2.9, 0.22) \
+	_attack_tween.tween_property(arm_l, "rotation:x", bl.x - 2.9, windup) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if forearm_l:
+		_attack_tween.tween_property(forearm_l, "rotation:x",
+			_base_forearm_l_rot.x - 1.6, windup) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if forearm_r:
+		_attack_tween.tween_property(forearm_r, "rotation:x",
+			_base_forearm_r_rot.x - 1.6, windup) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	if torso:
-		_attack_tween.tween_property(torso, "rotation:x", -0.14, 0.22)
+		_attack_tween.tween_property(torso, "rotation:x", -0.14, windup)
 	if visual_root:
 		_attack_tween.tween_property(visual_root, "position:y",
-			_base_visual_pos.y - 0.04, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_attack_tween.chain().tween_property(arm_r, "rotation:x", br.x + 0.95, 0.07) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	_attack_tween.parallel().tween_property(arm_l, "rotation:x", bl.x + 0.95, 0.07) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+			_base_visual_pos.y - 0.05, windup).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_attack_tween.chain().tween_property(arm_r, "rotation:x", br.x + 0.95, snap) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	_attack_tween.parallel().tween_property(arm_l, "rotation:x", bl.x + 0.95, snap) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	if forearm_l:
+		_attack_tween.parallel().tween_property(forearm_l, "rotation:x",
+			_base_forearm_l_rot.x + 1.3, snap) \
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	if forearm_r:
+		_attack_tween.parallel().tween_property(forearm_r, "rotation:x",
+			_base_forearm_r_rot.x + 1.3, snap) \
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	if torso:
-		_attack_tween.parallel().tween_property(torso, "rotation:x", 0.20, 0.07)
+		_attack_tween.parallel().tween_property(torso, "rotation:x", 0.20, snap)
 	if visual_root:
 		_attack_tween.parallel().tween_property(visual_root, "position:y",
-			_base_visual_pos.y, 0.07).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+			_base_visual_pos.y, snap).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	_attack_tween.chain().tween_callback(_finisher_snap)
-	_attack_tween.tween_property(arm_r, "rotation:x", br.x, 0.34) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_attack_tween.parallel().tween_property(arm_l, "rotation:x", bl.x, 0.34) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_attack_tween.tween_property(arm_r, "rotation:x", br.x, settle) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_attack_tween.parallel().tween_property(arm_l, "rotation:x", bl.x, settle) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if forearm_l:
+		_attack_tween.parallel().tween_property(forearm_l, "rotation:x",
+			_base_forearm_l_rot.x, settle) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if forearm_r:
+		_attack_tween.parallel().tween_property(forearm_r, "rotation:x",
+			_base_forearm_r_rot.x, settle) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	if torso:
-		_attack_tween.parallel().tween_property(torso, "rotation:x", 0.0, 0.30)
-	_attack_tween.tween_callback(func():
+		_attack_tween.parallel().tween_property(torso, "rotation:x", 0.0, settle)
+	# chain(): the swing only counts as complete AFTER the settle batch ends —
+	# in parallel mode a bare callback would fire at settle-start.
+	_attack_tween.chain().tween_callback(func():
 		_in_recovery = false
 		_on_swing_completed())
 
@@ -1023,14 +1164,23 @@ func _swing_impact(twist: float, lunge: float) -> void:
 	_in_recovery = true
 	_emit_impact()
 	if visual_root:
+		# Impact squash: one-frame compress, spring back with a slight
+		# overshoot — weight landing, body-local only (camera untouched).
+		visual_root.scale = _base_visual_scale * Vector3(1.06, 0.92, 1.06)
 		var back := create_tween()
-		back.tween_property(visual_root, "rotation:y", 0.0, 0.24) \
+		back.tween_property(visual_root, "scale", _base_visual_scale, 0.14) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		back.parallel().tween_property(visual_root, "rotation:y", 0.0, 0.20) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		back.parallel().tween_property(visual_root, "position:x", _base_visual_pos.x, 0.17) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		back.parallel().tween_property(visual_root, "rotation:z", 0.0, 0.17) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		back.parallel().tween_property(visual_root, "position:z",
-			_base_visual_pos.z + lunge, 0.07) \
+			_base_visual_pos.z + lunge, 0.06) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		back.chain().tween_property(visual_root, "position:z",
-			_base_visual_pos.z, 0.20) \
+			_base_visual_pos.z, 0.17) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 ## Finisher snap: deeper committed lunge than a normal swing.
@@ -1038,12 +1188,15 @@ func _finisher_snap() -> void:
 	_in_recovery = true
 	_emit_impact()
 	if visual_root:
+		visual_root.scale = _base_visual_scale * Vector3(1.08, 0.88, 1.08)
 		var back := create_tween()
-		back.tween_property(visual_root, "position:z",
-			_base_visual_pos.z + 0.24, 0.08) \
+		back.tween_property(visual_root, "scale", _base_visual_scale, 0.16) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		back.parallel().tween_property(visual_root, "position:z",
+			_base_visual_pos.z + 0.24, 0.07) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		back.chain().tween_property(visual_root, "position:z",
-			_base_visual_pos.z, 0.26) \
+			_base_visual_pos.z, 0.22) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 func _emit_impact() -> void:
@@ -1057,10 +1210,18 @@ func _emit_impact() -> void:
 func _finish_swing(base_drive: Vector3, base_guard: Vector3, drive: Node3D,
 		guard: Node3D, recovery: float) -> void:
 	_attack_tween.tween_property(drive, "rotation:x", base_drive.x, recovery) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	if guard:
 		_attack_tween.parallel().tween_property(guard, "rotation:x",
-			base_guard.x, recovery).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			base_guard.x, recovery).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if forearm_l:
+		_attack_tween.parallel().tween_property(forearm_l, "rotation:x",
+			_base_forearm_l_rot.x, recovery) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if forearm_r:
+		_attack_tween.parallel().tween_property(forearm_r, "rotation:x",
+			_base_forearm_r_rot.x, recovery) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	_attack_tween.tween_callback(func():
 		_in_recovery = false
 		_on_swing_completed())
@@ -1100,11 +1261,43 @@ func cancel_recovery() -> void:
 	if arm_r:
 		blend.tween_property(arm_r, "rotation", _base_arm_r_rot, 0.15) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if forearm_l:
+		blend.tween_property(forearm_l, "rotation", _base_forearm_l_rot, 0.15) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if forearm_r:
+		blend.tween_property(forearm_r, "rotation", _base_forearm_r_rot, 0.15) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	if visual_root:
 		blend.tween_property(visual_root, "rotation:y", 0.0, 0.15)
 		blend.tween_property(visual_root, "position:z", _base_visual_pos.z, 0.15)
 	anim_state = AnimState.IDLE
 	_advance_combo()
+
+## Encounter-reset hook. Cancels every one-shot writer and returns the
+## procedural/authored state provider to a clean idle without recreating nodes.
+func reset_to_idle() -> void:
+	if _attack_tween and _attack_tween.is_valid():
+		_attack_tween.kill()
+	if _hit_tween and _hit_tween.is_valid():
+		_hit_tween.kill()
+	_attack_tween = null
+	_hit_tween = null
+	_cancel_fidget()
+	anim_state = AnimState.IDLE
+	_in_recovery = false
+	_impact_emitted = false
+	combo_step = 0
+	_combo_clock = 0.0
+	authored_attack_cue = ""
+	move_ratio = 0.0
+	dodge_ratio = 0.0
+	if arm_l:
+		arm_l.rotation = _base_arm_l_rot
+	if arm_r:
+		arm_r.rotation = _base_arm_r_rot
+	if visual_root:
+		visual_root.position = _base_visual_pos
+		visual_root.rotation = Vector3.ZERO
 
 ## Staff/magic one-shot: raise the drive arm overhead with a charge,
 ## snap down on the impact frame, settle back. Alternates arms like swings.

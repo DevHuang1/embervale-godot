@@ -38,6 +38,18 @@ func _run_validation() -> void:
     if forge != null:
         _assert_true(forge.get_node_or_null("Root/VBox/ElementSwitcher") != null, "forge exposes checkpoint element switching")
     _assert_true(owner.get_node_or_null("RealmExpansion/EmbervaultDungeon") != null, "Embervault dungeon is built")
+    var cave_facade := owner.get_node_or_null(
+        "RealmExpansion/EmbervaultEntrance/GroundedCaveFacade")
+    _assert_true(cave_facade != null, "surface cave has a grounded rock facade")
+    if cave_facade != null:
+        _assert_true(cave_facade.get_node_or_null("RecessedCaveMouth") != null,
+            "surface cave has a visible recessed mouth")
+        _assert_true(cave_facade.find_children("FacadeBoulder_*", "MeshInstance3D").size() >= 7,
+            "surface cave mouth is formed by an authored boulder arch")
+    var dungeon_walls := owner.get_node_or_null(
+        "RealmExpansion/EmbervaultDungeon/GroundedDungeonWalls")
+    _assert_true(dungeon_walls != null and dungeon_walls.get_child_count() >= 20,
+        "dungeon uses grounded wall segments instead of four floating slabs")
     var mountain := owner.get_node("RealmExpansion/MountainRidge")
     _assert_true(mountain.get_child_count() == 0,
         "mountain ridge remains an empty compatibility container after hill removal")
@@ -48,6 +60,10 @@ func _run_validation() -> void:
     _assert_true(GameState.gold == 76, "element switch spends its forge cost")
 
     var chest = owner.get_node("RealmExpansion/Chest_mountain_cache")
+    _assert_true(chest.get_node_or_null("GroundedLootStaging/LootPad") != null,
+        "surface chest has terrain staging and an anchor pad")
+    _assert_true(chest.get_node_or_null("ChestLid") != null,
+        "surface chest has an authored curved lid")
     var before_gold := GameState.gold
     expansion.open_chest(chest, "mountain_cache")
     await get_tree().process_frame

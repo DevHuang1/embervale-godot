@@ -7,6 +7,8 @@ extends Node3D
 
 const LIFETIME := 0.75
 const DAMAGE_LIFETIME := 0.92
+const STATUS_FONT_SIZE := 42
+const DAMAGE_FONT_SIZE := 56
 
 static var _pool: Array[Label3D] = []
 static var _damage_serial := 0
@@ -15,9 +17,11 @@ static func spawn(parent: Node, world_pos: Vector3, text: String, color: Color, 
     if parent == null or not parent.is_inside_tree():
         return
     var label := _acquire(parent)
+    if label == null:
+        return
     label.text = text
-    label.font_size = int(64 * size_scale)
-    label.outline_size = int(12 * maxf(size_scale, 1.0))
+    label.font_size = int(STATUS_FONT_SIZE * size_scale)
+    label.outline_size = int(8 * maxf(size_scale, 1.0))
     label.modulate = color
     label.modulate.a = 1.0
     label.outline_modulate = Color(0.02, 0.03, 0.02, 0.9)
@@ -35,7 +39,9 @@ static func spawn(parent: Node, world_pos: Vector3, text: String, color: Color, 
 static func spawn_damage_on_entity(entity: Node3D, amount: int, critical: bool = false, color: Color = Color.BLACK) -> void:
     if entity == null or not is_instance_valid(entity) or not entity.is_inside_tree():
         return
-    var label := _acquire(entity.get_tree().current_scene)
+    var label := _acquire(entity)
+    if label == null:
+        return
     var base_color := Color(1.0, 0.90, 0.68)
     if critical:
         base_color = Color(1.0, 0.42, 0.16)
@@ -45,8 +51,8 @@ static func spawn_damage_on_entity(entity: Node3D, amount: int, critical: bool =
     var side := -1.0 if _damage_serial % 2 == 0 else 1.0
     var size_scale := 1.25 if critical else 1.0
     label.text = "%s%d" % ["CRIT " if critical else "", amount]
-    label.font_size = int(78 * size_scale)
-    label.outline_size = int(14 * size_scale)
+    label.font_size = int(DAMAGE_FONT_SIZE * size_scale)
+    label.outline_size = int(10 * size_scale)
     label.modulate = base_color
     label.modulate.a = 1.0
     label.outline_modulate = Color(0.02, 0.015, 0.01, 0.96)
@@ -67,7 +73,7 @@ static func spawn_damage_on_entity(entity: Node3D, amount: int, critical: bool =
 static func spawn_on_entity(entity: Node3D, text: String, color: Color, size_scale: float = 1.0) -> void:
     if entity == null or not is_instance_valid(entity) or not entity.is_inside_tree():
         return
-    spawn(entity.get_tree().current_scene, entity.global_position, text, color, size_scale)
+    spawn(entity, entity.global_position, text, color, size_scale)
 
 static func _acquire(parent: Node) -> Label3D:
     _pool = _pool.filter(func(l): return is_instance_valid(l))
@@ -79,12 +85,18 @@ static func _acquire(parent: Node) -> Label3D:
     label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
     label.no_depth_test = true
     label.pixel_size = 0.01
-    label.font_size = 64
-    label.outline_size = 12
-    _scene_root(parent).add_child(label)
+    label.font_size = STATUS_FONT_SIZE
+    label.outline_size = 8
+    var host := _scene_root(parent)
+    if host == null:
+        return null
+    host.add_child(label)
     _pool.append(label)
     return label
 
 static func _scene_root(parent: Node) -> Node:
-    var scene := parent.get_tree().current_scene
-    return scene if scene else parent.get_tree().root
+    if parent != null and is_instance_valid(parent) and parent.is_inside_tree():
+        var tree := parent.get_tree()
+        return tree.current_scene if tree.current_scene != null else tree.root
+    var loop := Engine.get_main_loop() as SceneTree
+    return loop.root if loop != null else null

@@ -18,6 +18,7 @@ func _frames(n: int) -> void:
 
 func _run() -> void:
 	var gs = root.get_node("/root/GameState")
+	gs.save_path = "/tmp/embervale_combat_recovery_test.cfg"
 	gs.delete_save()
 	gs.reset()
 
@@ -60,8 +61,7 @@ func _run() -> void:
 		gs.engage_enemy(target)
 		hero.global_position = target.global_position + Vector3(1.2, 0, 0)
 		var hp_before: int = target.hp
-		hero._perform_auto_strike(target)
-		await _seconds(0.4)
+		await hero._perform_auto_strike(target)
 		await _frames(5)
 		if is_instance_valid(target) and target.hp >= hp_before and not target.is_dead():
 			failures += 1

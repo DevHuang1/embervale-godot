@@ -16,6 +16,14 @@ var _current_cue := ""
 var _current_clip := ""
 var _cue_elapsed := 0.0
 var _cue_impact_fired := false
+var _impact_fraction_override := -1.0
+var _cue_speed := 1.0
+var _attack_serial := -1
+
+## Per-cue playback speed: the authored sword clip is 1.167s — far slower
+## than the attack cadence — so light swings play slightly sped up. Heavy
+## keeps natural speed to stay weighty. Impact thresholds compensate.
+const CUE_SPEEDS := {"light_1": 1.25, "light_2": 1.35, "light_3": 1.1}
 
 ## Gameplay cue -> likely clip names in imported packs (Quaternius and
 ## friends name clips "Idle", "Walk_01", "Attack", ... not our cue ids).
@@ -23,10 +31,10 @@ const CUE_ALIASES := {
 	"idle": ["idle", "flying", "fly", "float"],
 	"walk": ["walk", "walking", "fly", "flying"],
 	"run": ["run", "jog", "sprint", "walk"],
-	"light_1": ["attack", "attack1", "slash", "hit1"],
-	"light_2": ["attack2", "slash2", "hit2"],
-	"light_3": ["attack3", "combo", "hit3"],
-	"heavy": ["heavy", "slam", "attack"],
+	"light_1": ["attack1", "swordattack", "attack", "slash", "hit1"],
+	"light_2": ["attack2", "slash2", "hit2", "swordattack", "attack"],
+	"light_3": ["attack3", "combo", "hit3", "swordattack", "attack"],
+	"heavy": ["heavy", "slam", "swordattack", "attack"],
 	"cast": ["cast", "spell", "magic", "attack"],
 	"buff": ["buff", "cast", "spell"],
 	"hit": ["hurt", "take_hit", "damage", "hit"],
@@ -70,33 +78,52 @@ func _resolve(alias: String) -> String:
 
 ## Try to play a cue with a crossfade. Returns false when no clip matched,
 ## which tells gameplay code to keep the procedural pose instead.
-func play_cue(cue: String, cross: float = 0.22) -> bool:
+## `restart` forces a same-clip replay back to frame 0 — Godot 4.x
+## AnimationPlayer.play() keeps the old playback position when the requested
+## clip is already the current one, which reads as a swing that never resets.
+func play_cue(cue: String, cross: float = 0.22, restart: bool = false) -> bool:
 	if player == null:
 		return false
 	var clip := _resolve(cue)
 	if clip == "":
 		_current_cue = ""
 		return false
+	var was_playing_same: bool = player.current_animation == clip \
+			and player.is_playing()
 	_current_cue = cue
 	_current_clip = clip
 	_cue_elapsed = 0.0
 	_cue_impact_fired = false
-	# Locomotion/idle clips must loop; one-shots (attack/death) hold last frame.
+	_impact_fraction_override = -1.0
+	_cue_speed = float(CUE_SPEEDS.get(cue, 1.0))
+	player.speed_scale = _cue_speed
+	# Locomotion/idle clips must loop and may crossfade; one-shots (attack/
+	# death) hold last frame AND cut in — a long crossfade makes the visible
+	# arm start its swing a quarter-second after the blade and the damage.
+	var fade := cross
 	if cue in _LOOPING_CUES:
 		player.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
 	else:
 		player.get_animation(clip).loop_mode = Animation.LOOP_NONE
+		fade = 0.05
 	if tree != null:
 		var playback := tree.get("parameters/playback") as AnimationNodeStateMachinePlayback
 		if playback != null:
 			playback.travel(clip)
 			return true
-	player.play(clip, cross)
+	player.play(clip, fade)
+	if restart and was_playing_same:
+		# Same clip was mid-play: play() above did NOT rewind it, so snap
+		# the swing back to its first frame immediately (attacks reuse the
+		# same cue for combo resets and spaced taps).
+		player.seek(0.0, true)
 	return true
 
 func stop() -> void:
 	if player != null:
 		player.stop()
+		player.speed_scale = 1.0
+	_cue_speed = 1.0
 	_current_cue = ""
 	_current_clip = ""
 	_cue_elapsed = 0.0
@@ -104,6 +131,28 @@ func stop() -> void:
 
 func current_cue() -> String:
 	return _current_cue
+
+func has_cue(cue: String) -> bool:
+	return not _resolve(cue).is_empty()
+
+func current_cue_has_impact() -> bool:
+	return has_cue(_current_cue) and _impact_fraction(_current_cue) >= 0.0
+
+## Real impact moment of a cue on this rig, in seconds from cue start,
+## accounting for the per-cue playback speed. -1 when the rig has no clip
+## or the cue has no impact. `fraction_override` mirrors the runtime override
+## (entity-authored impact fractions) so gameplay can pre-align its clock.
+func cue_impact_time(cue: String, fraction_override: float = -1.0) -> float:
+	var clip := _resolve(cue)
+	if clip == "" or player == null:
+		return -1.0
+	var fraction := _impact_fraction(cue)
+	if fraction_override >= 0.0:
+		fraction = clampf(fraction_override, 0.05, 0.95)
+	if fraction < 0.0:
+		return -1.0
+	return player.get_animation(clip).length * fraction \
+		/ float(CUE_SPEEDS.get(cue, 1.0))
 
 ## True when this bridge owns the provided sync signals, so gameplay hooks
 ## (attack_impact/footfall) can forward from clip events later.
@@ -130,16 +179,22 @@ func _impact_fraction(cue: String) -> float:
 		_:
 			return -1.0
 
-func _update_authored_impact(delta: float) -> void:
+func _update_authored_impact(_delta: float) -> void:
 	if player == null or _current_clip == "" or _cue_impact_fired:
 		return
 	var fraction := _impact_fraction(_current_cue)
+	if _impact_fraction_override >= 0.0:
+		fraction = _impact_fraction_override
 	if fraction < 0.0:
 		return
 	var animation := player.get_animation(_current_clip)
 	if animation == null:
 		return
-	_cue_elapsed += delta
+	# Authoritative clip clock: current_animation_position already accounts
+	# for speed_scale and the AnimationPlayer's process mode. Self-accumulated
+	# process deltas drift against real playback (headless frame-rate
+	# clamping and dropped frames included), so threshold on clip time.
+	_cue_elapsed = player.current_animation_position
 	if _cue_elapsed >= animation.length * fraction:
 		_cue_impact_fired = true
 		cue_impact.emit(_current_cue)
@@ -154,12 +209,21 @@ func _process(delta: float) -> void:
 		# the last pose instead of polling dead captures every frame.
 		set_process(false)
 		return
+	# A new attack press must restart the swing clip even when the cue id is
+	# unchanged (combo resets, spaced taps) — otherwise the arm keeps playing
+	# the old clip while the blade, FX and damage start over.
+	var serial := int(st.get("attack_serial", -1))
+	var new_attack: bool = st.get("attacking", false) and serial != -1 and serial != _attack_serial
+	if new_attack:
+		_attack_serial = serial
 	var cue := _pick_cue(st)
 	if cue == "":
 		return
-	if cue == _current_cue and player.is_playing():
+	if not new_attack and cue == _current_cue and player.is_playing():
 		return
-	if play_cue(cue):
+	if play_cue(cue, 0.22, new_attack):
+		if st.get("attacking", false) and float(st.get("impact_fraction", -1.0)) >= 0.0:
+			_impact_fraction_override = clampf(float(st.impact_fraction), 0.05, 0.95)
 		_last_cue = cue
 
 func _pick_cue(st: Dictionary) -> String:
@@ -170,9 +234,10 @@ func _pick_cue(st: Dictionary) -> String:
 	if st.get("attacking", false):
 		# A cast (staff/area/heal) reads as a stance — the knight has no cast
 		# clip, so this falls back to idle rather than a walk-swing.
-		if st.get("casting", false):
-			return "cast"
-		return "light_1"
+		var attack_cue := str(st.get("attack_cue", ""))
+		if not attack_cue.is_empty():
+			return attack_cue
+		return "cast" if st.get("casting", false) else "light_1"
 	if st.get("dodging", false):
 		return "dodge"
 	if st.get("moving", false):

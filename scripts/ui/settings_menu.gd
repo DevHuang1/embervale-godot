@@ -5,6 +5,7 @@ class_name SettingsMenu
 ## Volume sliders bound to AudioManager, persisted via its ConfigFile.
 
 @onready var audio: AudioManager = AudioManager
+@onready var game_state: GameState = GameState
 @onready var master_slider: HSlider = $Root/Panel/VBox/MasterRow/MasterSlider
 @onready var music_slider: HSlider = $Root/Panel/VBox/MusicRow/MusicSlider
 @onready var sfx_slider: HSlider = $Root/Panel/VBox/SfxRow/SfxSlider
@@ -29,6 +30,41 @@ func _ready() -> void:
 		audio.save_settings()
 		get_tree().quit())
 	_build_quality_row()
+	_build_camera_row()
+
+## First/third-person choice is available on mobile and desktop. Desktop also
+## has the V shortcut, but this persisted picker remains the authoritative UI.
+func _build_camera_row() -> void:
+	var vbox: VBoxContainer = $Root/Panel/VBox
+	var row := HBoxContainer.new()
+	row.name = "CameraViewRow"
+	var label := Label.new()
+	label.text = "Camera"
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(label)
+	var option := OptionButton.new()
+	option.name = "CameraViewOption"
+	option.add_item("Third Person")
+	option.add_item("First Person")
+	option.tooltip_text = "Tap to move, joystick to steer — drag the screen (mobile) or move the mouse (desktop) to look left/right."
+	var config := ConfigFile.new()
+	config.load(AudioManager.SETTINGS_PATH)
+	var current := str(config.get_value("gameplay", "camera_view", "third_person"))
+	option.selected = 1 if current == "first_person" else 0
+	option.item_selected.connect(func(index: int) -> void:
+		var mode := "first_person" if index == 1 else "third_person"
+		var camera_rig := get_tree().root.find_child("CameraRig", true, false)
+		if camera_rig != null and camera_rig.has_method("set_view_mode"):
+			camera_rig.call("set_view_mode", mode)
+		else:
+			var settings := ConfigFile.new()
+			settings.load(AudioManager.SETTINGS_PATH)
+			settings.set_value("gameplay", "camera_view", mode)
+			settings.save(AudioManager.SETTINGS_PATH)
+		audio.play_ui_blip())
+	row.add_child(option)
+	vbox.add_child(row)
+	vbox.move_child(row, vbox.get_children().find(back_button))
 
 ## Adaptive-quality picker: Low / Auto / High, persisted by QualityScaler.
 func _build_quality_row() -> void:

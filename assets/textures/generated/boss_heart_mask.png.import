@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://cuwvfrw1ukoap"
 path.s3tc="res://.godot/imported/boss_heart_mask.png-f0bff045b37ca8aad63268a5e01e5636.s3tc.ctex"
+path.etc2="res://.godot/imported/boss_heart_mask.png-f0bff045b37ca8aad63268a5e01e5636.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/generated/boss_heart_mask.png"
-dest_files=["res://.godot/imported/boss_heart_mask.png-f0bff045b37ca8aad63268a5e01e5636.s3tc.ctex"]
+dest_files=["res://.godot/imported/boss_heart_mask.png-f0bff045b37ca8aad63268a5e01e5636.s3tc.ctex", "res://.godot/imported/boss_heart_mask.png-f0bff045b37ca8aad63268a5e01e5636.etc2.ctex"]
 
 [params]
 

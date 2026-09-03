@@ -1,0 +1,158 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Embervale Mobile"
+run/main_scene="res://scenes/main/main.tscn"
+config/features=PackedStringArray("4.7")
+
+[autoload]
+
+GameState="*res://scripts/autoload/game_state.gd"
+ScanManager="*res://scripts/autoload/scan_manager.gd"
+AudioManager="*res://scripts/autoload/audio_manager.gd"
+InputManager="*res://scripts/autoload/input_manager.gd"
+WorldState="*res://scripts/autoload/world_state.gd"
+
+[debug]
+
+settings/gizmos/global=true
+
+[display]
+
+window/size/viewport_width=1080
+window/size/viewport_height=1920
+window/mode/window_mode=0
+
+[groups]
+
+player="player"
+enemy="enemy"
+boss="boss"
+hushling="hushling"
+pickup="pickup"
+projectile="projectile"
+
+[gui]
+
+theme/custom="res://assets/ui/theme.tres"
+
+[layer_names]
+
+2d_physics/layer_1="player"
+3d_physics/layer_1="player"
+2d_physics/layer_2="enemy"
+3d_physics/layer_2="enemy"
+2d_physics/layer_3="projectile"
+3d_physics/layer_3="projectile"
+2d_physics/layer_4="pickup"
+3d_physics/layer_4="pickup"
+3d_physics/layer_5="boss"
+3d_physics/layer_6="environment"
+3d_physics/layer_7="prop"
+
+[physics]
+
+physics/common/physics_tick=60
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+renderer/rendering_method.mobile="mobile"
+textures/vram_compression/import_etc2_astc=true
+lights_and_shadows/directional_shadow/size=4096
+lights_and_shadows/directional_shadow/size.mobile=2048
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile=1
+lights_and_shadows/positional_shadow/atlas_size=4096
+lights_and_shadows/positional_shadow/atlas_size.mobile=2048
+lights_and_shadows/positional_shadow/atlas_quadrant_0_subdiv=2
+lights_and_shadows/positional_shadow/atlas_quadrant_1_subdiv=2
+lights_and_shadows/positional_shadow/atlas_quadrant_2_subdiv=3
+lights_and_shadows/positional_shadow/atlas_quadrant_3_subdiv=4
+lights_and_shadows/positional_shadow/soft_shadow_filter_quality=3
+lights_and_shadows/positional_shadow/soft_shadow_filter_quality.mobile=1
+occlusion_culling/use_occlusion_culling=true
+occlusion_culling/bvh_build_quality=2
+anti_aliasing/quality/msaa_3d=2
+anti_aliasing/quality/msaa_3d.mobile=1
+anti_aliasing/quality/screen_space_aa=1
+anti_aliasing/quality/use_taa=true
+anti_aliasing/quality/use_taa.mobile=false
+scaling_3d/mode="fsr2"
+scaling_3d/scale=1.0
+scaling_3d/scale.mobile=0.85
+scaling_3d/fsr_sharpness=0.35
+textures/default_filters/anisotropic_filtering_level=3
+textures/default_filters/anisotropic_filtering_level.mobile=2
+textures/default_filters/use_nearest_mipmap_filter=false
+mesh_lod/lod_change/threshold_pixels=1.0
+global_illumination/gi/use_half_resolution=false
+global_illumination/gi/use_half_resolution.mobile=true
+environment/glow/upscale_mode=1
+environment/glow/upscale_mode.mobile=0
+environment/ssao/quality=2
+environment/ssao/quality.mobile=0
+environment/ssao/half_size=false
+environment/ssao/half_size.mobile=true
+environment/ssil/quality=1
+environment/ssil/quality.mobile=0
+environment/screen_space_reflection/roughness_quality=2
+environment/screen_space_reflection/roughness_quality.mobile=0
+environment/volumetric_fog/volume_size=64
+environment/volumetric_fog/volume_size.mobile=32
+environment/volumetric_fog/volume_depth=64
+environment/volumetric_fog/volume_depth.mobile=32
+environment/defaults/default_clear_color=Color(0.043, 0.094, 0.078, 1)
+environment/defaults/default_environment="res://assets/environments/embervale_env.tres"
+
+[shader_globals]
+
+world_combat_intensity={
+"type": "float",
+"value": 0.0
+}
+world_magic_level={
+"type": "float",
+"value": 0.35
+}
+world_rain_level={
+"type": "float",
+"value": 0.0
+}
+world_wind={
+"type": "vec2",
+"value": Vector2(0, 0)
+}
+world_hero_pos_radius={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+world_pusher_1={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+world_pusher_2={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+world_pusher_3={
+"type": "vec4",
+	value": Vector4(0, 0, 0, 0)
+}
+world_wear_bounds={
+"type": "vec4",
+"value": Vector4(-76, -76, 152, 152)
+}
+world_wear_map={
+"type": "sampler2D",
+"value": ""
+}

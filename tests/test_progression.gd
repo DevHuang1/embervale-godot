@@ -10,6 +10,7 @@ func _initialize() -> void:
 func _run() -> void:
 	var failures := 0
 	var gs = root.get_node("/root/GameState")
+	gs.save_path = "/tmp/embervale_progression_test.cfg"
 	gs.delete_save()
 	gs.reset()
 
@@ -58,7 +59,7 @@ func _run() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("progress", "embers", 77)
 	cfg.set_value("progress", "current_stage", 1)
-	cfg.save(gs.SAVE_PATH)
+	cfg.save(gs.save_path)
 	gs.load_game()
 	if gs.gold != 77:
 		failures += 1
@@ -100,7 +101,12 @@ func _run() -> void:
 		print("FAIL: second kill granted first-kill again")
 
 	# --- Realm tracking ---
-	gs.unlock_realm("moonfen")
+	if not gs.unlock_realm("moonfen"):
+		failures += 1
+		print("FAIL: new realm unlock did not report a state change")
+	if gs.unlock_realm("moonfen"):
+		failures += 1
+		print("FAIL: repeated realm unlock reported a duplicate change")
 	gs.set_current_realm("moonfen")
 	gs.save_game()
 	gs.load_game()

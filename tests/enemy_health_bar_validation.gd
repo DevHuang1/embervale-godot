@@ -29,8 +29,16 @@ func _run_validation() -> void:
         return
     var fill := bar.get_node_or_null("HealthPlate/HealthFill") as MeshInstance3D
     var hp_label := bar.get_node_or_null("HealthPlate/EnemyHP") as Label3D
+    var lock_sigil := bar.get_node_or_null("HealthPlate/LockFrame") as MeshInstance3D
     _assert_true(fill != null, "health bar has a fill mesh")
     _assert_true(hp_label != null, "health bar shows numeric HP")
+    _assert_true(lock_sigil != null, "health bar has a lantern lock sigil")
+    if lock_sigil != null:
+        _assert_true(lock_sigil.mesh is ArrayMesh and not lock_sigil.mesh is QuadMesh,
+            "lantern mark uses ring geometry instead of a square quad")
+        GameState.engage_enemy(enemy)
+        await get_tree().process_frame
+        _assert_true(lock_sigil.visible, "lantern ring appears on the marked enemy")
     if hp_label != null:
         _assert_true(hp_label.text == "28 / 28", "new enemy bar starts at the enemy max HP")
     enemy.take_damage(7, Vector3.ZERO)
@@ -52,6 +60,8 @@ func _run_validation() -> void:
     for label in get_tree().current_scene.find_children("*", "Label3D", true, false):
         if label is Label3D and (label as Label3D).text == "CRIT 21":
             critical_number_found = true
+            _assert_true((label as Label3D).font_size <= 70,
+                "critical popup typography stays compact")
             break
     _assert_true(critical_number_found, "critical damage uses the emphasized damage style")
     enemy.take_damage(100, Vector3.ZERO)

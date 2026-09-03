@@ -14,6 +14,9 @@ var _mode := "buy"
 var _tabs: HBoxContainer
 var _buy_button: Button
 var _sell_button: Button
+const RARITY_COLORS: Array[Color] = [
+	Color(0.58, 0.67, 0.65), Color(0.56, 0.74, 0.45),
+	Color(0.38, 0.72, 0.86), Color(0.70, 0.48, 0.88), UiKit.EMBER]
 
 func _ready() -> void:
 	UiKit.apply_glass($Root)
@@ -25,7 +28,20 @@ func _ready() -> void:
 	game_state.gold_changed.connect(_on_gold_changed)
 	game_state.inventory_changed.connect(_on_inventory_changed)
 	_build_tabs()
+	get_viewport().size_changed.connect(_apply_responsive_layout)
+	_apply_responsive_layout()
 	_refresh()
+
+func _apply_responsive_layout() -> void:
+	var viewport_size := get_viewport().get_visible_rect().size
+	var root_panel := $Root as PanelContainer
+	var margin := 28.0 if viewport_size.x < 900.0 else 72.0
+	var width := minf(1040.0, viewport_size.x - margin * 2.0)
+	var height := minf(920.0, viewport_size.y - margin * 2.0)
+	root_panel.offset_left = -width * 0.5
+	root_panel.offset_right = width * 0.5
+	root_panel.offset_top = -height * 0.5
+	root_panel.offset_bottom = height * 0.5
 
 func _build_tabs() -> void:
 	_tabs = HBoxContainer.new()
@@ -87,7 +103,7 @@ func _on_inventory_changed(_notice: String = "", _count: int = 0) -> void:
 	_refresh()
 
 func _refresh() -> void:
-	gold_label.text = "GOLD  %d" % game_state.gold
+	gold_label.text = "◆  %d  GOLD" % game_state.gold
 	for child in items_vbox.get_children():
 		child.queue_free()
 	if _mode == "buy":
@@ -98,16 +114,24 @@ func _refresh() -> void:
 
 func _build_buy_row(stock: Dictionary) -> Control:
 	var panel := PanelContainer.new()
-	panel.add_theme_constant_override("panel_inset", 10)
-	var row := HBoxContainer.new()
-	panel.add_child(row)
 	var kind := str(stock.get("kind", "item"))
+	var accent := UiKit.EMBER if kind == "weapon" else (Color(0.42, 0.76, 0.96) if kind == "armor" else UiKit.SAGE_BRIGHT)
+	panel.add_theme_stylebox_override("panel", UiKit.item_card_stylebox(accent))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	panel.add_child(row)
 	var id := str(stock.get("id", ""))
 	var def: Dictionary = GameState.WEAPON_DEFS.get(id, {}) if kind == "weapon" else (GameState.ARMOR_DEFS.get(id, {}) if kind == "armor" else game_state.get_item(id))
+	var glyph_well := PanelContainer.new()
+	glyph_well.custom_minimum_size = Vector2(66, 66)
+	glyph_well.add_theme_stylebox_override("panel", UiKit.icon_well_stylebox(accent))
+	row.add_child(glyph_well)
 	var glyph := Label.new()
 	glyph.text = str(def.get("glyph", "🧪"))
-	UiKit.style_label(glyph, "", 28)
-	row.add_child(glyph)
+	glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	glyph.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	UiKit.style_label(glyph, "", 30)
+	glyph_well.add_child(glyph)
 	var info := VBoxContainer.new()
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(info)
@@ -116,8 +140,9 @@ func _build_buy_row(stock: Dictionary) -> Control:
 	UiKit.style_label(title, &"MenuTitle", 19)
 	info.add_child(title)
 	var stat := Label.new()
-	stat.text = _stat_line(kind, def)
+	stat.text = "%s  •  %s" % [kind.to_upper(), _stat_line(kind, def)]
 	UiKit.style_label(stat, &"Caption", 15)
+	stat.add_theme_color_override("font_color", accent.lightened(0.12))
 	info.add_child(stat)
 	var desc := Label.new()
 	desc.text = str(def.get("description", def.get("desc", "")))
@@ -154,13 +179,22 @@ func _build_sell_rows() -> void:
 
 func _build_sell_row(kind: String, item: Dictionary) -> Control:
 	var panel := PanelContainer.new()
-	panel.add_theme_constant_override("panel_inset", 10)
+	var rarity := clampi(int(item.get("rarity", 0)), 0, RARITY_COLORS.size() - 1)
+	var accent: Color = RARITY_COLORS[rarity]
+	panel.add_theme_stylebox_override("panel", UiKit.item_card_stylebox(accent))
 	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
 	panel.add_child(row)
+	var glyph_well := PanelContainer.new()
+	glyph_well.custom_minimum_size = Vector2(66, 66)
+	glyph_well.add_theme_stylebox_override("panel", UiKit.icon_well_stylebox(accent))
+	row.add_child(glyph_well)
 	var glyph := Label.new()
 	glyph.text = str(item.get("glyph", "⚔"))
-	UiKit.style_label(glyph, "", 28)
-	row.add_child(glyph)
+	glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	glyph.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	UiKit.style_label(glyph, "", 30)
+	glyph_well.add_child(glyph)
 	var info := VBoxContainer.new()
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(info)

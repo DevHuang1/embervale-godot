@@ -43,6 +43,18 @@ static func bind_lantern(lantern: Node3D) -> void:
 	_lantern = lantern
 
 
+## Teardown hook for realm swaps and tests: free the live marker and clear
+## the static refs so neither a dying-scene node nor this script's state can
+## outlive the session ("Resource still in use" / orphaned Node3D at exit).
+static func shutdown() -> void:
+	if _instance != null and is_instance_valid(_instance):
+		if _instance.get_parent() != null:
+			_instance.get_parent().remove_child(_instance)
+		_instance.free()
+	_instance = null
+	_lantern = null
+
+
 static func ensure(context: Node) -> TargetMarker:
 	if _instance != null and is_instance_valid(_instance) \
 			and _instance.is_inside_tree():
@@ -339,10 +351,27 @@ func _on_mark_released() -> void:
 	_was_locked = false
 	_tracked_id = 0
 	# Hear + see the lock drop (the ring fade is handled by _process).
-	AudioManager.play_lantern_release(_lantern)
+	# Positional only while the lantern is alive and in a scene; a freed or
+	# detached lantern (mid scene-teardown) falls back to the flat cue so no
+	# player is ever parented to a dying node.
+	if _lantern != null and is_instance_valid(_lantern) and _lantern.is_inside_tree():
+		AudioManager.play_lantern_release(_lantern)
+	else:
+		AudioManager.play_lantern_release()
 	if _lantern != null and is_instance_valid(_lantern):
 		FloatingText.spawn(_lantern, _lantern.global_position + Vector3(0, 0.7, 0),
 			"Mark lifted", Color(0.85, 0.85, 0.85, 0.8), 0.7)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		# Deletion (scene swap teardown, quit) must not leave the static
+		# singleton ref dangling — it would otherwise keep this script and
+		# its state alive past the resource exit check ("still in use").
+		if _instance == self:
+			_instance = null
+		if _lantern != null and not is_instance_valid(_lantern):
+			_lantern = null
 
 
 func _apply_fade() -> void:

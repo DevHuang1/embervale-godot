@@ -10,6 +10,7 @@ func _initialize() -> void:
 func _run() -> void:
 	var failures := 0
 	var gs = root.get_node("/root/GameState")
+	gs.save_path = "/tmp/embervale_boss_custom_test.cfg"
 	gs.delete_save()
 	gs.reset()
 
@@ -53,9 +54,10 @@ func _run() -> void:
 	if int(Bestiary.WAVES[1].hard) != 1:
 		failures += 1
 		print("FAIL: stage-1 wave comp")
-	if Bestiary.variant_for(Bestiary.REALM_HEARTWOOD, "hard").volley != true:
+	if str(Bestiary.variant_for(Bestiary.REALM_HEARTWOOD, "hard").get("kind", "")) \
+			!= "spitter":
 		failures += 1
-		print("FAIL: heartwood hard tier lacks volley")
+		print("FAIL: Heartwood hard tier lost its Cinder Spitter role")
 
 	# === Palette extraction ===
 	var img := Image.create(32, 32, false, Image.FORMAT_RGB8)
@@ -113,9 +115,10 @@ func _run() -> void:
 		failures += 1
 		print("FAIL: resource preset mismatch")
 	var roundtrip: Dictionary = bc.to_payload()
-	if str(roundtrip.palette[0]) != Color(0.5, 0.2, 0.1).to_html(true):
+	if roundtrip.get("palette", []).is_empty() \
+			or str(roundtrip.palette[0]) != Color(0.5, 0.2, 0.1).to_html(true):
 		failures += 1
-		print("FAIL: hex roundtrip -> ", roundtrip.palette[0])
+		print("FAIL: hex roundtrip -> ", roundtrip.get("palette", []))
 
 	# === Elite volley flag on a live hushling ===
 	var hush_scene: PackedScene = load("res://scenes/entities/hushling.tscn")
@@ -176,4 +179,5 @@ func _run() -> void:
 		print("ALL BOSS CUSTOMIZATION TESTS PASSED")
 	else:
 		print("%d FAILURES" % failures)
+	gs.delete_save()
 	quit(1 if failures > 0 else 0)

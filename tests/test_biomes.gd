@@ -1,12 +1,12 @@
 extends SceneTree
 
-## Headless functional check: 3-biome world layer.
+## Headless functional check: 4-biome world layer.
 ## - Bestiary biome/boss tables resolve and their scenes exist
 ## - Old "whispergrove" saves normalize to bramblewood
 ## - Each biome scene boots with packs, gates and (where applicable)
 ##   an arena stone; realm state follows the entered biome
 
-const BIOMES := ["bramblewood", "mistfen", "heartwood"]
+const BIOMES := ["bramblewood", "mistfen", "heartwood", "moonfen"]
 
 func _initialize() -> void:
 	_run.call_deferred()
@@ -28,13 +28,14 @@ func _run() -> void:
 			failures += 1
 			print("FAIL: biome scene missing -> ", id)
 		var boss_id := str(b.get("boss_id", ""))
-		if not id == "heartwood" and (boss_id.is_empty()
-				or Bestiary.boss_def(boss_id).is_empty()):
+		if boss_id.is_empty() or Bestiary.boss_def(boss_id).is_empty():
 			failures += 1
 			print("FAIL: arena boss def missing -> ", id)
 
 	if Bestiary.boss_def("thornhide_alpha").is_empty() \
-			or Bestiary.boss_def("fenmaw").is_empty():
+			or Bestiary.boss_def("fenmaw").is_empty() \
+			or Bestiary.boss_def("cinderhart_colossus").is_empty() \
+			or Bestiary.boss_def("moonfen_oracle").is_empty():
 		failures += 1
 		print("FAIL: new boss defs missing")
 
@@ -43,13 +44,17 @@ func _run() -> void:
 		failures += 1
 		print("FAIL: whispergrove alias lost")
 
-	# --- Fresh save unlocks all three biomes ---
+	# --- Fresh save keeps the vertical-slice realms open; Moonfen remains the
+	# Matriarch reward and is tested by direct scene boot below. ---
 	gs.delete_save()
 	gs.reset()
-	for id in BIOMES:
+	for id in ["bramblewood", "mistfen", "heartwood"]:
 		if id not in gs.unlocked_realms:
 			failures += 1
 			print("FAIL: biome locked on fresh save -> ", id)
+	if "moonfen" in gs.unlocked_realms:
+		failures += 1
+		print("FAIL: Moonfen should remain a visible post-Matriarch unlock")
 
 	# --- Each biome scene boots correctly ---
 	for id in BIOMES:
@@ -74,15 +79,22 @@ func _run() -> void:
 		for child in scene.get_children():
 			if child.name.begins_with("Gate_"):
 				gates += 1
-		if gates != 2:
+				var travel_arch := child.get_node_or_null("GroundedTravelArch")
+				if travel_arch == null \
+						or travel_arch.get_node_or_null("PortalMistVolume") == null:
+					failures += 1
+					print("FAIL: travel gate lacks grounded arch/mist volume -> ", id)
+				for mesh_node in child.find_children("*", "MeshInstance3D", true, false):
+					if mesh_node.name == "PortalMistVolume" and mesh_node.mesh is BoxMesh:
+						failures += 1
+						print("FAIL: travel portal regressed to square slab -> ", id)
+		var expected_gates: int = (Bestiary.biome(id).get("gates", []) as Array).size()
+		if gates != expected_gates:
 			failures += 1
-			print("FAIL: gate count wrong in ", id, " -> ", gates)
+			print("FAIL: gate count wrong in ", id, " -> ", gates, "/", expected_gates)
 
 		var has_arena := scene.has_node("ArenaStone")
-		if id == "heartwood" and has_arena:
-			failures += 1
-			print("FAIL: heartwood should have no arena stone (quest finale)")
-		if id != "heartwood" and not has_arena:
+		if not has_arena:
 			failures += 1
 			print("FAIL: arena stone missing in ", id)
 
@@ -90,20 +102,31 @@ func _run() -> void:
 		await process_frame
 		await process_frame
 
-	# --- Biome boss wires its def ---
-	gs.reset()
-	var boss: Node = (load("res://scenes/entities/boss_biome.tscn") as PackedScene).instantiate()
-	boss.def_id = "fenmaw"
-	root.add_child(boss)
-	await process_frame
-	var fen_def: Dictionary = Bestiary.boss_def("fenmaw")
-	if boss.max_hp != int(fen_def.get("hp", 0)):
-		failures += 1
-		print("FAIL: fenmaw hp not wired -> ", boss.max_hp)
-	if boss._boss_key() != "biome_fenmaw":
-		failures += 1
-		print("FAIL: boss key not def-scoped -> ", boss._boss_key())
-	boss.queue_free()
+	# --- Every arena boss wires stats, identity geometry and unique key ---
+	for boss_id in ["fenmaw", "cinderhart_colossus", "moonfen_oracle"]:
+		gs.reset()
+		var boss: Node = (load("res://scenes/entities/boss_biome.tscn") as PackedScene).instantiate()
+		boss.def_id = boss_id
+		root.add_child(boss)
+		await process_frame
+		var boss_def: Dictionary = Bestiary.boss_def(boss_id)
+		if boss.max_hp != int(boss_def.get("hp", 0)):
+			failures += 1
+			print("FAIL: %s hp not wired -> %d" % [boss_id, boss.max_hp])
+		if boss._boss_key() != "biome_%s" % boss_id:
+			failures += 1
+			print("FAIL: boss key not def-scoped -> ", boss._boss_key())
+		if boss_id in ["cinderhart_colossus", "moonfen_oracle"] \
+				and boss.get_node("Visual").get_child_count() <= 8:
+			failures += 1
+			print("FAIL: %s lacks unique silhouette geometry" % boss_id)
+		var materials: Dictionary = boss_def.get("rewards", {}).get("materials", {})
+		for material_id in materials:
+			if not gs.MATERIAL_DEFS.has(material_id):
+				failures += 1
+				print("FAIL: %s reward material invalid -> %s" % [boss_id, material_id])
+		boss.queue_free()
+		await process_frame
 
 	gs.delete_save()
 	if failures == 0:

@@ -11,6 +11,7 @@ extends RefCounted
 ##   hero            -> assets/models/hero.fbx
 ##   hushling        -> assets/models/hushling.fbx
 ##   boss_matriarch  -> assets/models/boss_matriarch.fbx
+##   boss_<realm>_<variant> -> assets/models/boss_variants/boss_<realm>_<variant>.glb
 #
 ## Target standing heights (world units) per profile. Measured against each
 ## mounted rig's actual mesh AABB at runtime, so ANY source-art unit system
@@ -25,9 +26,13 @@ const PROFILE_HEIGHT := {
 
 static func _any_model(profile: String) -> String:
 	for ext in ["glb", "gltf", "fbx"]:
-		var p := "res://assets/models/%s.%s" % [profile, ext]
-		if ResourceLoader.exists(p):
-			return p
+		var candidates := [
+			"res://assets/models/%s.%s" % [profile, ext],
+			"res://assets/models/boss_variants/%s.%s" % [profile, ext],
+		]
+		for p in candidates:
+			if ResourceLoader.exists(p):
+				return p
 	return ""
 
 static func has_model(profile: String) -> bool:
@@ -61,9 +66,11 @@ static func try_if_wire(entity: Node3D, profile: String) -> bool:
 	# feet at y≈0 — independent of the source art's unit system.
 	if PROFILE_HEIGHT.has(profile):
 		_fit_rig(rig, float(PROFILE_HEIGHT[profile]))
+	_configure_authored_lods(rig)
 
 	# Animation bridge: imported clips, when present, become playable cues.
 	var actors := rig.find_children("*", "AnimationPlayer", true, false)
+	print("[rig-loader] profile=", profile, " actors=", actors.size(), " rig_children=", rig.get_children())
 	if not actors.is_empty():
 		var player = actors[0] as AnimationPlayer
 		player.playback_process_mode = AnimationPlayer.ANIMATION_PROCESS_PHYSICS
@@ -86,7 +93,8 @@ static func try_if_wire(entity: Node3D, profile: String) -> bool:
 			if e == null:
 				return {}
 			var st := {"dead": false, "hit": false, "attacking": false, "casting": false,
-				"moving": false, "running": false, "dodging": false}
+				"moving": false, "running": false, "dodging": false,
+				"attack_cue": "", "impact_fraction": -1.0}
 			var defeated = e.get("is_defeated")
 			if defeated != null:
 				st.dead = bool(defeated)
@@ -101,6 +109,12 @@ static func try_if_wire(entity: Node3D, profile: String) -> bool:
 				st.hit = anim_state == int(EntityAnimator.AnimState.HIT)
 				st.attacking = anim_state == int(EntityAnimator.AnimState.ATTACK)
 				st.casting = st.attacking and str(anim.get("attack_style")) == "magic"
+				if st.attacking:
+					st.attack_cue = str(anim.get("authored_attack_cue"))
+					st.impact_fraction = float(anim.get("authored_impact_fraction"))
+				var serial = anim.get("swing_serial")
+				if serial != null:
+					st.attack_serial = int(serial)
 				# Movement comes from the animator's own move_ratio (only
 				# horizontal walking, excludes jumps/glides), not full 3D velocity.
 				var ratio := float(anim.get("move_ratio"))
@@ -111,6 +125,26 @@ static func try_if_wire(entity: Node3D, profile: String) -> bool:
 			return st
 		entity.set_meta("anim_bridge", bridge)
 	return true
+
+## Blender exports all three authored levels in one GLB. Configure mutually
+## exclusive distance bands after import so only one complete silhouette is
+## submitted at a time. Margins add hysteresis without alpha fading/overdraw.
+static func _configure_authored_lods(rig: Node3D) -> void:
+	for candidate in rig.find_children("*", "MeshInstance3D", true, false):
+		var mesh := candidate as MeshInstance3D
+		var node_name := str(mesh.name).to_upper()
+		mesh.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
+		mesh.visibility_range_begin_margin = 2.0
+		mesh.visibility_range_end_margin = 2.0
+		if node_name.ends_with("_LOD0"):
+			mesh.visibility_range_begin = 0.0
+			mesh.visibility_range_end = 20.0
+		elif node_name.ends_with("_LOD1"):
+			mesh.visibility_range_begin = 18.0
+			mesh.visibility_range_end = 36.0
+		elif node_name.ends_with("_LOD2"):
+			mesh.visibility_range_begin = 34.0
+			mesh.visibility_range_end = 1000.0
 
 ## Measure the rig's merged mesh AABB (in the rig's own space) and rescale
 ## it uniformly so the figure stands `target_height` world units tall, then
@@ -134,7 +168,9 @@ static func _fit_rig(rig: Node3D, target_height: float) -> void:
 	var k := target_height / acc.size.y
 	rig.scale *= k
 	# Plant feet: shift so the scaled AABB bottom lands on y=0.
-	rig.position.y -= acc.position.y * rig.scale.y
+	# AABB bottom in rig local space: acc.position.y - acc.size.y * 0.5
+	# After scaling by rig.scale.y, world bottom = (acc.position.y - acc.size.y * 0.5) * rig.scale.y + rig.position.y
+	rig.position.y -= (acc.position.y - acc.size.y * 0.5) * rig.scale.y
 
 # Names that stay visible when a real model mounts (light + sockets + FX
 # that gear, relics and the lantern still rely on).

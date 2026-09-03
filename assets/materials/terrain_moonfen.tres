@@ -1,18 +1,18 @@
 [gd_resource type="ShaderMaterial" load_steps=14 format=3]
 
 [ext_resource type="Shader" path="res://assets/shaders/terrain_ground.gdshader" id="1_sh"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/grass/albedo.jpg" id="2_ga"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/grass/normal.jpg" id="3_gn"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/grass/roughness.jpg" id="4_gr"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/dirt/albedo.jpg" id="5_da"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/dirt/normal.jpg" id="6_dn"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/dirt/roughness.jpg" id="7_dr"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/sand/albedo.jpg" id="8_sa"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/sand/normal.jpg" id="9_sn"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/sand/roughness.jpg" id="10_sr"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/albedo.jpg" id="11_ra"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/normal.jpg" id="12_rn"]
-[ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/roughness.jpg" id="13_rr"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/grass/albedo.png" id="2_ga"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/grass/normal.png" id="3_gn"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/grass/roughness.png" id="4_gr"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/dirt/albedo.png" id="5_da"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/dirt/normal.png" id="6_dn"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/dirt/roughness.png" id="7_dr"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/sand/albedo.png" id="8_sa"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/sand/normal.png" id="9_sn"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/sand/roughness.png" id="10_sr"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/rock/albedo.png" id="11_ra"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/rock/normal.png" id="12_rn"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/rock/roughness.png" id="13_rr"]
 
 [resource]
 render_priority = 0
@@ -42,6 +42,8 @@ shader_parameter/crest_color = Color(0.28, 0.25, 0.38, 1)
 shader_parameter/accent_color = Color(0.45, 0.72, 1.00, 1)
 shader_parameter/accent_strength = 0.55
 shader_parameter/terrain_brightness = 1.28
+shader_parameter/tex_gain = 1.9
+shader_parameter/tex_saturation = 0.45
 shader_parameter/detail_warp_amount = 0.9
 shader_parameter/ember_fleck_density = 0.045
 shader_parameter/ember_fleck_intensity = 0.85

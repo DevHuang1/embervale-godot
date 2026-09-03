@@ -1,0 +1,14 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/entities/hushling.tscn" id="1_base"]
+[ext_resource type="Script" path="res://scripts/entities/realm_archetype_enemy.gd" id="2_script"]
+
+[node name="MireStalker" instance=ExtResource("1_base")]
+script = ExtResource("2_script")
+archetype = "mire_stalker"
+display_name = "Mire Stalker"
+accent_color = Color(0.28, 0.78, 0.82, 1)
+silhouette_kind = "fins"
+profile_sfx = "grave_moss"
+max_hp = 36
+base_atk = 4

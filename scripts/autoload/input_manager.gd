@@ -22,6 +22,7 @@ var is_mobile: bool = OS.has_feature("mobile")
 var last_tap_time: float = 0.0
 var tap_threshold: float = 0.3
 var world_gesture_active: bool = false  # true while two-finger camera gesture
+var first_person_active: bool = false   # true while CameraRig drives a 1-finger free-look
 var active_camera: Camera3D = null
 var held_move_keys: Dictionary = {}
 var _drag_samples: Dictionary = {}  # index -> {speed: float, dir: Vector2}
@@ -96,22 +97,30 @@ func _handle_drag(event: InputEventScreenDrag) -> void:
 	if world_gesture_active:
 		move_input.emit(Vector2.ZERO)
 		return
-	var relative = event.relative
+	# In first-person view a one-finger drag is camera free-look (consumed by
+	# CameraRig). Keep tracking the sample so fast flicks still dodge.
+	if first_person_active:
+		_track_drag_sample(event, event.relative)
+		return
+	var relative := event.relative
 	if relative.length() > touch_deadzone:
 		move_input.emit(relative.normalized())
-		var now := Time.get_ticks_msec() / 1000.0
-		var speed := 0.0
-		var dir := Vector2.ZERO
-		if _drag_samples.has(event.index):
-			var sample: Dictionary = _drag_samples[event.index]
-			var dt: float = max(now - sample.get("time", now), 0.001)
-			speed = relative.length() / dt
-			dir = relative.normalized() if relative.length() > 0.0001 else Vector2.ZERO
-			sample.speed = lerpf(sample.speed, speed, 0.45)
-			sample.dir = dir
-			sample.time = now
+		_track_drag_sample(event, relative)
 	else:
 		move_input.emit(Vector2.ZERO)
+
+func _track_drag_sample(event: InputEventScreenDrag, relative: Vector2) -> void:
+	if relative.length() <= touch_deadzone:
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	if _drag_samples.has(event.index):
+		var sample: Dictionary = _drag_samples[event.index]
+		var dt: float = max(now - float(sample.get("time", now)), 0.001)
+		var speed := relative.length() / dt
+		var dir := relative.normalized() if relative.length() > 0.0001 else Vector2.ZERO
+		sample.speed = lerpf(float(sample.speed), speed, 0.45)
+		sample.dir = dir
+		sample.time = now
 
 func _handle_mouse(event: InputEventMouseButton) -> void:
 	if event.pressed:

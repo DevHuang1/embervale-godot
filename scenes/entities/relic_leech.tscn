@@ -1,0 +1,14 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/entities/hushling.tscn" id="1_base"]
+[ext_resource type="Script" path="res://scripts/entities/realm_archetype_enemy.gd" id="2_script"]
+
+[node name="RelicLeech" instance=ExtResource("1_base")]
+script = ExtResource("2_script")
+archetype = "relic_leech"
+display_name = "Relic Leech"
+accent_color = Color(0.46, 0.76, 1, 1)
+silhouette_kind = "maw"
+profile_sfx = "hollow_resin"
+max_hp = 44
+base_atk = 5

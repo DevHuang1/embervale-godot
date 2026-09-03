@@ -19,14 +19,73 @@ func _initialize() -> void:
 func _run() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT))
 	var t0 := Time.get_ticks_msec()
+	if "--enemy-v2-only" in OS.get_cmdline_user_args():
+		_enemy_skin_v2()
+		print("ENEMY V2 TEXTURES DONE in %d ms" % (Time.get_ticks_msec() - t0))
+		quit(0)
+		return
 	_detail_grain()
 	_detail_normal()
 	_write_hero_set()
 	_hero_ember_variant()
-	_hushling_mask()
+	_hushling_set()
 	_boss_set()
 	print("TEXTURE GENERATION DONE in %d ms" % (Time.get_ticks_msec() - t0))
 	quit(0)
+
+## Regenerable derivative pass for the selected image-generated enemy master.
+## The master is never modified; edge wrapping, contrast limiting, normal, ORM,
+## and emission extraction always write sibling runtime maps.
+func _enemy_skin_v2() -> void:
+	var source := Image.load_from_file(OUT + "enemy_skin_v2_master.png")
+	if source == null or source.is_empty():
+		push_error("Missing enemy_skin_v2_master.png")
+		return
+	source.resize(1024, 1024, Image.INTERPOLATE_LANCZOS)
+	var size := source.get_width()
+	var albedo := source.duplicate()
+	var wrap_band := 96
+	# Pair and blend opposite borders. At the edge both samples receive the
+	# same average; the blend falls away smoothly before the focal region.
+	for y in size:
+		for x in wrap_band:
+			var opposite := size - 1 - x
+			var weight := pow(1.0 - float(x) / float(wrap_band), 2.0)
+			var average: Color = (albedo.get_pixel(x, y) + albedo.get_pixel(opposite, y)) * 0.5
+			albedo.set_pixel(x, y, albedo.get_pixel(x, y).lerp(average, weight))
+			albedo.set_pixel(opposite, y, albedo.get_pixel(opposite, y).lerp(average, weight))
+	for x in size:
+		for y in wrap_band:
+			var opposite := size - 1 - y
+			var weight := pow(1.0 - float(y) / float(wrap_band), 2.0)
+			var average: Color = (albedo.get_pixel(x, y) + albedo.get_pixel(x, opposite)) * 0.5
+			albedo.set_pixel(x, y, albedo.get_pixel(x, y).lerp(average, weight))
+			albedo.set_pixel(x, opposite, albedo.get_pixel(x, opposite).lerp(average, weight))
+	var height := _new_img(size)
+	var orm := _new_img(size)
+	var emission := _new_img(size)
+	for y in size:
+		for x in size:
+			var color: Color = albedo.get_pixel(x, y)
+			# Mip-safe compression: retain plate hierarchy without harsh black seams.
+			var luminance: float = color.get_luminance()
+			var compressed: float = 0.5 + (luminance - 0.5) * 0.78
+			color *= compressed / maxf(luminance, 0.06)
+			color.r = clampf(color.r, 0.09, 0.78)
+			color.g = clampf(color.g, 0.09, 0.78)
+			color.b = clampf(color.b, 0.10, 0.82)
+			albedo.set_pixel(x, y, color)
+			luminance = color.get_luminance()
+			height.set_pixel(x, y, Color(luminance, luminance, luminance))
+			var crevice: float = clampf((0.48 - luminance) * 2.1, 0.0, 1.0)
+			var cyan: float = clampf((color.b + color.g) * 0.5 - color.r - 0.08, 0.0, 1.0)
+			orm.set_pixel(x, y, Color(1.0 - crevice * 0.55,
+				clampf(0.63 + crevice * 0.25 - cyan * 0.18, 0.38, 0.94), 0.0))
+			emission.set_pixel(x, y, Color(cyan, cyan, cyan))
+	_save(albedo, "enemy_skin_v2_albedo.png")
+	_normal_from_height(height, size, 3.0, "enemy_skin_v2_normal.png")
+	_save(orm, "enemy_skin_v2_orm.png")
+	_save(emission, "enemy_skin_v2_emission.png")
 
 # === Helpers ===
 
@@ -177,17 +236,44 @@ func _hero_ember_variant() -> void:
 				mask.set_pixel(x + 1, y + 1, c)
 	_save(mask, "hero_ember_emission_mask.png")
 
-func _hushling_mask() -> void:
-	# Glowing fungal pods: soft blobby islands over near-black
+func _hushling_set() -> void:
+	# Hand-painted Bramble Sprite set. The body wears a violet-moss mottle
+	# (grayscale ~0.5 so the albedo_texture multiply leaves the material's
+	# base_color intact), and the SAME pod field drives albedo pods, the
+	# normal height (raised mint knobs) and the emission mask — so glowing
+	# pods sit exactly on painted pods, never floating.
 	var size := 512
-	var pods := _fbm(51, 6.5, 4)
-	var warp := _fbm(52, 13.0, 2)
+	var mottle := _fbm(51, 6.5, 4)
+	var crevice := _fbm(53, 14.0, 3)
+	var pod_warps := _fbm(52, 13.0, 2)
+	var pod_val := _fbm(54, 6.5, 4)
+	var img := _new_img(size)     # albedo (violet-moss, pods mint)
+	var h := Image.create(size, size, false, Image.FORMAT_RGB8)
+	var orm := _new_img(size)     # R=ao G=rough B=metal
 	var mask := _new_img(size)
 	for y in size:
 		for x in size:
-			var wx := pods.get_noise_2d(x + warp.get_noise_2d(x, y) * 40.0, y)
-			var v := clampf(smoothstep(0.12, 0.46, wx), 0.0, 1.0)
-			mask.set_pixel(x, y, Color(v, v, v))
+			var warp := pod_warps.get_noise_2d(x, y) * 40.0
+			var pod := clampf(smoothstep(0.18, 0.52,
+				pod_val.get_noise_2d(x + warp, y)), 0.0, 1.0)
+			var m := clampf(mottle.get_noise_2d(x, y) * 0.5 + 0.5, 0.0, 1.0)
+			var cr := clampf(crevice.get_noise_2d(x, y) * 0.5 + 0.5, 0.0, 1.0)
+			# Violet-moss body, brighter in the crevices, mint pods on top
+			var alb := Color(0.46 + cr * 0.12, 0.42 + cr * 0.10, 0.55 + m * 0.06)
+			var pod_c := Color(0.44, 0.78, 0.62)
+			alb = alb.lerp(pod_c, pod * 0.85)
+			img.set_pixel(x, y, alb)
+			# Height: pod knobs rising out of a wrinkled skin
+			var val := pod * 0.55 + m * 0.25 + cr * 0.2
+			h.set_pixel(x, y, Color(val, val, val))
+			# ORM: AO deep in the wrinkles, rough bark skin, no metal
+			var ao := clampf(1.0 - cr * 0.5, 0.25, 1.0)
+			var rough := clampf(0.55 + m * 0.3 + pod * 0.1, 0.4, 1.0)
+			orm.set_pixel(x, y, Color(ao, rough, 0.0))
+			mask.set_pixel(x, y, Color(pod, pod, pod))
+	_normal_from_height(h, size, 3.2, "hushling_normal.png")
+	_save(img, "hushling_albedo.png")
+	_save(orm, "hushling_orm.png")
 	_save(mask, "hushling_emission_mask.png")
 
 func _boss_set() -> void:

@@ -83,28 +83,36 @@ text = "EMBERVALE"
 theme_override_font_sizes/font_size = 32
 
 [node name="HeroCard" type="PanelContainer" parent="Root"]
+custom_minimum_size = Vector2(720, 620)
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -490.0
+offset_left = -460.0
 offset_top = -350.0
-offset_right = 490.0
+offset_right = 460.0
 offset_bottom = 350.0
 grow_horizontal = 2
 grow_vertical = 2
 
 [node name="HeroVBox" type="VBoxContainer" parent="Root/HeroCard"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 16
 
 [node name="Eyebrow" type="Label" parent="Root/HeroCard/HeroVBox"]
 layout_mode = 2
 theme_type_variation = &"Eyebrow"
 text = "A TALE FROM EMBERVALE"
 horizontal_alignment = 1
+
+[node name="Crest" type="Label" parent="Root/HeroCard/HeroVBox"]
+layout_mode = 2
+theme_type_variation = &"Title"
+text = "—  ◈  —"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 28
 
 [node name="TitleLabel" type="Label" parent="Root/HeroCard/HeroVBox"]
 layout_mode = 2
@@ -120,6 +128,9 @@ text = "Night has settled over the Whispergrove. Take up the lantern,
 walk the pale path, and wake what sleeps beneath the moss."
 horizontal_alignment = 1
 autowrap_mode = 2
+
+[node name="TitleRule" type="HSeparator" parent="Root/HeroCard/HeroVBox"]
+layout_mode = 2
 
 [node name="CTASpacer" type="Control" parent="Root/HeroCard/HeroVBox"]
 custom_minimum_size = Vector2(0, 4)
@@ -169,20 +180,20 @@ alignment = 1
 theme_override_constants/separation = 14
 
 [node name="ContinueButton" type="Button" parent="Root/HeroCard/HeroVBox/SecondaryRow"]
-custom_minimum_size = Vector2(210, 64)
+custom_minimum_size = Vector2(190, 72)
 layout_mode = 2
 disabled = true
 text = "CONTINUE"
 theme_override_font_sizes/font_size = 23
 
 [node name="SettingsButton" type="Button" parent="Root/HeroCard/HeroVBox/SecondaryRow"]
-custom_minimum_size = Vector2(210, 64)
+custom_minimum_size = Vector2(190, 72)
 layout_mode = 2
 text = "SETTINGS"
 theme_override_font_sizes/font_size = 23
 
 [node name="QuitButton" type="Button" parent="Root/HeroCard/HeroVBox/SecondaryRow"]
-custom_minimum_size = Vector2(210, 64)
+custom_minimum_size = Vector2(190, 72)
 layout_mode = 2
 text = "QUIT"
 theme_override_font_sizes/font_size = 23

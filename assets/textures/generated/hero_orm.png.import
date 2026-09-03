@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://bqnw68bp45q5i"
 path.s3tc="res://.godot/imported/hero_orm.png-0928c845943d84c607713805a3a57c41.s3tc.ctex"
+path.etc2="res://.godot/imported/hero_orm.png-0928c845943d84c607713805a3a57c41.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/generated/hero_orm.png"
-dest_files=["res://.godot/imported/hero_orm.png-0928c845943d84c607713805a3a57c41.s3tc.ctex"]
+dest_files=["res://.godot/imported/hero_orm.png-0928c845943d84c607713805a3a57c41.s3tc.ctex", "res://.godot/imported/hero_orm.png-0928c845943d84c607713805a3a57c41.etc2.ctex"]
 
 [params]
 

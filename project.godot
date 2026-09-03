@@ -21,6 +21,8 @@ ScanManager="*res://scripts/autoload/scan_manager.gd"
 AudioManager="*res://scripts/autoload/audio_manager.gd"
 InputManager="*res://scripts/autoload/input_manager.gd"
 WorldState="*res://scripts/autoload/world_state.gd"
+StoryManager="*res://scripts/autoload/story_manager.gd"
+MCPRuntime="*res://addons/godot_mcp/runtime/mcp_runtime.gd"
 
 [debug]
 
@@ -31,6 +33,10 @@ settings/gizmos/global=true
 window/size/viewport_width=1080
 window/size/viewport_height=1920
 window/mode/window_mode=0
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
 
 [groups]
 
@@ -65,17 +71,34 @@ physics/common/physics_tick=60
 
 [rendering]
 
-rendering/quality/shadows/enabled=true
-rendering/quality/shadow_atlas/size=1024
-rendering/quality/shadow_atlas/quadrant_subdivision=2
-rendering/lights_and_shadows/use_occlusion_culling=true
-rendering/anti_aliasing/quality/msaa_3d=0
-rendering/anti_aliasing/quality/msaa_2d=0
-rendering/anti_aliasing/quality/use_taa=false
-rendering/scaling_3d/scale=0.75
-rendering/scaling_3d/mode=0
-rendering/environment/defaults/default_clear_color=Color(0.043, 0.094, 0.078, 1)
-rendering/environment/defaults/default_environment="res://assets/environments/embervale_env.tres"
+textures/vram_compression/import_etc2_astc=true
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile=1
+lights_and_shadows/positional_shadow/soft_shadow_filter_quality=3
+lights_and_shadows/positional_shadow/soft_shadow_filter_quality.mobile=1
+textures/default_filters/anisotropic_filtering_level=3
+environment/ssao/half_size=false
+environment/ssil/quality=1
+anti_aliasing/quality/msaa_3d=2
+scaling_3d/mode="fsr2"
+scaling_3d/fsr_sharpness=0.35
+environment/defaults/default_clear_color=Color(0.043, 0.094, 0.078, 1)
+anti_aliasing/quality/screen_space_aa=1
+anti_aliasing/quality/use_taa=true
+occlusion_culling/use_occlusion_culling=true
+environment/defaults/default_environment="res://assets/environments/embervale_env.tres"
+anti_aliasing/quality/msaa_3d.mobile=1
+anti_aliasing/quality/use_taa.mobile=false
+scaling_3d/scale.mobile=0.85
+textures/default_filters/anisotropic_filtering_level.mobile=2
+global_illumination/gi/use_half_resolution.mobile=true
+environment/ssao/quality.mobile=0
+environment/ssao/half_size.mobile=true
+environment/ssil/quality.mobile=0
+environment/screen_space_reflection/roughness_quality=2
+environment/screen_space_reflection/roughness_quality.mobile=0
+environment/volumetric_fog/volume_size.mobile=32
+environment/volumetric_fog/volume_depth.mobile=32
 
 [shader_globals]
 

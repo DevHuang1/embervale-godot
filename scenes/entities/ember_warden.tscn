@@ -1,0 +1,14 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/entities/hushling.tscn" id="1_base"]
+[ext_resource type="Script" path="res://scripts/entities/realm_archetype_enemy.gd" id="2_script"]
+
+[node name="EmberWarden" instance=ExtResource("1_base")]
+script = ExtResource("2_script")
+archetype = "ember_warden"
+display_name = "Ember Warden"
+accent_color = Color(1, 0.28, 0.08, 1)
+silhouette_kind = "shield"
+profile_sfx = "ember_glass"
+max_hp = 54
+base_atk = 6

@@ -6,6 +6,12 @@ class_name CameraRig
 ## cinematic depth of field and tighter top-down framing.
 ## Also supports a cinematic 3rd-person mode for immersive close-up gameplay.
 
+signal view_mode_changed(mode: String)
+
+const VIEW_FIRST_PERSON := "first_person"
+const VIEW_THIRD_PERSON := "third_person"
+const VIEW_TOP_DOWN := "top_down"
+
 @export var distance: float = 17.5
 @export var min_distance: float = 11.0
 @export var max_distance: float = 28.0
@@ -35,11 +41,21 @@ class_name CameraRig
 @export var third_person_fov: float = 55.0
 @export var third_person_min_distance: float = 8.0
 @export var third_person_max_distance: float = 24.0
+@export var first_person_distance: float = 0.12
+@export var first_person_angle_v: float = -0.20
+@export var first_person_target_height: float = 1.52
+@export var first_person_fov: float = 68.0
 @export var boss_distance: float = 15.5
 @export var boss_min_distance: float = 12.0
 @export var boss_max_distance: float = 22.0
 @export var boss_fov: float = 46.0
 @export var mode_lerp_speed: float = 3.0
+# First-person free-look: turn the view left/right to look around on any
+# device (mouse motion on desktop, a one-finger drag elsewhere). The orbit
+# modes keep their wide arc; first person stays near level with this band.
+@export var first_person_look_sensitivity: float = 0.004
+@export var first_person_pitch_min: float = -0.65
+@export var first_person_pitch_max: float = 0.10
 
 @onready var camera: Camera3D = $SpringArm/Camera3D
 @onready var spring_arm: SpringArm3D = $SpringArm
@@ -58,6 +74,8 @@ var target_angle_h: float = 0.0  # Horizontal (yaw)
 var target_angle_v: float = -0.95  # Vertical (pitch, ~-54 deg top-down)
 var cam_attributes: CameraAttributesPractical = null
 var camera_base_position: Vector3 = Vector3.ZERO
+var view_mode: String = VIEW_THIRD_PERSON
+var settings_path: String = AudioManager.SETTINGS_PATH
 
 # Mode switching state: lerps between top-down and 3rd-person
 var _target_distance: float = 17.5
@@ -90,8 +108,11 @@ func _ready() -> void:
 	spring_arm.spring_length = distance
 	spring_arm.margin = 0.5
 	
-	# Apply camera mode (instant on first frame)
-	set_camera_mode(third_person, true)
+	# Third person is the new default. Existing top-down callers remain valid
+	# through set_camera_mode(), while the persisted player choice uses the
+	# explicit first/third-person interface.
+	view_mode = _load_view_mode()
+	set_view_mode(view_mode, true, false)
 	
 	# Snap to default framing on first frame
 	rotation.y = target_angle_h
@@ -131,14 +152,15 @@ func _apply_drag_inertia(delta: float) -> void:
 			_drag_ang_vel = Vector2.ZERO
 		return
 	target_angle_h += _drag_ang_vel.x * inertia_strength * delta
-	target_angle_v = clampf(
-		target_angle_v + _drag_ang_vel.y * inertia_strength * delta, -1.35, -0.18)
+	target_angle_v = _clamp_pitch(target_angle_v + _drag_ang_vel.y * inertia_strength * delta)
 	_drag_ang_vel *= exp(-inertia_decay * delta)
 
 func _apply_idle_drift(delta: float) -> void:
 	# Barely-there orbit so the scene breathes when the player stands still
 	var player_speed := target_velocity.length() if target_velocity else 0.0
-	if _is_user_rotating() or _cinematic or player_speed > 0.4:
+	# A fixed-head self-orbit reads as motion sickness in first person; only
+	# breathe the yaw in the over-the-shoulder views.
+	if view_mode == VIEW_FIRST_PERSON or _is_user_rotating() or _cinematic or player_speed > 0.4:
 		return
 	target_angle_h += sin(Time.get_ticks_msec() / 1000.0 * 0.15) * 0.00035
 
@@ -147,7 +169,8 @@ func _update_camera_position(delta: float) -> void:
 	# Aim at the Hero’s torso rather than the feet. This keeps the ground
 	# plane below the frame in third-person mode and prevents terrain/POM
 	# textures from visually swallowing the lower body.
-	var focus_height := third_person_target_height if third_person else top_down_target_height
+	var focus_height := first_person_target_height if view_mode == VIEW_FIRST_PERSON \
+		else (third_person_target_height if third_person else top_down_target_height)
 	target_pos.y += focus_height
 		
 	# Velocity look-ahead
@@ -348,10 +371,7 @@ func set_boss_combat(active: bool, arena_radius: float = 20.0) -> void:
 		_target_max_dist = boss_max_distance
 		_target_fov = boss_fov
 	else:
-		_target_distance = third_person_distance if third_person else 17.5
-		_target_min_dist = third_person_min_distance if third_person else 11.0
-		_target_max_dist = third_person_max_distance if third_person else 28.0
-		_target_fov = third_person_fov if third_person else 40.0
+		_apply_view_targets(view_mode)
 
 func set_distance(new_distance: float) -> void:
 	distance = clamp(new_distance, _target_min_dist, _target_max_dist)
@@ -366,26 +386,75 @@ func get_angles() -> Vector2:
 ## Switch between 3rd-person cinematic and top-down modes.
 ## When instant=true the rig snaps immediately; otherwise it lerps smoothly.
 func set_camera_mode(new_third_person: bool, instant: bool = false) -> void:
-	third_person = new_third_person
-	if third_person:
-		_target_distance = third_person_distance
-		_target_angle_v = third_person_angle_v
-		_target_fov = third_person_fov
-		_target_min_dist = third_person_min_distance
-		_target_max_dist = third_person_max_distance
-	else:
-		_target_distance = 17.5
-		_target_angle_v = -0.95
-		_target_fov = 40.0
-		_target_min_dist = 11.0
-		_target_max_dist = 28.0
+	set_view_mode(VIEW_THIRD_PERSON if new_third_person else VIEW_TOP_DOWN,
+		instant, false)
+
+func set_view_mode(new_mode: String, instant: bool = false,
+		persist: bool = true) -> void:
+	if new_mode not in [VIEW_FIRST_PERSON, VIEW_THIRD_PERSON, VIEW_TOP_DOWN]:
+		new_mode = VIEW_THIRD_PERSON
+	view_mode = new_mode
+	third_person = view_mode == VIEW_THIRD_PERSON
+	_apply_view_targets(view_mode)
 	if instant:
 		distance = _target_distance
 		target_angle_v = _target_angle_v
+		spring_arm.spring_length = _target_distance
 		if camera:
 			camera.fov = _target_fov
 		min_distance = _target_min_dist
 		max_distance = _target_max_dist
+	_set_target_first_person_visibility(view_mode == VIEW_FIRST_PERSON)
+	# Route one-finger drags to the rig (free-look) instead of drag steering.
+	InputManager.first_person_active = view_mode == VIEW_FIRST_PERSON
+	if persist:
+		_save_view_mode()
+	view_mode_changed.emit(view_mode)
+
+func toggle_first_third_person() -> void:
+	set_view_mode(VIEW_THIRD_PERSON if view_mode == VIEW_FIRST_PERSON \
+		else VIEW_FIRST_PERSON)
+
+func _apply_view_targets(mode: String) -> void:
+	match mode:
+		VIEW_FIRST_PERSON:
+			_target_distance = first_person_distance
+			_target_angle_v = first_person_angle_v
+			_target_fov = first_person_fov
+			_target_min_dist = first_person_distance
+			_target_max_dist = first_person_distance
+		VIEW_TOP_DOWN:
+			_target_distance = 17.5
+			_target_angle_v = -0.95
+			_target_fov = 40.0
+			_target_min_dist = 11.0
+			_target_max_dist = 28.0
+		_:
+			_target_distance = third_person_distance
+			_target_angle_v = third_person_angle_v
+			_target_fov = third_person_fov
+			_target_min_dist = third_person_min_distance
+			_target_max_dist = third_person_max_distance
+
+func _set_target_first_person_visibility(first_person: bool) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+	var target_visual := target.get_node_or_null("Visual") as Node3D
+	if target_visual != null:
+		target_visual.visible = not first_person
+
+func _load_view_mode() -> String:
+	var config := ConfigFile.new()
+	if config.load(settings_path) != OK:
+		return VIEW_THIRD_PERSON
+	var stored := str(config.get_value("gameplay", "camera_view", VIEW_THIRD_PERSON))
+	return stored if stored in [VIEW_FIRST_PERSON, VIEW_THIRD_PERSON] else VIEW_THIRD_PERSON
+
+func _save_view_mode() -> void:
+	var config := ConfigFile.new()
+	config.load(settings_path)
+	config.set_value("gameplay", "camera_view", view_mode)
+	config.save(settings_path)
 
 # === Input: drag rotate, pinch zoom, wheel zoom ===
 @export var rotate_sensitivity: float = 0.005
@@ -397,15 +466,25 @@ var _touch_pos := {}
 var _touch_prev := {}
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
+	if event is InputEventKey and event.pressed and not event.echo \
+			and event.keycode == KEY_V:
+		toggle_first_third_person()
+		get_viewport().set_input_as_handled()
+	elif event is InputEventMouseButton:
 		_handle_mouse_button(event)
 	elif event is InputEventMouseMotion and _drag_rotate:
 		var dh: float = -event.relative.x * rotate_sensitivity
-		var dv: float = clampf(
-			target_angle_v - event.relative.y * rotate_sensitivity, -1.35, -0.18) - target_angle_v
+		var dv: float = _clamp_pitch(
+			target_angle_v - event.relative.y * rotate_sensitivity) - target_angle_v
 		target_angle_h += dh
-		target_angle_v = clampf(target_angle_v + dv, -1.35, -0.18)
+		target_angle_v = _clamp_pitch(target_angle_v + dv)
 		_drag_ang_vel = _drag_ang_vel.lerp(Vector2(dh, dv) * 60.0, 0.4)
+		if view_mode == VIEW_FIRST_PERSON:
+			_target_angle_v = target_angle_v
+	elif event is InputEventMouseMotion and not _drag_rotate and view_mode == VIEW_FIRST_PERSON:
+		# Desktop free-look: moving the mouse turns the first-person view.
+		_apply_first_person_look(event.relative)
+		get_viewport().set_input_as_handled()
 	elif event is InputEventScreenTouch:
 		_handle_screen_touch(event)
 	elif event is InputEventScreenDrag:
@@ -432,6 +511,13 @@ func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 	InputManager.world_gesture_active = _touch_pos.size() >= 2
 
 func _handle_screen_drag(event: InputEventScreenDrag) -> void:
+	# First-person free-look: a single finger turns the view left/right.
+	# Movement keeps its own inputs (tap-to-move and the on-screen joystick),
+	# so the drag never steers in first person.
+	if view_mode == VIEW_FIRST_PERSON and _touch_pos.size() == 1 \
+			and _touch_pos.has(event.index):
+		_apply_first_person_look(event.relative)
+		return
 	if _touch_pos.size() < 2 or not _touch_pos.has(event.index):
 		return
 	
@@ -445,11 +531,13 @@ func _handle_screen_drag(event: InputEventScreenDrag) -> void:
 	
 	# Two-finger orbit from the pair's average motion
 	var dh := -event.relative.x * 0.5 * rotate_sensitivity
-	var dv := clampf(
-		target_angle_v - event.relative.y * 0.5 * rotate_sensitivity, -1.35, -0.18) - target_angle_v
+	var dv := _clamp_pitch(
+		target_angle_v - event.relative.y * 0.5 * rotate_sensitivity) - target_angle_v
 	target_angle_h += dh
-	target_angle_v = clampf(target_angle_v + dv, -1.35, -0.18)
+	target_angle_v = _clamp_pitch(target_angle_v + dv)
 	_drag_ang_vel = _drag_ang_vel.lerp(Vector2(dh, dv) * 60.0, 0.4)
+	if view_mode == VIEW_FIRST_PERSON:
+		_target_angle_v = target_angle_v
 	
 	# Pinch zoom from the pair's distance delta
 	var d_now := event.position.distance_to(_touch_pos[other_index])
@@ -459,6 +547,21 @@ func _handle_screen_drag(event: InputEventScreenDrag) -> void:
 	_touch_pos[event.index] = event.position
 	_touch_prev[event.index] = event.position
 	_touch_prev[other_index] = _touch_pos[other_index]
+
+func _apply_first_person_look(relative: Vector2) -> void:
+	target_angle_h -= relative.x * first_person_look_sensitivity
+	target_angle_v = _clamp_pitch(target_angle_v - relative.y * first_person_look_sensitivity)
+	# Tell the mode lerp our hand-picked pitch is the target so nothing eases
+	# the head back to the authored first-person pitch mid-look.
+	_target_angle_v = target_angle_v
+	_drag_ang_vel = Vector2.ZERO
+
+## Pitch clamp for the current view: orbit modes use the whole [-1.35,-0.18]
+## arc, while first person keeps the head near level so fights stay readable.
+func _clamp_pitch(v: float) -> float:
+	if view_mode == VIEW_FIRST_PERSON:
+		return clampf(v, first_person_pitch_min, first_person_pitch_max)
+	return clampf(v, -1.35, -0.18)
 
 func zoom(delta: float) -> void:
 	set_distance(distance - delta)

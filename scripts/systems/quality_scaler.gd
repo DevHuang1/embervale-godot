@@ -20,6 +20,9 @@ const SAMPLE_INTERVAL := 0.5
 const SETTINGS_SECTION := "quality"
 const SETTINGS_KEY := "mode"
 
+## Overridable for isolated validation; production keeps the shared settings.
+var settings_path: String = AudioManager.SETTINGS_PATH
+
 var mode: int = Mode.AUTO
 var level: int = Level.HIGH          # applied degradation level (auto-managed)
 var particle_scale: float = 1.0      # read by DayNightCycle via WorldState
@@ -27,6 +30,7 @@ var particle_scale: float = 1.0      # read by DayNightCycle via WorldState
 # --- UE-look feature knobs (per Level.LOW/MEDIUM/HIGH) ---
 var debris_max: int = 24             # live RigidBody3D shard cap
 var pom_mode: int = 2                # 0 off, 1 parallax offset, 2 POM march
+var stochastic_mode: int = 1         # 0 plain tile, 1 hex-tile grass/dirt (v4)
 var vegetation_pushers: int = 4      # world_pushers slots published to shaders
 var corpse_pool_size: int = 6        # pooled tumble corpses
 var contact_shadows: bool = true     # key light contact shadows
@@ -36,6 +40,7 @@ var vfx_trail_limit: int = 12        # simultaneous ribbon/core meshes
 var transient_light_budget: int = 3  # short-lived impact lights
 var distortion_enabled: bool = true  # chroma/rain-smear post effects
 var material_detail_level: int = 2   # 0 broad, 1 offset, 2 close POM
+var grass_density_scale: float = 1.0 # instanced carpet spacing/count only
 
 var _sample_clock := 0.0
 var _low_time := 0.0
@@ -120,6 +125,7 @@ func _apply_level(new_level: int) -> void:
 	particle_scale = [0.5, 0.75, 1.0][level]
 	debris_max = [6, 12, 24][level]
 	pom_mode = [0, 1, 2][level]
+	stochastic_mode = [0, 0, 1][level]   # only HIGH pays for 3-tap sampling
 	vegetation_pushers = [1, 4, 4][level]
 	corpse_pool_size = [2, 4, 6][level]
 	contact_shadows = level == int(Level.HIGH)
@@ -129,6 +135,7 @@ func _apply_level(new_level: int) -> void:
 	transient_light_budget = [0, 0, 3][level]
 	distortion_enabled = level == int(Level.HIGH)
 	material_detail_level = level
+	grass_density_scale = [0.65, 0.82, 1.0][level]
 	# Trade resolution for smoothness: render at a fraction of the window and
 	# bilinearly upscale, so even weak GPUs hold a steadier framerate. The
 	# sharper the user wants it, the closer to full res they land.
@@ -200,6 +207,7 @@ func _pom_for_material(mat) -> void:
 	if not str(sm.shader.resource_path).contains("terrain_ground.gdshader"):
 		return
 	sm.set_shader_parameter("pom_mode", pom_mode)
+	sm.set_shader_parameter("stochastic_mode", stochastic_mode)
 
 
 ## Degradation order (cheapest visual win first):
@@ -239,7 +247,7 @@ func _apply_environment() -> void:
 
 func _load_mode() -> void:
 	var cfg := ConfigFile.new()
-	if cfg.load(AudioManager.SETTINGS_PATH) != OK:
+	if cfg.load(settings_path) != OK:
 		return
 	mode = clampi(int(cfg.get_value(SETTINGS_SECTION, SETTINGS_KEY, int(Mode.AUTO))),
 		int(Mode.LOW), int(Mode.HIGH))
@@ -247,6 +255,6 @@ func _load_mode() -> void:
 
 func _save_mode() -> void:
 	var cfg := ConfigFile.new()
-	cfg.load(AudioManager.SETTINGS_PATH)
+	cfg.load(settings_path)
 	cfg.set_value(SETTINGS_SECTION, SETTINGS_KEY, mode)
-	cfg.save(AudioManager.SETTINGS_PATH)
+	cfg.save(settings_path)

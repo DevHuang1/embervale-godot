@@ -17,7 +17,7 @@ layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-color = Color(0.008, 0.02, 0.014, 0.66)
+color = Color(0.002, 0.006, 0.005, 0.88)
 
 [node name="Panel" type="PanelContainer" parent="Root"]
 layout_mode = 2
@@ -103,7 +103,7 @@ value = 0.8
 [node name="HintLabel" type="Label" parent="Root/Panel/VBox"]
 layout_mode = 2
 theme_type_variation = &"Caption"
-text = "Camera: drag right-mouse / two fingers to orbit, wheel / pinch to zoom."
+text = "Camera: choose first/third person above. Press V on desktop; drag or pinch to orbit and zoom."
 horizontal_alignment = 1
 autowrap_mode = 2
 

@@ -1,0 +1,14 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/entities/hushling.tscn" id="1_base"]
+[ext_resource type="Script" path="res://scripts/entities/realm_archetype_enemy.gd" id="2_script"]
+
+[node name="SporeWeaver" instance=ExtResource("1_base")]
+script = ExtResource("2_script")
+archetype = "spore_weaver"
+display_name = "Spore Weaver"
+accent_color = Color(0.62, 0.86, 0.34, 1)
+silhouette_kind = "crown"
+profile_sfx = "grave_moss"
+max_hp = 38
+base_atk = 4

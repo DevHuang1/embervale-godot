@@ -1,8 +1,8 @@
 extends SceneTree
 
 ## Headless validation for the combat polish pass:
-## 1. Ember scorch decal must be a bright ADD-blend glow (never a dark MUL
-##    quad that can render as a hard-edged black square).
+## 1. Ground impact marks must use the clipped procedural shader, never an
+##    unmasked material quad that can render as a hard-edged square.
 ## 2. QualityScaler must drive 3D render resolution scaling per tier so the
 ##    game trades detail for smoothness on weak hardware.
 
@@ -16,34 +16,28 @@ func _initialize() -> void:
 func _run() -> void:
 	var failures := 0
 
-	# --- 1) Decal: ADD-blend, warm albedo, no black-square ingredients ---
+	# --- 1) Decal: clipped procedural shader, no square boundary ---
 	var stage := Node3D.new()
 	root.add_child(stage)
 	current_scene = stage
 
-	var decal_mat: BaseMaterial3D = null
+	var decal_mat: Material = null
 	var decal_mi: MeshInstance3D = null
 	CombatFx.spawn_decal(stage, Vector3(2, 0, 0), 0.9)
 	for child in stage.get_children():
 		if child is MeshInstance3D and child.global_position.x > 1.0:
 			decal_mi = child
-			decal_mat = child.mesh.material if child.mesh else null
+			decal_mat = child.mesh.surface_get_material(0) if child.mesh else null
 			break
 	if decal_mat == null:
 		failures += 1
 		print("FAIL: spawn_decal should parent a MeshInstance3D")
-	elif decal_mat is StandardMaterial3D:
-		var sm: StandardMaterial3D = decal_mat
-		if sm.blend_mode != BaseMaterial3D.BLEND_MODE_ADD:
+	elif decal_mat is ShaderMaterial:
+		var decal_material := decal_mat as ShaderMaterial
+		if decal_material.shader == null \
+				or not decal_material.shader.resource_path.ends_with("ground_impact.gdshader"):
+			print("FAIL: spawn_decal must use clipped ground impact shader")
 			failures += 1
-			print("FAIL: decal must be ADD blend, got ", str(sm.blend_mode))
-		if sm.albedo_color.r < 0.5:
-			failures += 1
-			print("FAIL: decal albedo went dark again (black-square risk): ",
-				str(sm.albedo_color))
-		if sm.shading_mode != BaseMaterial3D.SHADING_MODE_UNSHADED:
-			failures += 1
-			print("FAIL: decal should be unshaded for a clean additive glow")
 		if ProjectSettings.get_setting(
 				"rendering/scaling_3d/scale", 1.0) is float \
 				and float(ProjectSettings.get_setting(
@@ -52,7 +46,7 @@ func _run() -> void:
 				+ "owns upscaling — acceptable only when AUTO/HIGH is set")
 	else:
 		failures += 1
-		print("FAIL: decal material is not a StandardMaterial3D")
+		print("FAIL: decal material is not the clipped ShaderMaterial")
 
 	# --- 2) QualityScaler drives 3D scaling (0.6 LOW / 0.75 MID / 1.0 HIGH) ---
 	var scaler := QualityScaler.new()

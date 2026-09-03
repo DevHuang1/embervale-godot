@@ -63,17 +63,16 @@ func _build_bar() -> void:
     _fill.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
     plate.add_child(_fill)
 
-    # Lock frame: lantern-orange border that only appears on the marked foe,
-    # so "this is the one my lantern lit" answers itself at a glance.
-    var lock_mesh := QuadMesh.new()
-    lock_mesh.size = Vector2(bar_width + 0.06, bar_height + 0.05)
+    # Lantern sigil: real annular geometry rather than a translucent QuadMesh.
+    # Only the ring owns pixels, so compatibility renderers cannot expose a
+    # square texture boundary on the marked enemy.
+    var lock_mesh := _make_lock_sigil_mesh()
     _lock_material = _make_material(Color(1.0, 0.74, 0.30, 0.0))
-    _lock_material.billboard_mode = BaseMaterial3D.BILLBOARD_DISABLED
-    lock_mesh.material = _lock_material
+    lock_mesh.surface_set_material(0, _lock_material)
     _lock_frame = MeshInstance3D.new()
     _lock_frame.name = "LockFrame"
     _lock_frame.mesh = lock_mesh
-    _lock_frame.position = Vector3(0.0, 0.0, -0.002)
+    _lock_frame.position = Vector3(-bar_width * 0.5 - 0.26, 0.0, -0.002)
     _lock_frame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
     _lock_frame.visible = false
     plate.add_child(_lock_frame)
@@ -111,6 +110,24 @@ func _make_material(color: Color) -> StandardMaterial3D:
     material.disable_receive_shadows = true
     material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
     return material
+
+func _make_lock_sigil_mesh() -> ArrayMesh:
+    const SEGMENTS := 28
+    const INNER_RADIUS := 0.105
+    const OUTER_RADIUS := 0.175
+    var surface := SurfaceTool.new()
+    surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+    for i in SEGMENTS:
+        var a0 := TAU * float(i) / float(SEGMENTS)
+        var a1 := TAU * float(i + 1) / float(SEGMENTS)
+        var inner0 := Vector3(cos(a0) * INNER_RADIUS, sin(a0) * INNER_RADIUS, 0.0)
+        var outer0 := Vector3(cos(a0) * OUTER_RADIUS, sin(a0) * OUTER_RADIUS, 0.0)
+        var inner1 := Vector3(cos(a1) * INNER_RADIUS, sin(a1) * INNER_RADIUS, 0.0)
+        var outer1 := Vector3(cos(a1) * OUTER_RADIUS, sin(a1) * OUTER_RADIUS, 0.0)
+        for vertex in [inner0, outer0, outer1, inner0, outer1, inner1]:
+            surface.set_normal(Vector3(0.0, 0.0, 1.0))
+            surface.add_vertex(vertex)
+    return surface.commit() as ArrayMesh
 
 ## Immediate damage hook used by enemy and boss damage handlers. The normal
 ## process refresh remains as a safety net for regeneration and scripted damage.

@@ -154,8 +154,9 @@ size = Vector3(62, 4, 2)
 [sub_resource type="BoxShape3D" id="BoxShape_wall_ns"]
 size = Vector3(2, 4, 62)
 
-[node name="Grove" type="Node3D"]
+[node name="Moonfen" type="Node3D"]
 script = ExtResource("1_wm")
+biome_id = "moonfen"
 lantern_active = true
 starting_time_of_day = 0.78
 

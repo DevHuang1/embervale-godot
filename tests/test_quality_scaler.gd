@@ -15,6 +15,7 @@ func _run() -> void:
 
 	var scaler := QualityScaler.new()
 	scaler.name = "QualityScaler"
+	scaler.settings_path = "/tmp/embervale_quality_scaler_test.cfg"
 	root.add_child(scaler)
 	await process_frame
 	await process_frame
@@ -38,6 +39,9 @@ func _run() -> void:
 			or scaler.material_detail_level != QualityScaler.Level.HIGH:
 		failures += 1
 		print("FAIL: HIGH tier should max vfx density/pool/trails/lights/distortion")
+	if not is_equal_approx(scaler.grass_density_scale, 1.0):
+		failures += 1
+		print("FAIL: HIGH should use the full grass-carpet density")
 
 	# --- Contact shadows are opt-in via the contact_shadow group ---
 	var stage := Node3D.new()
@@ -78,6 +82,9 @@ func _run() -> void:
 			or scaler.material_detail_level != QualityScaler.Level.LOW:
 		failures += 1
 		print("FAIL: LOW tier should minimize vfx density/pool/trails/lights/distortion")
+	if not is_equal_approx(scaler.grass_density_scale, 0.65):
+		failures += 1
+		print("FAIL: LOW should retain a reduced grass carpet")
 
 	# --- Auto degrades one step per sustained low reading ---
 	scaler.set_mode(QualityScaler.Mode.AUTO)
@@ -129,6 +136,7 @@ func _run() -> void:
 	# --- Mode persists into the shared settings cfg and loads back ---
 	scaler.set_mode(QualityScaler.Mode.LOW)
 	var reread := QualityScaler.new()
+	reread.settings_path = scaler.settings_path
 	reread._load_mode()
 	if reread.mode != QualityScaler.Mode.LOW:
 		failures += 1

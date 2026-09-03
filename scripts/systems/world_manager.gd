@@ -1,6 +1,8 @@
 extends Node3D
 class_name WorldManager
 
+const MATRIARCH_BOSS_KEY := "res://scripts/entities/boss_hushling_matriarch.gd"
+
 ## === Whispergrove World Manager ===
 ## Handles quest progression, spawns, day/night, environment
 
@@ -37,6 +39,7 @@ var _pack: Array[Node3D] = []
 var _gate_opened := false
 var _altar: Node3D = null
 var _practice_altar: Node3D = null
+var _post_boss_root: Node3D = null
 
 var _relic_trophy: Node3D = null
 var _realm_expansion: Node3D = null
@@ -155,12 +158,15 @@ func _spawn_pack_enemy(origin: Vector3, realm_id: String, hard: bool,
 	var v := Bestiary.variant_for(realm_id, "hard" if hard else "normal")
 	if v.is_empty():
 		return
-	# Ranged "spitter" kin get their own rigged scene; everything else is
-	# the classic hushling (recolored per realm by CharacterModelData).
+	# Ranged "spitter" kin and "fenling" mire sprites get their own rigged
+	# scenes; everything else is the classic hushling (recolored per realm
+	# by CharacterModelData).
 	var kind := str(v.get("kind", "hushling"))
 	var scene_path := "res://scenes/entities/elite_hushling.tscn" \
 		if elite else ("res://scenes/entities/spitter.tscn" \
-		if kind == "spitter" else "res://scenes/entities/hushling.tscn")
+		if kind == "spitter" else ("res://scenes/entities/moonfen_fenling.tscn" \
+		if kind in ["fenling", "moonfen_fenling"] else ("res://scenes/entities/relic_leech.tscn" \
+		if kind == "relic_leech" else "res://scenes/entities/hushling.tscn")))
 	var scene: PackedScene = load(scene_path)
 	if scene == null:
 		return
@@ -177,7 +183,8 @@ func _spawn_pack_enemy(origin: Vector3, realm_id: String, hard: bool,
 	md.move_speed_mult = 0.92 if elite else float(v.get("speed", 1.0))
 	md.configure_entity(enemy)
 	if enemy.has_method("configure_archetype"):
-		enemy.configure_archetype(kind)
+		if not enemy is RealmArchetypeEnemy:
+			enemy.configure_archetype(kind)
 	if bool(v.get("volley", false)) and "thorn_volley" in enemy:
 		enemy.thorn_volley = true
 	if elite:
@@ -311,8 +318,8 @@ func _enable_beacon_light() -> void:
 	beacon_light.light_energy = 3.4
 	beacon_light.omni_range = 30.0
 	beacon_light.omni_attenuation = 1.5
-	beacon_light.global_position = beacon_spawn.global_position + Vector3(0, 3, 0)
 	add_child(beacon_light)
+	beacon_light.global_position = beacon_spawn.global_position + Vector3(0, 3, 0)
 	
 	# Rising ember motes + warm ground glow (pooled GPU fx)
 	var origin: Vector3 = beacon_spawn.global_position
@@ -333,25 +340,62 @@ func _spawn_matriarch(practice: bool = false) -> void:
 	if "is_practice" in matriarch:
 		matriarch.is_practice = practice
 	matriarch.global_position = beacon_spawn.global_position + Vector3(0, 0.1, 6)
+	if matriarch.has_method("set_encounter_origin"):
+		matriarch.set_encounter_origin(matriarch.global_position)
 	if camera_rig:
 		camera_rig.add_shake(0.6)
 		camera_rig.play_boss_intro(matriarch)
+	audio.start_boss_score("matriarch")
+	if matriarch.has_signal("phase_changed"):
+		matriarch.phase_changed.connect(_on_matriarch_phase_changed)
+	if matriarch.has_signal("encounter_reset"):
+		matriarch.encounter_reset.connect(_on_matriarch_encounter_reset)
+	if matriarch.has_signal("death_sequence_started"):
+		matriarch.death_sequence_started.connect(_on_matriarch_death_sequence_started)
 	if matriarch.has_signal("died"):
 		matriarch.died.connect(_on_matriarch_died.bind(matriarch))
 
-func _on_matriarch_died(boss: Node3D) -> void:
+func _on_matriarch_phase_changed(phase: int) -> void:
+	audio.set_boss_score_phase(phase)
+
+func _on_matriarch_encounter_reset() -> void:
+	audio.reset_boss_score()
+
+func _on_matriarch_death_sequence_started(boss: Node3D) -> void:
 	if camera_rig and is_instance_valid(boss):
 		camera_rig.play_kill_cam(boss)
 	var was_practice: bool = boss.is_practice if "is_practice" in boss else false
+	audio.finish_boss_score(not was_practice)
+	CombatFx.spawn_shockwave(self, boss.global_position, 5.2,
+		Color(0.68, 1.0, 0.76, 0.78), 0.9)
+	CombatFx.spawn_motes(self, boss.global_position + Vector3.UP * 1.6,
+		Color(0.76, 1.0, 0.82, 0.8), 22, 2.6, 1.3, 2.0)
+	if not was_practice:
+		FloatingText.spawn_on_entity(boss, "THE BRAMBLE QUEEN FALLS",
+			Color(0.82, 1.0, 0.84), 1.25)
+
+func _on_matriarch_died(boss: Node3D) -> void:
+	var was_practice: bool = boss.is_practice if "is_practice" in boss else false
 	matriarch = null
 	if not was_practice:
+		_apply_post_matriarch_state(true)
 		_spawn_practice_altar()
+
+func _exit_tree() -> void:
+	# The music autoload outlives this realm, so never leak its fixed boss voices
+	# into travel, reload, or the title screen.
+	if audio != null and audio.boss_score_active:
+		audio.stop_boss_score_immediate()
 
 ## === Boss gate: "Shape Your Foe" before the Matriarch wakes ===
 ## Players with scans may spend one to personalize her; everyone else —
 ## or anyone who declines — faces the untouched default.
 func _open_boss_gate() -> void:
 	if _gate_opened:
+		return
+	if game_state.has_boss_killed(MATRIARCH_BOSS_KEY):
+		_apply_post_matriarch_state(false)
+		_spawn_practice_altar()
 		return
 	_gate_opened = true
 	if game_state.scans_remaining > 0:
@@ -424,6 +468,59 @@ func _spawn_practice_altar() -> void:
 	_practice_altar.global_position = relic_pedestal.global_position \
 		if relic_pedestal != null else beacon_spawn.global_position + Vector3(4, 0, 0)
 
+## Reconstructed from the saved first-kill flag on every load. The aftermath
+## is intentionally collision-free: it changes mood, landmarking, and the next
+## goal without altering navigation or trapping the player.
+func _apply_post_matriarch_state(announce: bool) -> void:
+	_gate_opened = true
+	matriarch_spawned = true
+	if moonfen_gate:
+		moonfen_gate.visible = true
+	var ws := get_node_or_null("/root/WorldState")
+	if ws != null:
+		ws.weather_locked = true
+		ws.set_rain(0.0)
+	if _post_boss_root != null and is_instance_valid(_post_boss_root):
+		return
+	_post_boss_root = Node3D.new()
+	_post_boss_root.name = "MatriarchAftermath"
+	add_child(_post_boss_root)
+	_post_boss_root.global_position = beacon_spawn.global_position + Vector3(0, 0.05, 6)
+	var sprout_mat := StandardMaterial3D.new()
+	sprout_mat.albedo_color = Color(0.16, 0.34, 0.22)
+	sprout_mat.roughness = 0.88
+	sprout_mat.emission_enabled = true
+	sprout_mat.emission = Color(0.32, 0.88, 0.52)
+	sprout_mat.emission_energy_multiplier = 0.42
+	for i in 8:
+		var sprout := MeshInstance3D.new()
+		sprout.name = "CleansedSprout_%02d" % i
+		var mesh := CylinderMesh.new()
+		mesh.top_radius = 0.02
+		mesh.bottom_radius = 0.13
+		mesh.height = 0.8 + float(i % 3) * 0.18
+		mesh.radial_segments = 7
+		sprout.mesh = mesh
+		sprout.material_override = sprout_mat
+		var angle := TAU * float(i) / 8.0
+		var radius := 4.4 + float(i % 2) * 1.2
+		sprout.position = Vector3(cos(angle) * radius, mesh.height * 0.5,
+			sin(angle) * radius)
+		sprout.rotation = Vector3(sin(angle) * 0.12, 0.0, -cos(angle) * 0.12)
+		_post_boss_root.add_child(sprout)
+	var marker := Label3D.new()
+	marker.name = "AftermathMarker"
+	marker.text = "THE GROVE REMEMBERS"
+	marker.font_size = 34
+	marker.modulate = Color(0.72, 1.0, 0.78)
+	marker.outline_size = 7
+	marker.position = Vector3(0, 2.2, 0)
+	marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_post_boss_root.add_child(marker)
+	if announce:
+		game_state.quest_progress.emit(
+			"The Matriarch has fallen. New growth marks the road to Moonfen.")
+
 func _despawn_practice_altar() -> void:
 	if _practice_altar != null and is_instance_valid(_practice_altar):
 		_practice_altar.queue_free()
@@ -436,8 +533,8 @@ func _permanent_beacon_light() -> void:
 	permanent_light.light_energy = 2.0
 	permanent_light.omni_range = 40.0
 	permanent_light.omni_attenuation = 1.2
-	permanent_light.global_position = beacon_spawn.global_position + Vector3(0, 4, 0)
 	add_child(permanent_light)
+	permanent_light.global_position = beacon_spawn.global_position + Vector3(0, 4, 0)
 
 func _on_hero_position_changed(pos: Vector3) -> void:
 	game_state.player_position = Vector2(pos.x, pos.z)
@@ -533,6 +630,9 @@ func _on_player_defeated() -> void:
 	game_state.hp_changed.emit(0, game_state.hp)
 	game_state.combat_state = GameState.CombatState.EXPLORING
 	game_state.disengage_enemy()
+	if matriarch != null and is_instance_valid(matriarch) \
+			and matriarch.has_method("reset_encounter"):
+		matriarch.reset_encounter()
 	get_tree().call_group("screen_fx", "reset")
 	# The starter hushling only returns while its quest stage is live;
 	# it queue-frees on death and later stages keep it gone.

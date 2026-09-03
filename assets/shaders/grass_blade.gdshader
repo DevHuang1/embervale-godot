@@ -12,6 +12,9 @@ uniform vec3 tip_color : source_color = vec3(0.30, 0.40, 0.16);
 uniform float wind_strength : hint_range(0.0, 0.6) = 0.16;
 uniform float wind_speed : hint_range(0.0, 4.0) = 1.6;
 uniform float blade_height : hint_range(0.05, 2.0) = 0.34;
+// Cylinder reeds are centered around their origin; authored grass clumps root
+// at local y=0. Materials choose the appropriate height convention.
+uniform float root_height_offset : hint_range(0.0, 0.5) = 0.5;
 // Realm/weather gusts: direction in XZ scaled by strength. Zero = calm.
 uniform vec2 wind_zone = vec2(0.0);
 uniform float wind_gloss : hint_range(0.0, 1.0) = 0.25;
@@ -43,7 +46,7 @@ vec3 _push_offset(vec4 mover, vec3 world_vertex) {
 }
 
 void vertex() {
-	v_h = clamp((VERTEX.y + blade_height * 0.5) / blade_height, 0.0, 1.0);
+	v_h = clamp(VERTEX.y / blade_height + root_height_offset, 0.0, 1.0);
 	float phase = TIME * wind_speed
 		+ (MODEL_MATRIX[3][0] + MODEL_MATRIX[3][2]) * 0.37
 		+ VERTEX.x * 2.0;

@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://bp5piw7yuoc1j"
 path.s3tc="res://.godot/imported/normal.jpg-7aa3dc7e2957e3980c22562db835b650.s3tc.ctex"
+path.etc2="res://.godot/imported/normal.jpg-7aa3dc7e2957e3980c22562db835b650.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/pbr/dirt/normal.jpg"
-dest_files=["res://.godot/imported/normal.jpg-7aa3dc7e2957e3980c22562db835b650.s3tc.ctex"]
+dest_files=["res://.godot/imported/normal.jpg-7aa3dc7e2957e3980c22562db835b650.s3tc.ctex", "res://.godot/imported/normal.jpg-7aa3dc7e2957e3980c22562db835b650.etc2.ctex"]
 
 [params]
 

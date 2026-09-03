@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://2pthwreymlah"
 path.s3tc="res://.godot/imported/boss_bark_normal.png-75827e79dcd41869b80ac0503363666c.s3tc.ctex"
+path.etc2="res://.godot/imported/boss_bark_normal.png-75827e79dcd41869b80ac0503363666c.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/generated/boss_bark_normal.png"
-dest_files=["res://.godot/imported/boss_bark_normal.png-75827e79dcd41869b80ac0503363666c.s3tc.ctex"]
+dest_files=["res://.godot/imported/boss_bark_normal.png-75827e79dcd41869b80ac0503363666c.s3tc.ctex", "res://.godot/imported/boss_bark_normal.png-75827e79dcd41869b80ac0503363666c.etc2.ctex"]
 
 [params]
 

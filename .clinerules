@@ -1,0 +1,13 @@
+# Cline project rules
+
+Read and follow `AGENTS.md` as the source of truth for Embervale priorities,
+constraints, active tasks, and verification commands.
+
+When asked for broad project improvement, select the highest-priority unchecked
+task that produces a complete, testable player-facing slice. Do not start
+several large refactors at once, do not redo the completed stylized-PBR/VFX
+baseline, and do not modify unrelated uncommitted work.
+
+Before finishing, update an `AGENTS.md` checkbox only if its acceptance is
+genuinely met, run the affected validation, and report evidence rather than
+assumptions.

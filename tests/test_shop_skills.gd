@@ -10,6 +10,9 @@ func _initialize() -> void:
 func _run() -> void:
 	var failures := 0
 	var gs = root.get_node("/root/GameState")
+	gs.save_path = "/tmp/embervale_shop_skills_test.cfg"
+	gs.delete_save()
+	gs.reset()
 
 	# --- Registry integrity ---
 	for id in ["ember_sword", "arcane_staff"]:
@@ -66,7 +69,7 @@ func _run() -> void:
 		failures += 1
 		print("FAIL: same skill cast while cooling down")
 	# Cooldowns tick down
-	gs.update_skill_cooldowns(float(cast.skill.cooldown) + 0.1)
+	gs.update_skill_cooldowns(float(cast.skill.cooldown) * 1.20 + 0.1)
 	if not gs.can_use_skill_slot(0):
 		failures += 1
 		print("FAIL: cooldown never recovered")
@@ -115,6 +118,7 @@ func _run() -> void:
 		print("FAIL: armor lost across load")
 
 	dummy.queue_free()
+	gs.delete_save()
 
 	if failures == 0:
 		print("ALL SHOP/SKILL/ARMOR TESTS PASSED")

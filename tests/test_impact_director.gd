@@ -31,12 +31,12 @@ func _run() -> void:
 		failures += 1
 		print("FAIL: unknown style/surface must fall back, not break")
 
-	# --- Element resolution: vanilla inert, relics deterministic ---
+	# --- Element resolution: authored weapons explicit, relics deterministic ---
 	var vanilla := ImpactDirector.element_for_weapon(
 		gs.WEAPON_DEFS["mug_mace"].duplicate(true))
-	if vanilla != "":
+	if vanilla != "fire":
 		failures += 1
-		print("FAIL: vanilla weapons must stay elementless, got '%s'" % vanilla)
+		print("FAIL: authored Mug Mace fire identity was lost, got '%s'" % vanilla)
 	var relic := RelicData.build_weapon_def(
 		{"id": "mug_mace", "name": "MUG MACE", "atk": 7}, 1,
 		"Test Charm", ["A", "B", "C"])

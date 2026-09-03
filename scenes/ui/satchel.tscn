@@ -26,6 +26,11 @@ layout_mode = 2
 theme_type_variation = &"MenuTitle"
 text = "FIELD SATCHEL"
 
+[node name="InventoryMark" type="Label" parent="Root/VBox/Header"]
+layout_mode = 2
+theme_type_variation = &"Eyebrow"
+text = "  ◈  WARDEN LOADOUT"
+
 [node name="CountLabel" type="Label" parent="Root/VBox/Header"]
 layout_mode = 2
 theme_type_variation = &"Subtitle"
@@ -43,6 +48,7 @@ theme_override_font_sizes/font_size = 19
 [node name="ItemsList" type="ScrollContainer" parent="Root/VBox"]
 layout_mode = 2
 size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 220)
 
 [node name="ItemsVBox" type="VBoxContainer" parent="Root/VBox/ItemsList"]
 layout_mode = 2

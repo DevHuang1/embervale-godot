@@ -86,6 +86,25 @@ func _run() -> void:
 	failures = _check(failures,
 		quit_b.get_theme_color("font_hover_color") == UiKit.DANGER_BRIGHT,
 		"QUIT not styled danger")
+	var settings_b: Button = menu.get_node(
+		"Root/HeroCard/HeroVBox/SecondaryRow/SettingsButton")
+	# Geometry regression: the startup card used to have zero authored height,
+	# collapsing all three secondary actions over BEGIN A NEW TALE.
+	for secondary in [cont, settings_b, quit_b]:
+		failures = _check(failures,
+			not cta.get_global_rect().intersects(secondary.get_global_rect()),
+			"CTA overlaps %s" % secondary.text)
+	for pair in [[cont, settings_b], [settings_b, quit_b]]:
+		failures = _check(failures,
+			not (pair[0] as Button).get_global_rect().intersects(
+				(pair[1] as Button).get_global_rect()),
+			"secondary menu buttons overlap")
+	for action in [cta, cont, settings_b, quit_b]:
+		failures = _check(failures, action.get_global_rect().size.y >= 64.0,
+			"%s touch target is shorter than 64 px" % action.text)
+		failures = _check(failures,
+			hero.get_global_rect().encloses(action.get_global_rect()),
+			"%s falls outside the hero card" % action.text)
 	var yes: Button = menu.get_node(
 		"Root/HeroCard/HeroVBox/ConfirmCard/ConfirmVBox/ConfirmRow/ConfirmYes")
 	failures = _check(failures,
@@ -111,9 +130,43 @@ func _run() -> void:
 	# --- Entrance completes ---
 	await create_timer(1.0).timeout
 	await _frames(3)
+	# Recheck after every stagger tween has completed; the historical overlap
+	# appeared only after container layout and positional animation competed.
+	for secondary in [cont, settings_b, quit_b]:
+		failures = _check(failures,
+			not cta.get_global_rect().intersects(secondary.get_global_rect()),
+			"CTA overlaps %s after entrance animation" % secondary.text)
+	for action in [cta, cont, settings_b, quit_b]:
+		failures = _check(failures,
+			hero.get_global_rect().encloses(action.get_global_rect()),
+			"%s falls outside the hero card after entrance" % action.text)
 	var wordmark: Label = menu.get_node("Root/Wordmark")
 	failures = _check(failures, wordmark.modulate.a > 0.95,
 		"wordmark entrance never faded in")
+
+	# --- Continue availability + end-to-end press ---
+	# No save yet: the button must be visibly OFF (renamed, not just dimmed)
+	# so a fresh player is never left clicking a silent dark glass slab.
+	failures = _check(failures, cont.disabled,
+		"CONTINUE enabled despite no save existing")
+	failures = _check(failures, cont.text == "NO SAVED TALE",
+		"disabled CONTINUE should read NO SAVED TALE, got \"%s\"" % cont.text)
+	gs.gold = 42
+	gs.save_game()
+	failures = _check(failures, gs.has_save(), "save_game wrote no file")
+	menu._check_continue_availability()
+	failures = _check(failures, not cont.disabled,
+		"CONTINUE still disabled with a save present")
+	failures = _check(failures, cont.text == "CONTINUE",
+		"enabled button should read CONTINUE, got \"%s\"" % cont.text)
+	cont.pressed.emit()
+	await create_timer(1.5).timeout
+	await _frames(4)
+	failures = _check(failures,
+		current_scene != null
+		and current_scene.scene_file_path == "res://scenes/world/grove.tscn",
+		"pressing CONTINUE never loaded the grove (scene=%s)"
+		% (current_scene.scene_file_path if current_scene else "<null>"))
 
 	gs.delete_save()
 	if failures == 0:

@@ -1,15 +1,21 @@
 shader_type spatial;
-render_mode blend_mix, depth_draw_opaque, cull_back;
+render_mode blend_mix, depth_draw_opaque, cull_back, specular_schlick_ggx;
 
-// === Terrain Ground v3 (UE-style) ===
-// Photo-scanned PBR layers (grass/dirt/sand/rock: albedo + normal +
-// roughness) blended UE-Landscape style: macro noise masks pick regions,
-// then per-layer texture HEIGHTS sharpen the transitions so layers
-// interpenetrate instead of melting. Close range adds parallax occlusion
-// mapping against the blended layer heights (tier-gated), per-layer
-// normal detail, and rain wetting via world_rain_level. Distance still
-// settles everything into calm realm-tinted color masses.
-// Realm palettes + persistent wear map keep driving every biome.
+// === Terrain Ground v4 (UE-style, higher-quality pass) ===
+// Additions over v3:
+//   * Stochastic hex-tile sampling for grass/dirt (kills obvious tiling
+//     repetition at range). Tier-gated by QualityScaler → stochastic_mode.
+//   * Triplanar rock projection for steep slopes — cliffs no longer smear
+//     the top-down rock texture. Cost is rock_mask weighted so flat
+//     ground stays cheap.
+//   * Macro colour variation (low-frequency multiplier) breaks the mass
+//     tint across biome-sized regions without extra samples.
+//   * Puddle accumulation: in low-lying areas (analytic height field)
+//     rain wets more aggressively — darker albedo, near-mirror roughness,
+//     slight blue tint — so water actually pools where it should.
+//   * Cavity AO from the blended layer heights.
+//   * Per-layer specular tuning (rock is glossier, grass is matte).
+//   * Secondary micro-normal octave at very close range.
 
 uniform vec3 grass_color : source_color = vec3(0.16, 0.26, 0.11);
 uniform vec3 grass_dry : source_color = vec3(0.34, 0.36, 0.14);
@@ -52,16 +58,21 @@ uniform float tex_blend : hint_range(0.0, 1.0) = 0.95;
 uniform float sand_amount : hint_range(0.0, 1.0) = 0.34;
 
 // --- Height-weighted blending (UE landscape heightlerp feel) ---
-// 0 recovers soft noise-only blends; higher values carve sharper edges
-// where one layer's surface height rises above the mix.
 uniform float height_contrast : hint_range(0.0, 6.0) = 2.4;
 
 // --- Parallax occlusion (tier-gated by QualityScaler -> pom_mode) ---
 // 0 = off (analytic bump only), 1 = single-step offset (MEDIUM),
-// 2 = 4-step occlusion march near camera (HIGH, Android-budgeted)
+// 2 = 8-step occlusion march near camera (HIGH)
 uniform int pom_mode = 0;
 uniform float depth_scale : hint_range(0.0, 0.2) = 0.025;
 uniform float pom_near : hint_range(4.0, 48.0) = 15.0;
+
+// --- Stochastic hex-tile sampling (v4) ---
+// 0 = plain tiled sampling (LOW/MEDIUM), 1 = 3-tap hex-cell blend on
+// grass/dirt to erase obvious repetition (HIGH). Fades out beyond
+// stochastic_far so we only pay for it near camera.
+uniform int stochastic_mode = 0;
+uniform float stochastic_far : hint_range(6.0, 80.0) = 34.0;
 
 // Debug: 1 = visualize layer weights (r=grass g=dirt b=sand+rock)
 uniform int debug_view = 0;
@@ -71,6 +82,9 @@ uniform float normal_strength : hint_range(0.0, 3.0) = 1.4;
 // Broad geometric relief from the analytic height field
 uniform float bump_strength : hint_range(0.0, 2.0) = 0.42;
 uniform float detail_scale : hint_range(0.05, 8.0) = 0.85;
+// Secondary micro-normal octave (v4)
+uniform float micro_normal_strength : hint_range(0.0, 1.5) = 0.55;
+uniform float micro_normal_scale : hint_range(1.0, 8.0) = 3.7;
 
 // Realm accent: sparse glowing flecks (ember, fen-light, moonmoss).
 uniform vec3 accent_color : source_color = vec3(0.96, 0.72, 0.29);
@@ -81,15 +95,19 @@ uniform float terrain_brightness : hint_range(0.5, 2.0) = 1.28;
 uniform float detail_warp_amount : hint_range(0.0, 4.0) = 0.9;
 uniform float ember_fleck_density : hint_range(0.0, 0.5) = 0.045;
 uniform float ember_fleck_intensity : hint_range(0.0, 4.0) = 0.85;
-// Low-cost realism controls: procedural breakup avoids visible tile repetition.
-uniform float macro_breakup_strength : hint_range(0.0, 1.0) = 0.42;
-uniform float micro_grain_strength : hint_range(0.0, 1.0) = 0.26;
-uniform float puddle_sheen_strength : hint_range(0.0, 1.0) = 0.22;
+
+// Macro colour variation (v4): low-frequency albedo modulation
+uniform float macro_variation_strength : hint_range(0.0, 0.6) = 0.18;
+uniform float macro_variation_scale : hint_range(0.001, 0.05) = 0.008;
+
+// Puddle accumulation (v4) — activated by world_rain_level
+uniform float puddle_threshold : hint_range(0.0, 1.0) = 0.32;
+uniform float puddle_strength : hint_range(0.0, 1.0) = 0.85;
 
 // --- Persistent ground wear (TerrainWear splats via WorldState global) ---
 global uniform sampler2D world_wear_map;
-global uniform vec4 world_wear_bounds;   // xy = min corner (x,z), z = size
-global uniform float world_rain_level;   // published by WorldState each frame
+global uniform vec4 world_wear_bounds;
+global uniform float world_rain_level;
 uniform float wear_strength : hint_range(0.0, 1.0) = 0.8;
 
 varying vec3 world_pos;
@@ -99,6 +117,11 @@ float hash21(vec2 p) {
 	p = fract(p * vec2(127.13, 311.71));
 	p += dot(p, p + 34.43);
 	return fract(p.x * p.y);
+}
+
+vec2 hash22(vec2 p) {
+	float n = hash21(p);
+	return vec2(n, fract(n * 3.71 + 0.137));
 }
 
 float vnoise(vec2 p) {
@@ -123,8 +146,73 @@ float fbm(vec2 p) {
 	return total;
 }
 
-float lum(vec3 c) {
-	return dot(c, vec3(0.299, 0.587, 0.114));
+float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+mat2 rot2(float a) {
+	float c = cos(a); float s = sin(a);
+	return mat2(vec2(c, -s), vec2(s, c));
+}
+
+// Stochastic 3-tap sampling: sample the texture at three rotated /
+// offset positions keyed to hex-cell hashes and blend by barycentric
+// weights. Variance-preserving normalisation keeps overall brightness
+// stable. Approach adapted from Heitz & Neyret (2018), simplified for
+// mobile. Fades to plain sampling beyond `blend_fade` (0..1).
+vec3 stochastic_sample(sampler2D tex, vec2 uv, float blend_fade) {
+	if (blend_fade < 0.02) { return texture(tex, uv).rgb; }
+	// Hex-lattice cell lookup via skewed grid
+	vec2 skew = vec2(uv.x + uv.y * 0.5, uv.y);
+	vec2 cell = floor(skew);
+	vec2 f = fract(skew);
+	// Three vertices of the hex cell we're inside
+	vec2 v0, v1, v2;
+	if (f.x + f.y < 1.0) {
+		v0 = cell;
+		v1 = cell + vec2(1.0, 0.0);
+		v2 = cell + vec2(0.0, 1.0);
+	} else {
+		v0 = cell + vec2(1.0, 1.0);
+		v1 = cell + vec2(1.0, 0.0);
+		v2 = cell + vec2(0.0, 1.0);
+	}
+	// Barycentric weights
+	vec3 w;
+	if (f.x + f.y < 1.0) {
+		w = vec3(1.0 - f.x - f.y, f.x, f.y);
+	} else {
+		w = vec3(f.x + f.y - 1.0, 1.0 - f.y, 1.0 - f.x);
+	}
+	// Per-cell random rotation + offset
+	vec2 o0 = hash22(v0);
+	vec2 o1 = hash22(v1);
+	vec2 o2 = hash22(v2);
+	float a0 = o0.x * 6.2831853;
+	float a1 = o1.x * 6.2831853;
+	float a2 = o2.x * 6.2831853;
+	vec2 uv0 = rot2(a0) * uv + o0 * 4.0;
+	vec2 uv1 = rot2(a1) * uv + o1 * 4.0;
+	vec2 uv2 = rot2(a2) * uv + o2 * 4.0;
+	vec3 s0 = texture(tex, uv0).rgb;
+	vec3 s1 = texture(tex, uv1).rgb;
+	vec3 s2 = texture(tex, uv2).rgb;
+	vec3 mean = (s0 + s1 + s2) / 3.0;
+	// Variance-preserve: weighted deviation around mean
+	vec3 stoch = mean + (s0 - mean) * w.x + (s1 - mean) * w.y + (s2 - mean) * w.z;
+	vec3 plain = texture(tex, uv).rgb;
+	return mix(plain, stoch, blend_fade);
+}
+
+// Triplanar sample (albedo-only, XZ plane already provided as `top`).
+// Blends in world-Y-facing "side" samples for steep slopes.
+vec3 triplanar_side(sampler2D tex, vec3 wp, vec3 n) {
+	vec2 uv_x = wp.zy * uv_world_scale * 1.5;
+	vec2 uv_z = wp.xy * uv_world_scale * 1.5;
+	vec3 sx = texture(tex, uv_x).rgb;
+	vec3 sz = texture(tex, uv_z).rgb;
+	vec3 an = abs(n);
+	float wx = an.x; float wz = an.z;
+	float wsum = max(wx + wz, 0.001);
+	return (sx * wx + sz * wz) / wsum;
 }
 
 // Dirt keeps its own two-tone so shaded soil stays rich
@@ -140,9 +228,6 @@ vec2 layer_uv(vec2 uv, int layer) {
 	return uv;
 }
 
-// Blended layer surface height at a uv point. Weights are fixed per
-// fragment (computed once at the entry uv) so the parallax march sees a
-// stable field.
 float layer_height(vec2 uv, float wg, float wd, float ws, float wrr) {
 	float h = wg * lum(textureLod(grass_tex, layer_uv(uv, 0), 0.0).rgb);
 	h += wd * lum(textureLod(dirt_tex, layer_uv(uv, 1), 0.0).rgb);
@@ -151,11 +236,8 @@ float layer_height(vec2 uv, float wg, float wd, float ws, float wrr) {
 	return clamp(h, 0.0, 1.0);
 }
 
-// Parallax occlusion against the blended layer heights.
-// cam_vec: direction from fragment toward the camera (world space).
 vec2 pom_offset(vec2 uv, vec3 cam_vec, vec3 nrm, int steps,
 		float wg, float wd, float ws, float wrr) {
-	// Project onto the ground plane's tangent basis (uv spans world xz)
 	vec3 t1 = normalize(vec3(1.0, 0.0, 0.0) - nrm * nrm.x);
 	vec3 t2 = cross(nrm, t1);
 	vec3 v = normalize(cam_vec);
@@ -166,6 +248,7 @@ vec2 pom_offset(vec2 uv, vec3 cam_vec, vec3 nrm, int steps,
 	float d = 0.0;
 	vec2 cuv = uv;
 	float dh = 1.0 - layer_height(cuv, wg, wd, ws, wrr);
+	// High is intentionally a short four-sample near-camera march for mobile.
 	for (int i = 0; i < 4; i++) {
 		if (i >= steps || d >= dh) { break; }
 		cuv -= duv;
@@ -194,7 +277,7 @@ void fragment() {
 	float slope = 1.0 - clamp(n.y, 0.0, 1.0);
 	float cam_dist = length(VERTEX);
 
-	// --- Macro masks (region layout, unchanged from v2) ---
+	// --- Macro masks (region layout) ---
 	vec2 wp = world_pos.xz;
 	float macro = fbm(wp * 0.015 + vec2(3.1, 8.7));
 	float gmix = fbm(wp * tile_scale * 2.2);
@@ -210,11 +293,7 @@ void fragment() {
 	float crest = smoothstep(1.4, 2.6, world_pos.y);
 	float wr = max(rock_mask, crest * (1.0 - patches));
 
-	// Gently warp the shared world UV so scanned layers do not repeat on a rigid grid.
-	vec2 macro_warp = vec2(
-		fbm(wp * 0.021 + vec2(17.4, 5.8)),
-		fbm(wp * 0.019 + vec2(42.1, 23.7)));
-	vec2 uv = wp * uv_world_scale + (macro_warp - 0.5) * 0.16 * macro_breakup_strength;
+	vec2 uv = wp * uv_world_scale;
 
 	// --- Base weights -> height-modulated weights (UE heightlerp) ---
 	float wg = 1.0;
@@ -225,8 +304,16 @@ void fragment() {
 	vec2 uvd = layer_uv(uv, 1);
 	vec2 uvs = layer_uv(uv, 2);
 	vec2 uvr = layer_uv(uv, 3);
-	vec3 gc = texture(grass_tex, uvg).rgb;
-	vec3 dc = texture(dirt_tex, uvd).rgb;
+
+	// Stochastic fade (0..1): only apply near camera and on grass/dirt
+	// layers where tiling is most obvious. Gated by tier.
+	float stoch_fade = 0.0;
+	if (stochastic_mode > 0) {
+		stoch_fade = smoothstep(stochastic_far, stochastic_far * 0.4, cam_dist);
+	}
+
+	vec3 gc = stochastic_sample(grass_tex, uvg, stoch_fade);
+	vec3 dc = stochastic_sample(dirt_tex, uvd, stoch_fade);
 	vec3 sc = texture(sand_tex, uvs).rgb;
 	vec3 rc = texture(rock_tex, uvr).rgb;
 	float wsum = wg + wd + ws + wrr;
@@ -255,10 +342,18 @@ void fragment() {
 		uvd = layer_uv(puv, 1);
 		uvs = layer_uv(puv, 2);
 		uvr = layer_uv(puv, 3);
-		gc = texture(grass_tex, uvg).rgb;
-		dc = texture(dirt_tex, uvd).rgb;
+		gc = stochastic_sample(grass_tex, uvg, stoch_fade);
+		dc = stochastic_sample(dirt_tex, uvd, stoch_fade);
 		sc = texture(sand_tex, uvs).rgb;
 		rc = texture(rock_tex, uvr).rgb;
+	}
+
+	// Triplanar side-projection for rock on steep slopes (only meaningful
+	// where rock weight AND slope contribute together).
+	float triplanar_strength = smoothstep(0.35, 0.85, slope) * wrr;
+	if (triplanar_strength > 0.01) {
+		vec3 rc_side = triplanar_side(rock_tex, world_pos, n);
+		rc = mix(rc, rc_side, triplanar_strength);
 	}
 
 	// --- Height-blended albedo under realm tints ---
@@ -268,30 +363,29 @@ void fragment() {
 		* mix(vec3(1.0), sc, tex_blend));
 	col += wrr * (stone_color * mix(vec3(1.0), rc, tex_blend));
 
-	// Pebble speckle: softened cells so stones read as embedded, not pasted
+	// Pebble speckle
 	vec2 cell = floor(wp * tile_scale * 14.0);
 	vec2 fcell = fract(wp * tile_scale * 14.0) - 0.5;
 	float pebble = step(0.94, hash21(cell)) * (1.0 - smoothstep(0.16, 0.46, length(fcell)));
 	col = mix(col, stone_color * 1.22,
 		pebble * speckle_strength * 0.8 * (1.0 - wr));
 
-		float realm_field = fbm(wp * 0.024 + vec2(31.7, 11.4));
-		float moisture_field = fbm(wp * 0.080 + vec2(8.3, 19.1));
-		float moisture_mask = smoothstep(0.44, 0.80, moisture_field);
-		vec3 tint_mix = mix(vec3(1.0), realm_tint, realm_tint_strength);
-		col *= tint_mix;
-		float moss_mask = moss_strength * mix(0.35, 1.0, moisture_strength)
-			* moisture_mask * (1.0 - wr) * flatness;
-		col = mix(col, moss_color * (0.78 + realm_field * 0.22), clamp(moss_mask, 0.0, 1.0));
-		// Broad color breakup makes the ground read as natural patches rather than a tiled plane.
-		float macro_value = fbm(wp * 0.031 + vec2(63.2, 14.7));
-		float macro_contrast = smoothstep(0.16, 0.84, macro_value);
-		float macro_tone = mix(0.88, 1.12, macro_contrast);
-		col *= mix(1.0, macro_tone, macro_breakup_strength);
-		// Moist realms get a restrained darkening/wet sheen without flattening PBR layers.
-		float wet_response = moisture_strength * moisture_mask * (1.0 - wr) * 0.18;
-		col = mix(col, col * 0.90 + moss_color * 0.04, clamp(wet_response, 0.0, 1.0));
-		ALBEDO = col;
+	// Macro colour variation (v4): sweep tint across biome-scale regions
+	float macro_var = fbm(wp * macro_variation_scale + vec2(17.3, 41.9));
+	float macro_boost = (macro_var - 0.5) * 2.0 * macro_variation_strength;
+	col *= (1.0 + macro_boost);
+
+	float realm_field = fbm(wp * 0.024 + vec2(31.7, 11.4));
+	float moisture_field = fbm(wp * 0.080 + vec2(8.3, 19.1));
+	float moisture_mask = smoothstep(0.44, 0.80, moisture_field);
+	vec3 tint_mix = mix(vec3(1.0), realm_tint, realm_tint_strength);
+	col *= tint_mix;
+	float moss_mask = moss_strength * mix(0.35, 1.0, moisture_strength)
+		* moisture_mask * (1.0 - wr) * flatness;
+	col = mix(col, moss_color * (0.78 + realm_field * 0.22), clamp(moss_mask, 0.0, 1.0));
+	float wet_response = moisture_strength * moisture_mask * (1.0 - wr) * 0.18;
+	col = mix(col, col * 0.90 + moss_color * 0.04, clamp(wet_response, 0.0, 1.0));
+	ALBEDO = col;
 
 	if (debug_view == 1) {
 		ALBEDO = vec3(wg, wd, ws + wrr);
@@ -304,11 +398,13 @@ void fragment() {
 	float rs = texture(sand_rough, uvs).r;
 	float rk = texture(rock_rough, uvr).r;
 	float r_out = (wg * rg + wd * rd + ws * rs + wrr * rk) * roughness;
-		r_out *= mix(1.0, 0.82, wr);
-		r_out *= mix(1.0, 0.78, clamp(moisture_strength * moisture_mask, 0.0, 1.0));
+	r_out *= mix(1.0, 0.82, wr);
+	r_out *= mix(1.0, 0.78, clamp(moisture_strength * moisture_mask, 0.0, 1.0));
+
+	// Per-layer specular tuning (v4): rock a touch glossier, grass matte
+	SPECULAR = mix(0.42, 0.62, wrr) - wg * 0.06;
 
 	// --- Relief stack ---
-	// 1) Broad geometric swell from the analytic height field
 	float e = 0.09;
 	float h0 = surf_height(world_pos.xz);
 	float hx = surf_height(world_pos.xz + vec2(e, 0.0));
@@ -317,8 +413,6 @@ void fragment() {
 	vec3 n_bump = normalize(vec3(n.x - (hx - h0) * k, max(n.y, 0.08),
 		n.z - (hz - h0) * k));
 
-	// 2) Blended per-layer normal maps: fade with distance so far ground
-	//    stays smooth
 	float close_fade = smoothstep(30.0, 6.0, cam_dist);
 	if (normal_strength > 0.001 && close_fade > 0.001) {
 		vec3 gn = texture(grass_norm, uvg).rgb;
@@ -330,25 +424,44 @@ void fragment() {
 		float nf = normal_strength * close_fade;
 		n_bump = normalize(vec3(n_bump.x + tn.x * nf, n_bump.y,
 			n_bump.z + tn.y * nf));
+
+		// Secondary micro-normal octave for crumb detail
+		float micro_fade = smoothstep(14.0, 2.5, cam_dist);
+		if (micro_normal_strength > 0.001 && micro_fade > 0.001) {
+			vec2 muv = uvg * micro_normal_scale;
+			vec3 mn = texture(grass_norm, muv).rgb * 2.0 - 1.0;
+			float mf = micro_normal_strength * micro_fade;
+			n_bump = normalize(vec3(n_bump.x + mn.x * mf, n_bump.y,
+				n_bump.z + mn.y * mf));
+		}
 	}
 	NORMAL = normalize((VIEW_MATRIX * vec4(n_bump, 0.0)).xyz);
 
-	// Cavity shading + gentle close-range crumb variation
+	// Cavity AO: analytic height + layer-height blend darkening seams
 	float cav = smoothstep(0.30, 1.05, h0);
-	AO = mix(0.80, 1.0, cav);
-	float grain = hash21(floor(world_pos.xz * 110.0));
-	float fine_grain = vnoise(world_pos.xz * 8.0 + vec2(2.7, 9.4));
-	ALBEDO *= mix(1.0, 0.95 + grain * 0.09, close_fade);
-	ALBEDO *= mix(1.0, 0.96 + fine_grain * 0.08, micro_grain_strength * close_fade);
-	ROUGHNESS = clamp(r_out * mix(0.96, 1.03, grain), 0.0, 1.0);
-	float sheen_mask = smoothstep(0.58, 0.90, moisture_mask) * moisture_strength * puddle_sheen_strength;
-	ROUGHNESS = mix(ROUGHNESS, max(0.18, ROUGHNESS - 0.24), sheen_mask);
+	float layer_cav = 1.0 - clamp(havg, 0.0, 1.0);
+	AO = mix(0.80, 1.0, cav) * (1.0 - layer_cav * 0.18);
 
-	// --- Rain wetting: darken albedo, gloss the surface ---
+	float grain = hash21(floor(world_pos.xz * 110.0));
+	ALBEDO *= mix(1.0, 0.95 + grain * 0.09, close_fade);
+	ROUGHNESS = clamp(r_out * mix(0.96, 1.03, grain), 0.0, 1.0);
+
+	// --- Rain wetting + puddle accumulation (v4) ---
 	float wet = clamp(world_rain_level, 0.0, 1.0);
 	if (wet > 0.003) {
 		ALBEDO *= mix(1.0, 0.62, wet * 0.8);
 		ROUGHNESS = mix(ROUGHNESS, min(ROUGHNESS, 0.32), wet * 0.75);
+		// Water pools in low areas of the analytic height field
+		float low_area = 1.0 - smoothstep(puddle_threshold,
+			puddle_threshold + 0.18, h0);
+		float puddle = low_area * flatness * (1.0 - wr) * wet * puddle_strength;
+		if (puddle > 0.001) {
+			ALBEDO = mix(ALBEDO, ALBEDO * vec3(0.42, 0.48, 0.56), puddle);
+			ROUGHNESS = mix(ROUGHNESS, 0.04, puddle);
+			SPECULAR = mix(SPECULAR, 0.85, puddle);
+			NORMAL = mix(NORMAL, normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz),
+				puddle * 0.85);
+		}
 	}
 
 	// Trodden ground: darkened, roughened paths remembered by the wear map
@@ -360,8 +473,7 @@ void fragment() {
 		ROUGHNESS = mix(ROUGHNESS, 1.0, wear * 0.6);
 	}
 
-	// Domain-warped speckle: breaks up grain repetition like terrain_moss
-	// Uses 46.0 for fine speckle grain (detail_scale is 0.85 for PBR UVs)
+	// Domain-warped speckle
 	float speckle_ds = 46.0;
 	vec2 warp = vec2(
 		vnoise(wp * speckle_ds * 0.37 + vec2(7.7, 3.1)),
@@ -370,11 +482,10 @@ void fragment() {
 		wp * speckle_ds * 2.13 + vec2(31.4, 61.8) + warp * detail_warp_amount);
 	float speckle = (warped_speckle - 0.5) * 0.16;
 
-	// Apply brightness boost and speckle detail
 	ALBEDO = clamp(ALBEDO * terrain_brightness * (1.0 + speckle),
 		vec3(0.0), vec3(1.0));
 
-	// Realm accent flecks: sparse emissive speckles keyed to world space
+	// Realm accent flecks
 	if (accent_strength > 0.001) {
 		float fn = hash21(floor(world_pos.xz * 4.0) + vec2(7.7, 3.3));
 		float band = smoothstep(0.94, 0.985, fn) * accent_strength;

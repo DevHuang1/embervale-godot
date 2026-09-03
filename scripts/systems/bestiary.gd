@@ -9,6 +9,7 @@ extends Object
 const REALM_BRAMBLEWOOD := "bramblewood"
 const REALM_MISTFEN := "mistfen"
 const REALM_HEARTWOOD := "heartwood"
+const REALM_MOONFEN := "moonfen"
 
 ## Realm per quest stage: stages 0-1 share the green edge, stage 2 sinks
 ## into mistfen, stage 3 is the Heartwood rite where the Matriarch waits.
@@ -77,11 +78,11 @@ const ENEMY_VARIANTS := {
 	},
 	REALM_MISTFEN: {
 "normal": {
-				"kind": "ambusher",
-				"display": "Fenwick Ambusher", "scale": 0.92, "hp": 34, "atk_bonus": 1,
-			"speed": 1.05, "volley": false,
-			"tint": Color(0.16, 0.22, 0.26), "eye": Color(0.62, 0.80, 0.96),
-		},
+				"kind": "fenling",
+				"display": "Fenling Mire Sprite", "scale": 0.92, "hp": 34, "atk_bonus": 1,
+				"speed": 1.04, "volley": false,
+				"tint": Color(0.13, 0.20, 0.26), "eye": Color(0.42, 0.86, 1.0),
+			},
 		"hard": {
 			"kind": "spitter",
 			"display": "Fen Spitter", "scale": 1.05, "hp": 46, "atk_bonus": 3,
@@ -101,6 +102,20 @@ const ENEMY_VARIANTS := {
 			"display": "Cinder Spitter", "scale": 1.1, "hp": 52, "atk_bonus": 4,
 			"speed": 1.0, "volley": false,
 			"tint": Color(0.22, 0.10, 0.07), "eye": Color(1.0, 0.30, 0.12),
+		},
+	},
+	REALM_MOONFEN: {
+		"normal": {
+			"kind": "moonfen_fenling",
+			"display": "Lunar Fenling", "scale": 0.94, "hp": 40, "atk_bonus": 2,
+			"speed": 1.08, "volley": true,
+			"tint": Color(0.08, 0.22, 0.30), "eye": Color(0.32, 0.92, 1.0),
+		},
+		"hard": {
+			"kind": "relic_leech",
+			"display": "Moon Relic Leech", "scale": 1.08, "hp": 54, "atk_bonus": 4,
+			"speed": 0.98, "volley": false,
+			"tint": Color(0.16, 0.10, 0.28), "eye": Color(0.52, 0.86, 1.0),
 		},
 	},
 }
@@ -131,16 +146,19 @@ const BOSS_DEFS := {
 				"cooldown": 14.0, "desc": "Roots leap the distance and cage you where you stand."},
 		],
 		"sfx_presets": ["hollow_resin", "grave_moss", "ember_glass"],
+			"model_variants": ["boss_whispergrove_rootwarden", "boss_whispergrove_dewseer"],
 	},
 	# === Biome bosses (arena challenges) ===
 	"thornhide_alpha": {
 		"name": "THORNHIDE ALPHA",
 		"title": "the First Hunger",
 		"scene": "res://scenes/entities/boss_biome.tscn",
-		"hp": 420, "atk": 11, "speed": 4.8, "scale": 1.0,
+		"hp": 560, "atk": 12, "speed": 4.8, "scale": 1.0,
 		"palette": [Color(0.16, 0.23, 0.13), Color(1.0, 0.42, 0.16)],
-		"diamond_reward": 3,
-		"special_1": {"kind": "volley", "cooldown": 9.0, "damage": 10},
+			"diamond_reward": 3,
+			"model_variants": ["boss_bramblewood_thornregent", "boss_bramblewood_briarwidow"],
+			"special_1": {"kind": "volley", "cooldown": 9.0, "damage": 10},
+
 		"special_2": {"kind": "summon", "cooldown": 16.0, "count": 2},
 		"ultimate": {"kind": "storm", "cooldown": 22.0, "eruptions": 16, "damage": 20},
 		"intro": "The underbrush folds open — something old and hungry has been waiting.",
@@ -157,10 +175,11 @@ const BOSS_DEFS := {
 		"name": "FENMAW",
 		"title": "the Drowned Choir",
 		"scene": "res://scenes/entities/boss_biome.tscn",
-		"hp": 520, "atk": 13, "speed": 4.2, "scale": 1.12,
+		"hp": 700, "atk": 14, "speed": 4.2, "scale": 1.12,
 		"palette": [Color(0.10, 0.17, 0.24), Color(0.45, 0.85, 1.0)],
-		"diamond_reward": 4,
-		"special_1": {"kind": "volley", "cooldown": 8.0, "damage": 12},
+			"diamond_reward": 4,
+			"model_variants": ["boss_mistfen_veilmother", "boss_mistfen_drownedsage"],
+			"special_1": {"kind": "volley", "cooldown": 8.0, "damage": 12},
 		"special_2": {"kind": "heal", "cooldown": 15.0, "amount": 14},
 		"ultimate": {"kind": "storm", "cooldown": 21.0, "eruptions": 18, "damage": 22},
 		"intro": "The fen goes still. Under the pale water, a chorus of throats opens.",
@@ -171,6 +190,49 @@ const BOSS_DEFS := {
 				"atk": 20, "swing_time": 0.65, "range": 11.0,
 				"skill": {"name": "Drowning Wake", "type": "heavy_aoe", "cooldown": 8.0,
 					"radius": 16.0, "dmg_mult": 2.0}, "rarity": 3},
+		},
+	},
+	"cinderhart_colossus": {
+		"name": "CINDERHART COLOSSUS", "title": "the Walking Furnace",
+		"scene": "res://scenes/entities/boss_biome.tscn",
+		"hp": 810, "atk": 16, "speed": 3.8, "scale": 1.18,
+		"palette": [Color(0.16, 0.07, 0.04), Color(1.0, 0.28, 0.06)],
+					"silhouette": "cinder_antlers", "diamond_reward": 5,
+			"model_variants": ["boss_heartwood_cinderhart", "boss_heartwood_ashcolossus"],
+			"special_1": {"kind": "fissure", "cooldown": 8.5, "damage": 14},
+
+		"special_2": {"kind": "summon", "cooldown": 17.0, "count": 2,
+			"scene": "res://scenes/entities/ember_warden.tscn"},
+		"ultimate": {"kind": "spiral", "cooldown": 23.0, "eruptions": 20, "damage": 24},
+		"intro": "The ash causeway splits. A furnace with antlers drags itself into the rite.",
+		"rewards": {
+			"xp": 410, "materials": {"emberstone": 5, "monster_core": 2},
+			"loot": {"moss_tonic": 2},
+			"weapon": {"id": "cinderhart_maul", "name": "CINDERHART MAUL", "glyph": "🔨",
+				"atk": 23, "swing_time": 0.82, "range": 10.0,
+				"skill": {"name": "Furnace Break", "type": "heavy_aoe", "cooldown": 9.5,
+					"radius": 15.0, "dmg_mult": 2.25}, "rarity": 4},
+		},
+	},
+	"moonfen_oracle": {
+		"name": "MOONFEN ORACLE", "title": "the Reflection Beneath",
+		"scene": "res://scenes/entities/boss_biome.tscn",
+		"hp": 900, "atk": 17, "speed": 4.6, "scale": 1.12,
+		"palette": [Color(0.07, 0.12, 0.24), Color(0.22, 0.92, 1.0)],
+		"silhouette": "lunar_crown", "diamond_reward": 6,
+			"model_variants": ["boss_moonfen_tideoracle", "boss_moonfen_lunarleviathan"],
+		"special_1": {"kind": "tide_cross", "cooldown": 7.5, "damage": 15},
+		"special_2": {"kind": "summon", "cooldown": 16.0, "count": 2,
+			"scene": "res://scenes/entities/relic_leech.tscn"},
+		"ultimate": {"kind": "spiral", "cooldown": 21.0, "eruptions": 24, "damage": 25},
+		"intro": "The water reflects no hero. The thing wearing your moonlit shadow rises instead.",
+		"rewards": {
+			"xp": 480, "materials": {"moonmoss": 5, "crystal_fragment": 3},
+			"loot": {"moss_tonic": 3},
+			"weapon": {"id": "oracle_crescent", "name": "ORACLE CRESCENT", "glyph": "☾",
+				"atk": 24, "swing_time": 0.58, "range": 12.0,
+				"skill": {"name": "Undertide Mirror", "type": "whirl", "cooldown": 8.0,
+					"radius": 17.0, "dmg_mult": 2.1}, "rarity": 4},
 		},
 	},
 }
@@ -258,12 +320,22 @@ const BIOMES := {
 	},
 	REALM_HEARTWOOD: {
 		"title": "Heartwood",
-		"boss_id": "",
+		"boss_id": "cinderhart_colossus",
 		"final_boss_biome": true,
 		"pack": {"normal": 1, "hard": 2},
 		"pack_cap": 4,
 		"respawn_seconds": 19.0,
-		"gates": [REALM_BRAMBLEWOOD, REALM_MISTFEN],
+		"gates": [REALM_BRAMBLEWOOD, REALM_MISTFEN, REALM_MOONFEN],
+	},
+	REALM_MOONFEN: {
+		"title": "Moonfen",
+		"boss_id": "moonfen_oracle",
+		"final_boss_biome": false,
+		"pack": {"normal": 2, "hard": 1},
+		"pack_cap": 5,
+		"respawn_seconds": 18.0,
+		"fog_energy": 1.18,
+		"gates": [REALM_BRAMBLEWOOD, REALM_HEARTWOOD],
 	},
 }
 

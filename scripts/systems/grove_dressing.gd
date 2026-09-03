@@ -45,8 +45,10 @@ func _ready() -> void:
 	_build_ruins()
 	_build_torches()
 	_build_realm_flavor()
+	_build_world_ground_composition()
 	_apply_fog_quality_to_scene()
 	_build_props()
+	_build_gathering_nodes()
 	var ecosystem := RealmEcosystem.new()
 	ecosystem.name = "RealmEcosystem"
 	ecosystem.foliage_density = ecosystem_density
@@ -214,6 +216,44 @@ func _prop_anchors() -> Array[Vector2]:
 	return [Vector2.ZERO, Vector2(12, -8), Vector2(-14, 6),
 		Vector2(18, 14), Vector2(-6, -16)]
 
+## Small deterministic gathering route near authored gameplay anchors. These
+## nodes add no solid collision; WorldManager's existing interaction fallback
+## discovers them through the interactable group on desktop and touch.
+func _build_gathering_nodes() -> void:
+	var realm_id := _visual_realm_id()
+	if realm_id == "whispergrove":
+		realm_id = "bramblewood"
+	var profiles := {
+		"bramblewood": ["moss_fiber", "bramble_wood", "iron_shard", "beast_hide"],
+		"mistfen": ["fen_reed", "spore_dust", "moss_fiber", "fen_reed"],
+		"heartwood": ["emberstone", "monster_core", "iron_shard", "emberstone"],
+		"moonfen": ["moonmoss", "crystal_fragment", "fen_reed", "moonmoss"],
+	}
+	var materials: Array = profiles.get(realm_id, profiles["bramblewood"])
+	var anchors: Array[Vector2] = _prop_anchors()
+	for i in mini(4, anchors.size()):
+		var base := anchors[i]
+		var angle := float(i) * 1.91 + 0.4
+		var point := base + Vector2(cos(angle), sin(angle)) * 2.8
+		var node := GatheringNode.new()
+		node.name = "Gather_%s_%d" % [str(materials[i]), i]
+		var minimum_yield := 1
+		var maximum_yield := 2
+		# One deliberate Bramblewood circuit can fund the material side of
+		# the first weapon recipe; progression never waits on a respawn roll.
+		if realm_id == "bramblewood":
+			var route_yields := {
+				"bramble_wood": 3,
+				"iron_shard": 4,
+				"beast_hide": 2,
+			}
+			minimum_yield = int(route_yields.get(str(materials[i]), 1))
+			maximum_yield = minimum_yield
+		node.configure(str(materials[i]), minimum_yield, maximum_yield,
+			1.15, 180.0, realm_id)
+		node.position = Vector3(point.x, _ground_height(point.x, point.y), point.y)
+		add_child(node)
+
 func _mat(color: Color, emission: Color = Color.BLACK, energy: float = 0.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = color
@@ -250,7 +290,7 @@ func _bind_scan_textures(m: ShaderMaterial, path: String) -> void:
 				"res://assets/textures/stylized/%s" % pair[1]))
 
 func _batch(mesh: Mesh, material: Material, transforms: Array[Transform3D],
-		shadows: bool, extent: float = 35.0) -> void:
+		shadows: bool, extent: float = 35.0, batch_name: String = "") -> void:
 	if transforms.is_empty():
 		return
 	var mm := MultiMesh.new()
@@ -261,6 +301,8 @@ func _batch(mesh: Mesh, material: Material, transforms: Array[Transform3D],
 	for i in transforms.size():
 		mm.set_instance_transform(i, transforms[i])
 	var mmi := MultiMeshInstance3D.new()
+	if not batch_name.is_empty():
+		mmi.name = batch_name
 	mmi.multimesh = mm
 	mmi.material_override = material
 	if shadows:
@@ -418,15 +460,21 @@ func _build_pebbles() -> void:
 	_batch(pebble, mat, transforms, false, 310.0)
 
 func _build_pale_path() -> void:
-	var stone := BoxMesh.new()
-	stone.size = Vector3(0.9, 0.12, 1.25)
+	# Low-sided, flattened river stones make a readable trail without the old
+	# paired rows of glowing BoxMeshes reading as rectangular terrain holes.
+	var stone := CylinderMesh.new()
+	stone.top_radius = 0.48
+	stone.bottom_radius = 0.52
+	stone.height = 0.07
+	stone.radial_segments = 7
+	stone.rings = 1
 	stone.material = _shader_mat("res://assets/shaders/rock.gdshader", {
-		"rock_color": Color(0.34, 0.40, 0.32),
+		"rock_color": Color(0.25, 0.29, 0.23),
 		"moss_color": tuft_color,
-		"mottle_scale": 6.0,
-		"moss_amount": 0.30,
+		"mottle_scale": 3.5,
+		"moss_amount": 0.42,
 		"emission_color": Color(0.18, 0.28, 0.18),
-		"emission_energy": 0.25,
+		"emission_energy": 0.03,
 	})
 
 	var transforms: Array[Transform3D] = []
@@ -435,59 +483,179 @@ func _build_pale_path() -> void:
 	var forward := (finish - start).normalized()
 	var angle := atan2(forward.x, forward.z)
 	var path_basis := Basis(Vector3.UP, angle)
-	for i in 18:
-		var t := i / 17.0
+	for i in 12:
+		var t := i / 11.0
 		var center := start.lerp(finish, t)
 		center += Vector3(0.0, 0.0, sin(t * PI) * 0.35)
-		for side in [-1.0, 1.0]:
-			var local_offset := Vector3(side * rng.randf_range(0.35, 0.7), 0.0, rng.randf_range(-0.18, 0.18))
-			var scale := rng.randf_range(0.75, 1.15)
-			var stone_pos := center + path_basis * local_offset
-			stone_pos.y = _ground_height(stone_pos.x, stone_pos.z) + 0.08
-			var basis := path_basis.scaled(Vector3(scale, rng.randf_range(0.8, 1.1), scale))
-			transforms.append(Transform3D(basis, stone_pos))
+		var local_offset := Vector3(rng.randf_range(-0.42, 0.42), 0.0,
+			rng.randf_range(-0.20, 0.20))
+		var stone_pos := center + path_basis * local_offset
+		stone_pos.y = _ground_height(stone_pos.x, stone_pos.z) + 0.035
+		var basis := Basis(Vector3.UP, angle + rng.randf_range(-0.35, 0.35)).scaled(
+			Vector3(rng.randf_range(0.65, 1.05), 1.0, rng.randf_range(0.85, 1.35)))
+		transforms.append(Transform3D(basis, stone_pos))
 
 	# Long pilgrim road toward the boss arena stone
 	var arena := Vector3(-16.0, 0.08, -10.0)
 	var to_arena := (arena - start).normalized()
 	var arena_basis := Basis(Vector3.UP, atan2(to_arena.x, to_arena.z))
-	for i in 46:
-		var center := start.lerp(arena, float(i) / 45.0)
+	for i in 30:
+		var center := start.lerp(arena, float(i) / 29.0)
 		center += Vector3(sin(float(i) * 0.7) * 0.8, 0.0, cos(float(i) * 0.5) * 0.5)
-		for side in [-1.0, 1.0]:
-			var off := Vector3(side * rng.randf_range(0.4, 0.85), 0.0,
-				rng.randf_range(-0.2, 0.2))
-			var sp := center + arena_basis * off
-			sp.y = _ground_height(sp.x, sp.z) + 0.07
-			transforms.append(Transform3D(
-				arena_basis.scaled(Vector3.ONE * rng.randf_range(0.7, 1.2)), sp))
+		var off := Vector3(rng.randf_range(-0.55, 0.55), 0.0,
+			rng.randf_range(-0.22, 0.22))
+		var sp := center + arena_basis * off
+		sp.y = _ground_height(sp.x, sp.z) + 0.035
+		var stone_angle := atan2(to_arena.x, to_arena.z) + rng.randf_range(-0.42, 0.42)
+		var path_scale := rng.randf_range(0.65, 1.15)
+		transforms.append(Transform3D(Basis(Vector3.UP, stone_angle).scaled(
+			Vector3(path_scale, 1.0, path_scale * rng.randf_range(0.8, 1.3))), sp))
 
-	_batch(stone, stone.material, transforms, false, 310.0)
+	_batch(stone, stone.material, transforms, false, 310.0, "PalePathStones")
 
 func _build_tufts() -> void:
-	var tuft := CylinderMesh.new()
-	tuft.top_radius = 0.03
-	tuft.bottom_radius = 0.09
-	tuft.height = 0.6
-	tuft.radial_segments = 3
-	tuft.rings = 1
+	var tuft := _make_grass_clump()
 
 	var grass := ShaderMaterial.new()
 	grass.shader = load("res://assets/shaders/grass_blade.gdshader")
 	grass.set_shader_parameter("blade_color", tuft_color)
-	grass.set_shader_parameter("tip_color", tuft_color.lightened(0.45))
-	grass.set_shader_parameter("blade_height", 0.6)
+	grass.set_shader_parameter("tip_color", tuft_color.lightened(0.18))
+	grass.set_shader_parameter("blade_height", 0.36)
+	grass.set_shader_parameter("root_height_offset", 0.0)
 
-	var transforms: Array[Transform3D] = []
-	for i in tuft_count:
+	var density_scale := _grass_density_scale()
+	var carpet_radius := _grass_carpet_radius()
+	var spacing := 0.68 / sqrt(maxf(density_scale, 0.1))
+	var carpet: Array[Transform3D] = []
+	var grid_radius := int(ceil(carpet_radius / spacing))
+	for gx in range(-grid_radius, grid_radius + 1):
+		for gz in range(-grid_radius, grid_radius + 1):
+			var base := Vector2(float(gx) * spacing, float(gz) * spacing)
+			var jitter := Vector2(rng.randf_range(-0.28, 0.28),
+				rng.randf_range(-0.28, 0.28)) * spacing
+			var p := base + jitter
+			if p.length() > carpet_radius or _grass_clearance(p):
+				continue
+			var scale := rng.randf_range(0.72, 1.08)
+			var basis := Basis.from_euler(Vector3(rng.randf_range(-0.10, 0.10),
+				rng.randf() * TAU, rng.randf_range(-0.10, 0.10))).scaled(
+					Vector3(scale, scale, scale))
+			carpet.append(Transform3D(basis,
+				Vector3(p.x, _ground_height(p.x, p.y) + 0.015, p.y)))
+
+	# A cheaper wide scatter carries the carpet into long sightlines without
+	# paying dense-grid cost across the full 600 m legacy terrain.
+	var far_scatter: Array[Transform3D] = []
+	var far_count := int(round(float(mini(tuft_count, 12000)) * density_scale))
+	for i in far_count:
 		var p := _rand_pos_in(scatter_radius)
+		if p.length() <= carpet_radius or _grass_clearance(p):
+			continue
 		var b := Basis.from_euler(Vector3(
 			rng.randf_range(-0.2, 0.2),
 			rng.randf() * TAU,
 			rng.randf_range(-0.2, 0.2)))
-		transforms.append(Transform3D(b, Vector3(p.x, _ground_height(p.x, p.y), p.y)))
+		far_scatter.append(Transform3D(b, Vector3(p.x, _ground_height(p.x, p.y), p.y)))
 
-	_batch(tuft, grass, transforms, false, 310.0)
+	_batch(tuft, grass, carpet, false, carpet_radius + 3.0, "GrassCarpet")
+	_batch(tuft, grass, far_scatter, false, scatter_radius + 10.0, "GrassFarScatter")
+
+func _grass_density_scale() -> float:
+	var scaler := get_node_or_null("/root/WorldState/QualityScaler")
+	if scaler == null:
+		scaler = get_node_or_null("/root/QualityScaler")
+	return clampf(float(scaler.get("grass_density_scale")), 0.35, 1.0) \
+		if scaler != null else 1.0
+
+func _grass_carpet_radius() -> float:
+	match _visual_realm_id():
+		"moonfen":
+			return 28.0
+		"mistfen", "heartwood":
+			return 56.0
+		_:
+			return 72.0
+
+func _grass_clearance(point: Vector2) -> bool:
+	var profile := RealmLayoutData.profile(_visual_realm_id())
+	var route: Array = profile.get("route", [])
+	for i in maxi(route.size() - 1, 0):
+		var a3 := route[i] as Vector3
+		var b3 := route[i + 1] as Vector3
+		if _distance_to_segment(point, Vector2(a3.x, a3.z), Vector2(b3.x, b3.z)) < 0.75:
+			return true
+	for key in ["checkpoint", "cave", "arena"]:
+		var anchor3 := profile.get(key, Vector3.ZERO) as Vector3
+		var radius := 5.0 if key == "arena" else (2.4 if key == "checkpoint" else 2.0)
+		if point.distance_to(Vector2(anchor3.x, anchor3.z)) < radius:
+			return true
+	for chest_value in profile.get("chests", []):
+		var chest := chest_value as Dictionary
+		var chest3 := chest.get("pos", Vector3.ZERO) as Vector3
+		if point.distance_to(Vector2(chest3.x, chest3.z)) < 1.15:
+			return true
+	for pond_value in WorldGroundComposition.pond_centers(_visual_realm_id()):
+		if point.distance_to(pond_value as Vector2) < 4.8:
+			return true
+	return false
+
+func _distance_to_segment(point: Vector2, start: Vector2, finish: Vector2) -> float:
+	var segment := finish - start
+	var length_squared := segment.length_squared()
+	if length_squared <= 0.0001:
+		return point.distance_to(start)
+	var amount := clampf((point - start).dot(segment) / length_squared, 0.0, 1.0)
+	return point.distance_to(start + segment * amount)
+
+## Five tapered, slightly leaning opaque blades per instance. Unlike the old
+## triangular cylinder this has a broad leafy silhouette and a narrow tip, so
+## dense coverage reads as grass rather than a field of rods.
+func _make_grass_clump() -> ArrayMesh:
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var blade_specs := [
+		{"offset": Vector3(-0.16, 0, -0.05), "angle": 0.10, "height": 0.30, "width": 0.10, "lean": Vector2(0.045, 0.02)},
+		{"offset": Vector3(0.15, 0, 0.03), "angle": 1.08, "height": 0.36, "width": 0.09, "lean": Vector2(-0.04, 0.045)},
+		{"offset": Vector3(0.02, 0, -0.16), "angle": 2.15, "height": 0.27, "width": 0.10, "lean": Vector2(0.03, -0.04)},
+		{"offset": Vector3(-0.07, 0, 0.16), "angle": 3.20, "height": 0.32, "width": 0.09, "lean": Vector2(-0.04, -0.025)},
+		{"offset": Vector3(0.07, 0, 0.07), "angle": 4.25, "height": 0.39, "width": 0.09, "lean": Vector2(0.025, 0.04)},
+		{"offset": Vector3(-0.03, 0, 0.01), "angle": 5.30, "height": 0.29, "width": 0.10, "lean": Vector2(-0.02, 0.035)},
+	]
+	for spec_value in blade_specs:
+		var spec := spec_value as Dictionary
+		var angle := float(spec.angle)
+		var right := Vector3(cos(angle), 0, sin(angle)) * float(spec.width) * 0.5
+		var offset := spec.offset as Vector3
+		var lean := spec.lean as Vector2
+		var height := float(spec.height)
+		var mid_center := offset + Vector3(lean.x * 0.35, height * 0.58, lean.y * 0.35)
+		var top_center := offset + Vector3(lean.x, height, lean.y)
+		var normal := Vector3(-sin(angle), 0.15, cos(angle)).normalized()
+		_add_blade_quad(surface, offset - right, offset + right,
+			mid_center + right * 0.72, mid_center - right * 0.72,
+			normal, 1.0, 0.42)
+		_add_blade_quad(surface, mid_center - right * 0.72,
+			mid_center + right * 0.72, top_center + right * 0.20,
+			top_center - right * 0.20, normal, 0.42, 0.0)
+	return surface.commit() as ArrayMesh
+
+func _add_blade_quad(surface: SurfaceTool, bottom_left: Vector3, bottom_right: Vector3,
+		top_right: Vector3, top_left: Vector3, normal: Vector3,
+		bottom_v: float, top_v: float) -> void:
+	var vertices := [bottom_left, bottom_right, top_right,
+		bottom_left, top_right, top_left]
+	var uvs := [Vector2(0, bottom_v), Vector2(1, bottom_v), Vector2(1, top_v),
+		Vector2(0, bottom_v), Vector2(1, top_v), Vector2(0, top_v)]
+	for i in vertices.size():
+		surface.set_normal(normal)
+		surface.set_uv(uvs[i])
+		surface.add_vertex(vertices[i])
+
+func _build_world_ground_composition() -> void:
+	var composition := WorldGroundComposition.new()
+	composition.name = "WorldGroundComposition"
+	add_child(composition)
+	composition.setup(_visual_realm_id(), seed_value + 4099, _grass_carpet_radius())
 
 func _build_mushrooms() -> void:
 	var lights_node := get_parent().get_node_or_null("WarmLights")
@@ -641,27 +809,52 @@ class LightFlicker:
 ## BRAMBLEWOOD: thorn arches straddling the pilgrim road — living gate
 ## hoops woven from dark briar, announcing this realm's tangled character.
 func _build_thorn_arches() -> void:
-	var ring := TorusMesh.new()
-	ring.inner_radius = 1.68
-	ring.outer_radius = 2.12
-	ring.rings = 10
-	ring.ring_segments = 6
+	var post := CylinderMesh.new()
+	post.top_radius = 0.16
+	post.bottom_radius = 0.28
+	post.height = 2.8
+	post.radial_segments = 7
+	var branch := CylinderMesh.new()
+	branch.top_radius = 0.12
+	branch.bottom_radius = 0.20
+	branch.height = 2.3
+	branch.radial_segments = 7
+	var thorn := CylinderMesh.new()
+	thorn.top_radius = 0.0
+	thorn.bottom_radius = 0.11
+	thorn.height = 0.55
+	thorn.radial_segments = 5
 	var briar := _shader_mat("res://assets/shaders/bark.gdshader", {
 		"bark_color": Color(0.09, 0.075, 0.05),
 	})
-	var transforms: Array[Transform3D] = []
+	var posts: Array[Transform3D] = []
+	var branches: Array[Transform3D] = []
+	var thorns: Array[Transform3D] = []
 	var spots := [
-		Vector2(-16.0, 5.4), Vector2(-15.1, 1.1), Vector2(-13.8, -2.8),
-		Vector2(-15.3, -6.6), Vector2(-11.6, 5.0), Vector2(-18.8, 3.2),
+		Vector2(-16.0, 5.4), Vector2(-15.1, 0.4), Vector2(-14.2, -5.0),
 	]
 	for i in spots.size():
 		var s: Vector2 = spots[i]
 		var gy := _ground_height(s.x, s.y)
-		var b := Basis(Vector3(1, 0, 0), PI / 2.0) \
-			* Basis(Vector3.UP, rng.randf_range(-0.35, 0.35))
-		b = b.scaled(Vector3.ONE * rng.randf_range(0.9, 1.25))
-		transforms.append(Transform3D(b, Vector3(s.x, gy + 1.35, s.y)))
-	_batch(ring, briar, transforms, true, 310.0)
+		var facing := rng.randf_range(-0.18, 0.18)
+		var gate_basis := Basis(Vector3.UP, facing)
+		for side in [-1.0, 1.0]:
+			var local := Vector3(side * 1.15, 1.38, 0.0)
+			var post_basis := gate_basis * Basis.from_euler(Vector3(0, 0, -side * 0.09))
+			posts.append(Transform3D(post_basis, Vector3(s.x, gy, s.y) + gate_basis * local))
+		var beam_basis := gate_basis * Basis(Vector3(0, 0, 1), PI * 0.5)
+		branches.append(Transform3D(beam_basis,
+			Vector3(s.x, gy + 2.55, s.y)))
+		for thorn_i in 5:
+			var side := -1.0 if thorn_i % 2 == 0 else 1.0
+			var local_x := -0.84 + float(thorn_i) * 0.42
+			var thorn_basis := gate_basis * Basis.from_euler(
+				Vector3(0, 0, side * 0.78))
+			thorns.append(Transform3D(thorn_basis,
+				Vector3(s.x, gy + 2.65, s.y) + gate_basis * Vector3(local_x, 0, 0)))
+	_batch(post, briar, posts, true, 310.0, "RootedThornGatePosts")
+	_batch(branch, briar, branches, true, 310.0, "RootedThornGateBeams")
+	_batch(thorn, briar, thorns, true, 310.0, "RootedThornGateSpikes")
 
 ## MISTFEN: swaying reeds in the damp hollows and pale drowned stones.
 func _build_reeds() -> void:
