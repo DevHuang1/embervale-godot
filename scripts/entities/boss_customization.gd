@@ -1,40 +1,47 @@
+extends RefCounted
 class_name BossCustomization
-extends Resource
 
-## === Boss Customization ===
-## What a spent scan buys: the scanned idol mesh + its texture, an extracted
-## palette, ONE realm skill from the boss's pool, and a generic SFX preset.
-## Everything else about the boss (ultimate, summons, stingers, arena) stays
-## locked to preserve identity and balance.
+## === BossCustomization — Player-Personalised Boss Skin ===
+## Set on BossBase.customization after the player scans a real object
+## via ScanManager. Drives:
+##   - idol_mesh      : a MeshInstance3D node the scan produced
+##   - palette        : override body_tint + eye_glow on the boss
+##   - skill          : one pooled skill dict replacing _realm_skill slot
+##   - sfx_profile    : SFX preset id ("vanilla" = default cues)
+##
+## BossBase reads these fields directly. No methods needed.
 
-@export var boss_id: String = ""
-@export var skill: Dictionary = {}
-@export var sfx_preset: String = "vanilla"
-@export var palette: Array[Color] = []
-@export var idol_mesh: Mesh
-@export var idol_texture: Texture2D
+## Scanned object mesh (can be null — boss keeps default silhouette)
+var idol_mesh    : MeshInstance3D = null
 
+## Color palette override (Color with alpha 0 = no override)
+var body_tint    : Color = Color(0, 0, 0, 0)
+var eye_glow     : Color = Color(0, 0, 0, 0)
 
-static func from_payload(data: Dictionary) -> BossCustomization:
-	var c := BossCustomization.new()
-	c.boss_id = str(data.get("boss_id", ""))
-	c.skill = data.get("skill", {}).duplicate(true)
-	c.sfx_preset = str(data.get("sfx_preset", "vanilla"))
-	var cols: Array = data.get("palette", [])
-	for col in cols:
-		if col is Color:
-			c.palette.append(col)
-		elif col is String:
-			c.palette.append(Color(col))
-	return c
+## Realm skill slot override (empty dict = use default thorn rain)
+## Must match the skill dict shape from GameState.WEAPON_DEFS[*].skills[*]
+var skill        : Dictionary = {}
 
+## SFX preset id — AudioManager.play_profile_cue(sfx_profile, "cast")
+var sfx_profile  : String = "vanilla"
 
-## Save-safe payload (colors as hex strings; mesh/texture stay runtime-only —
-## a reloaded save keeps skill/palette/SFX and simply omits the idol).
-func to_payload() -> Dictionary:
-	return {
-		"boss_id": boss_id,
-		"skill": skill.duplicate(true),
-		"sfx_preset": sfx_preset,
-		"palette": palette.map(func(c): return c.to_html(true)),
-	}
+## Convenience constructor from a scan payload Dictionary
+static func from_payload(payload: Dictionary) -> BossCustomization:
+	var bc := BossCustomization.new()
+	bc.sfx_profile = str(payload.get("sfx_profile", "vanilla"))
+	if payload.has("skill") and payload["skill"] is Dictionary:
+		bc.skill = payload["skill"]
+	if payload.has("body_tint"):
+		var t = payload["body_tint"]
+		if t is Color:
+			bc.body_tint = t
+	if payload.has("eye_glow"):
+		var e = payload["eye_glow"]
+		if e is Color:
+			bc.eye_glow = e
+	return bc
+
+func is_empty() -> bool:
+	return idol_mesh == null and body_tint.a < 0.01 \
+		and eye_glow.a < 0.01 and skill.is_empty() \
+		and sfx_profile == "vanilla"
