@@ -172,57 +172,25 @@ var _stagger_cooldown: float = 0.0
 func _build_creature_details() -> void:
 	if visual == null:
 		return
-	var thorn_mat := StandardMaterial3D.new()
-	thorn_mat.albedo_color = Color(0.16, 0.13, 0.08)
-	thorn_mat.roughness = 0.9
-	var spike := CylinderMesh.new()
-	spike.top_radius = 0.0
-	spike.bottom_radius = 0.05
-	spike.height = 0.3
-	spike.radial_segments = 5
-	for i in 6:
-		var thorn := MeshInstance3D.new()
-		thorn.mesh = spike
-		thorn.material_override = thorn_mat
-		var ang := TAU * float(i) / 6.0
-		thorn.position = Vector3(cos(ang) * 0.22, 0.28, sin(ang) * 0.22)
-		thorn.rotation = Vector3(sin(ang) * 0.7, 0.0, -cos(ang) * 0.7)
-		visual.add_child(thorn)
-	var leg_mesh := CapsuleMesh.new()
-	leg_mesh.radius = 0.055
-	leg_mesh.height = 0.26
-	for side in [-1.0, 1.0]:
-		for row in 2:
-			var leg := MeshInstance3D.new()
-			leg.mesh = leg_mesh
-			leg.material_override = thorn_mat
-			leg.position = Vector3(0.2 * side, -0.24, -0.1 + row * 0.2)
-			leg.rotation.x = 0.35 if row == 0 else -0.35
-			visual.add_child(leg)
-	# Twin front claw-arms: gives the sprite an aggressive frontal line.
-	var arm_mesh := CapsuleMesh.new()
-	arm_mesh.radius = 0.05
-	arm_mesh.height = 0.3
-	var claw_tip := CylinderMesh.new()
-	claw_tip.top_radius = 0.0
-	claw_tip.bottom_radius = 0.045
-	claw_tip.height = 0.2
-	claw_tip.radial_segments = 5
-	for side in [-1.0, 1.0]:
-		var claw_arm := MeshInstance3D.new()
-		claw_arm.name = "ClawArm"
-		claw_arm.mesh = arm_mesh
-		claw_arm.material_override = thorn_mat
-		claw_arm.position = Vector3(0.24 * side, 0.02, 0.28)
-		claw_arm.rotation = Vector3(-0.35, 0, -0.5 * side)
-		visual.add_child(claw_arm)
-		var claw := MeshInstance3D.new()
-		claw.name = "ClawTip"
-		claw.mesh = claw_tip
-		claw.material_override = thorn_mat
-		claw.position = Vector3(0.38 * side, -0.08, 0.42)
-		claw.rotation = Vector3(-0.75, 0, -0.65 * side)
-		visual.add_child(claw)
+	var dark_mat := _dark_thorn_mat()
+	# All archetypes share the base legs — only claw/feature geometry differs
+	_build_legs(dark_mat)
+	# Archetype-specific overlay geometry
+	match archetype:
+		"charger", "thorn_charger":
+			_build_ram_horns(dark_mat)
+		"fenling", "moonfen_fenling":
+			_build_fin_crest(dark_mat)
+		"ember_warden":
+			_build_shield_disc()
+		"spore_weaver":
+			_build_spore_sacs(dark_mat)
+		"mire_stalker":
+			_build_stalker_fins(dark_mat)
+		"relic_leech":
+			_build_leech_suckers(dark_mat)
+		_:
+			_build_default_claws(dark_mat)
 
 func _ready() -> void:
 	hp = max_hp
@@ -311,44 +279,53 @@ func _rig_profile() -> String:
 	return "hushling"
 
 func _build_hushling_silhouette() -> void:
+	# Base body scale varies by archetype — charger reads bigger, ambusher flatter
+	var body_scale := _archetype_body_scale()
+	visual.scale = body_scale
+
+	# Core gem — color and size reflect archetype element
+	var core_col := _archetype_core_color()
 	var core := MeshInstance3D.new()
 	core.name = "BrambleCore"
 	var core_mesh := SphereMesh.new()
-	core_mesh.radius = 0.13
-	core_mesh.height = 0.26
-	var core_material := StandardMaterial3D.new()
-	core_material.albedo_color = Color(0.46, 1.0, 0.64, 1.0)
-	core_material.emission_enabled = true
-	core_material.emission = Color(0.16, 1.0, 0.38, 1.0)
-	core_material.emission_energy_multiplier = 2.8
-	core.mesh = core_mesh
-	core.material_override = core_material
-	core.position = Vector3(0, 0.04, 0.42)
+	core_mesh.radius = 0.13 * body_scale.x
+	core_mesh.height  = core_mesh.radius * 2.0
+	var core_mat := StandardMaterial3D.new()
+	core_mat.albedo_color             = core_col
+	core_mat.emission_enabled         = true
+	core_mat.emission                 = core_col
+	core_mat.emission_energy_multiplier = 2.8
+	core.mesh              = core_mesh
+	core.material_override = core_mat
+	core.position          = Vector3(0, 0.04, 0.42)
 	visual.add_child(core)
 
 	var core_light := OmniLight3D.new()
-	core_light.name = "BrambleCoreLight"
-	core_light.light_color = Color(0.32, 1.0, 0.50, 1.0)
+	core_light.name         = "BrambleCoreLight"
+	core_light.light_color  = core_col
 	core_light.light_energy = 0.55
-	core_light.omni_range = 3.2
-	core_light.position = Vector3(0, 0.04, 0.40)
+	core_light.omni_range   = 3.2
+	core_light.position     = Vector3(0, 0.04, 0.40)
 	visual.add_child(core_light)
 
-	for i in range(3):
+	# Crown thorns — count and lean angle per archetype
+	var crown_data := _archetype_crown_data()  # [count, lean, height, radius]
+	var thorn_mat := StandardMaterial3D.new()
+	thorn_mat.albedo_color = Color(0.20, 0.34, 0.22)
+	thorn_mat.roughness    = 0.92
+	for i in crown_data[0]:
 		var thorn := MeshInstance3D.new()
 		thorn.name = "CrownThorn%d" % i
-		var thorn_mesh := CylinderMesh.new()
-		thorn_mesh.top_radius = 0.0
-		thorn_mesh.bottom_radius = 0.075
-		thorn_mesh.height = 0.38
-		thorn_mesh.radial_segments = 6
-		var thorn_material := StandardMaterial3D.new()
-		thorn_material.albedo_color = Color(0.20, 0.34, 0.22, 1.0)
-		thorn_material.roughness = 0.92
-		thorn.mesh = thorn_mesh
-		thorn.material_override = thorn_material
-		thorn.position = Vector3((i - 1) * 0.22, 0.42, 0.02)
-		thorn.rotation.z = (i - 1) * 0.34
+		var tm := CylinderMesh.new()
+		tm.top_radius      = 0.0
+		tm.bottom_radius   = crown_data[3]
+		tm.height          = crown_data[2]
+		tm.radial_segments = 6
+		thorn.mesh              = tm
+		thorn.material_override = thorn_mat
+		var spread := float(crown_data[0])
+		thorn.position = Vector3((i - spread * 0.5 + 0.5) * 0.22, 0.42, 0.02)
+		thorn.rotation.z = (i - spread * 0.5 + 0.5) * crown_data[1]
 		visual.add_child(thorn)
 
 func _physics_process(delta: float) -> void:
@@ -1169,25 +1146,32 @@ func _update_movement(delta: float) -> void:
 	velocity.y = 0
 
 func _update_visuals(delta: float) -> void:
-	# Animator drives the squash-stretch hop
+	# Move ratio drives squash-stretch
 	animator.set_move_ratio(clampf(velocity.length() / max(lunge_speed, 0.01), 0.0, 1.0))
-	
-	# Eye glow pulse
-	var eye_pulse = 0.7 + sin(bob_timer * 3.0) * 0.25
+
+	# Eye glow: size + intensity respond to current combat pattern
+	var base_pulse := 0.7 + sin(bob_timer * 3.0) * 0.25
+	var pattern_scale := _eye_scale_for_pattern()
 	for eye in eyes.get_children():
 		if eye.material_override:
-			eye.material_override.set_shader_parameter("glow_intensity", eye_pulse)
-	
-	# Tendrils: slow hypnotic spiral — each tendril traces a small circle
-	# with its own phase drift instead of a single-axis sine sway
+			eye.material_override.set_shader_parameter("glow_intensity", base_pulse * pattern_scale)
+		# Scale eyes slightly per pattern so they visibly widen on lunge
+		eye.scale = Vector3.ONE * lerpf(eye.scale.x, pattern_scale, delta * 8.0)
+
+	# Tendrils: spiral drift with per-tendril phase offset
 	var count := maxf(tendrils.get_child_count(), 1.0)
 	for i in tendrils.get_child_count():
 		var tendril = tendrils.get_child(i)
 		var ph := bob_timer * 1.35 + float(i) * TAU / count
-		tendril.rotation.x = -PI/3 + cos(ph) * 0.15
+		tendril.rotation.x = -PI / 3 + cos(ph) * 0.15
 		tendril.rotation.z = sin(ph) * 0.19
 		tendril.rotation.y = sin(ph * 0.7 + float(i)) * 0.12
-	
+
+	# Shield disc visibility (ember_warden)
+	var shield_disc := visual.get_node_or_null("ShieldDisc")
+	if shield_disc != null:
+		shield_disc.visible = _shield_active
+
 	bob_timer += delta * 2.45
 
 func _modulate_eyes(color: Color) -> void:
@@ -1487,3 +1471,232 @@ func set_burst_cooldown(value: float) -> void:
 func get_last_strike_damage() -> int:
 	# For auto-strike callbacks
 	return 8  # Base damage
+
+## === Archetype model helpers (added by model-improvements) ===
+
+func _archetype_body_scale() -> Vector3:
+	match archetype:
+		"charger", "thorn_charger":
+			return Vector3(1.18, 1.14, 1.18)   # bigger, more mass
+		"ambusher", "mire_stalker":
+			return Vector3(0.88, 0.78, 0.88)   # smaller, flatter silhouette
+		"ember_warden":
+			return Vector3(1.08, 1.20, 1.08)   # tall and wide
+		"fenling", "moonfen_fenling":
+			return Vector3(0.92, 0.70, 0.92)   # low-skimming
+		"spore_weaver":
+			return Vector3(1.04, 0.96, 1.04)   # round
+		_:
+			return Vector3.ONE
+
+func _archetype_core_color() -> Color:
+	match archetype:
+		"charger", "thorn_charger":
+			return Color(1.00, 0.28, 0.08)  # orange-red
+		"ambusher":
+			return Color(0.36, 0.78, 0.56)  # green
+		"mire_stalker":
+			return Color(0.32, 0.78, 0.82)  # cyan
+		"ember_warden":
+			return Color(1.00, 0.30, 0.08)  # deep orange
+		"spore_weaver":
+			return Color(0.64, 0.88, 0.34)  # acid green
+		"relic_leech":
+			return Color(0.46, 0.76, 1.00)  # blue
+		"fenling", "moonfen_fenling":
+			return Color(0.30, 0.82, 0.94)  # ice blue
+		_:
+			return Color(0.16, 1.00, 0.38)  # default bramble green
+
+func _archetype_crown_data() -> Array:
+	# [thorn_count, lean_per_unit, height, bottom_radius]
+	match archetype:
+		"charger", "thorn_charger":
+			return [5, 0.38, 0.52, 0.10]  # more, shorter, thicker
+		"ember_warden":
+			return [4, 0.28, 0.60, 0.09]
+		"fenling", "moonfen_fenling":
+			return [2, 0.20, 0.28, 0.06]  # minimal crown, low profile
+		"ambusher":
+			return [3, 0.44, 0.44, 0.07]
+		_:
+			return [3, 0.34, 0.38, 0.075]
+
+func _dark_thorn_mat() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.16, 0.13, 0.08)
+	m.roughness    = 0.9
+	return m
+
+func _build_legs(mat: Material) -> void:
+	var leg_mesh := CapsuleMesh.new()
+	leg_mesh.radius = 0.055
+	leg_mesh.height = 0.26
+	for side in [-1.0, 1.0]:
+		for row in 2:
+			var leg := MeshInstance3D.new()
+			leg.mesh              = leg_mesh
+			leg.material_override = mat
+			leg.position          = Vector3(0.2 * side, -0.24, -0.1 + row * 0.2)
+			leg.rotation.x        = 0.35 if row == 0 else -0.35
+			visual.add_child(leg)
+
+func _build_default_claws(mat: Material) -> void:
+	var arm_mesh := CapsuleMesh.new()
+	arm_mesh.radius = 0.05
+	arm_mesh.height = 0.3
+	var claw_tip := CylinderMesh.new()
+	claw_tip.top_radius      = 0.0
+	claw_tip.bottom_radius   = 0.045
+	claw_tip.height          = 0.2
+	claw_tip.radial_segments = 5
+	for side in [-1.0, 1.0]:
+		var claw_arm := MeshInstance3D.new()
+		claw_arm.name             = "ClawArm"
+		claw_arm.mesh             = arm_mesh
+		claw_arm.material_override = mat
+		claw_arm.position         = Vector3(0.24 * side, 0.02, 0.28)
+		claw_arm.rotation         = Vector3(-0.35, 0, -0.5 * side)
+		visual.add_child(claw_arm)
+		var claw := MeshInstance3D.new()
+		claw.name              = "ClawTip"
+		claw.mesh              = claw_tip
+		claw.material_override = mat
+		claw.position          = Vector3(0.38 * side, -0.08, 0.42)
+		claw.rotation          = Vector3(-0.75, 0, -0.65 * side)
+		visual.add_child(claw)
+
+func _build_ram_horns(mat: Material) -> void:
+	var horn_mesh := CylinderMesh.new()
+	horn_mesh.top_radius      = 0.0
+	horn_mesh.bottom_radius   = 0.065
+	horn_mesh.height          = 0.58
+	horn_mesh.radial_segments = 6
+	for side in [-1.0, 1.0]:
+		var horn := MeshInstance3D.new()
+		horn.name              = "RamHorn"
+		horn.mesh              = horn_mesh
+		horn.material_override = mat
+		# Angled forward and outward from the crown
+		horn.position = Vector3(0.28 * side, 0.52, 0.18)
+		horn.rotation = Vector3(-0.65, 0.0, -0.55 * side)
+		visual.add_child(horn)
+	# Extra back spine for mass
+	var spine := MeshInstance3D.new()
+	var sm := CylinderMesh.new()
+	sm.top_radius = 0.0; sm.bottom_radius = 0.05; sm.height = 0.42; sm.radial_segments = 5
+	spine.mesh = sm; spine.material_override = mat
+	spine.position = Vector3(0, 0.34, -0.22)
+	spine.rotation.x = 0.55
+	visual.add_child(spine)
+
+func _build_fin_crest(mat: Material) -> void:
+	var fin_mesh := CapsuleMesh.new()
+	fin_mesh.radius = 0.035
+	fin_mesh.height = 0.62
+	var fin := MeshInstance3D.new()
+	fin.name              = "DorsalFin"
+	fin.mesh              = fin_mesh
+	fin.material_override = mat
+	fin.position = Vector3(0.0, 0.38, -0.06)
+	fin.rotation.x = 0.12   # slight forward lean
+	fin.rotation.z = PI * 0.5   # lay the capsule flat = dorsal ridge
+	visual.add_child(fin)
+	# Two small side barbs
+	for side in [-1.0, 1.0]:
+		var barb := MeshInstance3D.new()
+		var bm := CylinderMesh.new()
+		bm.top_radius = 0.0; bm.bottom_radius = 0.025; bm.height = 0.26; bm.radial_segments = 4
+		barb.mesh = bm; barb.material_override = mat
+		barb.position = Vector3(0.18 * side, 0.30, -0.10)
+		barb.rotation = Vector3(0.25, 0.0, -0.70 * side)
+		visual.add_child(barb)
+
+func _build_shield_disc() -> void:
+	var shield_mat := StandardMaterial3D.new()
+	shield_mat.albedo_color  = Color(0.55, 0.16, 0.05, 0.88)
+	shield_mat.transparency  = BaseMaterial3D.TRANSPARENCY_ALPHA
+	shield_mat.emission_enabled = true
+	shield_mat.emission      = Color(1.00, 0.30, 0.08)
+	shield_mat.emission_energy_multiplier = 1.2
+	var disc := MeshInstance3D.new()
+	disc.name   = "ShieldDisc"
+	var cm := CylinderMesh.new()
+	cm.top_radius    = 0.55
+	cm.bottom_radius = 0.55
+	cm.height        = 0.06
+	cm.radial_segments = 16
+	disc.mesh              = cm
+	disc.material_override = shield_mat
+	disc.position          = Vector3(0.0, 0.08, 0.56)
+	disc.rotation.x        = PI * 0.5
+	disc.visible           = false   # activated by _shield_active logic
+	visual.add_child(disc)
+	# Pulse when visible
+	var tw := disc.create_tween().set_loops()
+	tw.tween_property(shield_mat, "emission_energy_multiplier", 2.2, 0.65).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(shield_mat, "emission_energy_multiplier", 0.8, 0.65).set_trans(Tween.TRANS_SINE)
+
+func _build_spore_sacs(mat: Material) -> void:
+	var sac_mat := StandardMaterial3D.new()
+	sac_mat.albedo_color        = Color(0.36, 0.50, 0.18)
+	sac_mat.emission_enabled    = true
+	sac_mat.emission            = Color(0.52, 0.78, 0.24)
+	sac_mat.emission_energy_multiplier = 0.55
+	sac_mat.roughness           = 0.7
+	for i in 3:
+		var side := (i % 2) * 2.0 - 1.0
+		var sac := MeshInstance3D.new()
+		sac.name = "SporeSac_%d" % i
+		var sm := SphereMesh.new()
+		sm.radius = 0.10 + 0.04 * float(i % 2)
+		sm.height  = sm.radius * 1.5
+		sac.mesh              = sm
+		sac.material_override = sac_mat
+		sac.position = Vector3(0.30 * side, -0.08 + float(i) * 0.14, -0.12)
+		visual.add_child(sac)
+		# Gentle throb
+		var tw := sac.create_tween().set_loops()
+		tw.tween_property(sac, "scale", Vector3.ONE * 1.18, 0.9 + float(i) * 0.15).set_trans(Tween.TRANS_SINE)
+		tw.tween_property(sac, "scale", Vector3.ONE * 0.90, 0.9 + float(i) * 0.15).set_trans(Tween.TRANS_SINE)
+
+func _build_stalker_fins(mat: Material) -> void:
+	for side in [-1.0, 1.0]:
+		var fin := MeshInstance3D.new()
+		fin.name = "StalkerFin"
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.0; cm.bottom_radius = 0.04; cm.height = 0.48; cm.radial_segments = 5
+		fin.mesh = cm; fin.material_override = mat
+		fin.position = Vector3(0.28 * side, 0.12, -0.15)
+		fin.rotation = Vector3(0.30, 0.0, -1.05 * side)
+		visual.add_child(fin)
+
+func _build_leech_suckers(mat: Material) -> void:
+	var sucker_mat := StandardMaterial3D.new()
+	sucker_mat.albedo_color = Color(0.30, 0.22, 0.44)
+	sucker_mat.emission_enabled = true
+	sucker_mat.emission = Color(0.46, 0.76, 1.0)
+	sucker_mat.emission_energy_multiplier = 0.7
+	for i in 5:
+		var angle := TAU * float(i) / 5.0
+		var sucker := MeshInstance3D.new()
+		var sm := CylinderMesh.new()
+		sm.top_radius = 0.06; sm.bottom_radius = 0.06; sm.height = 0.04; sm.radial_segments = 8
+		sucker.mesh = sm; sucker.material_override = sucker_mat
+		sucker.position = Vector3(cos(angle) * 0.20, sin(angle) * 0.20, 0.44)
+		sucker.rotation.x = PI * 0.5
+		visual.add_child(sucker)
+
+func _eye_scale_for_pattern() -> float:
+	match current_pattern:
+		Pattern.LUNGE, Pattern.CHARGE_RUSH, Pattern.WINDUP:
+			return 1.55   # wide, aggressive
+		Pattern.FEINT, Pattern.SPECIAL_TELEGRAPH:
+			return 1.25
+		Pattern.HIDE:
+			return 0.45   # narrowed/hidden
+		Pattern.RECOVER:
+			return 0.85
+		_:
+			return 1.0
+
