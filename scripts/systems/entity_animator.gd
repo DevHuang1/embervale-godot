@@ -1,5 +1,5 @@
 extends Node
-class_name EntityAnimator
+## class_name removed — duplicate of scripts/entities/entity_animator.gd
 
 ## === EntityAnimator — Procedural Combat Animation Controller ===
 ## Drives squash-stretch, attack swings, hit-react, death tumble and gait
