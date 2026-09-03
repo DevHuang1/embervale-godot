@@ -1,54 +1,55 @@
-class_name AttachmentSocket
 extends Node3D
+class_name AttachmentSocket
 
-## === Attachment Socket ===
-## Named mount point on a character rig ("weapon_r_hand",
-## "lantern_hand", "back"). Attachments are plain meshes + materials
-## with local offsets, so gear swaps never touch entity code.
+## === AttachmentSocket — Weapon / Gear Mount Point ===
+## Used by Hero for hand sockets (hand_l, hand_r) and back socket.
+## Entities create these in _ready(); CharacterRigLoader reparents them
+## under the matching bone when an authored rig mounts.
+##
+## Properties read by the weapon visual system:
+##   socket_id   : String  — "hand_l", "hand_r", "back"
+##   attached    : Node3D  — currently mounted item (set by equip/unequip)
+##
+## API:
+##   attach(item: Node3D)   — parent item under this socket, keep world xform
+##   detach() -> Node3D     — remove and return the current item
+##   has_item() -> bool
 
-@export var socket_id: String = ""
-var _attached: Node3D = null
+@export var socket_id : String = ""
+## Tag displayed in editor for identification
+@export var socket_label : String = ""
 
+var attached : Node3D = null
 
-func attach(mesh: Mesh, material: Material = null, offset: Vector3 = Vector3.ZERO,
-		rotation_euler: Vector3 = Vector3.ZERO, id: String = "") -> Node3D:
-	detach()
-	var mi := MeshInstance3D.new()
-	mi.name = "Attachment_%s" % (id if not id.is_empty() else socket_id)
-	mi.mesh = mesh
-	if material:
-		mi.material_override = material
-	mi.position = offset
-	mi.rotation = rotation_euler
-	add_child(mi)
-	_attached = mi
-	return mi
+func attach(item: Node3D) -> void:
+	if item == null:
+		return
+	if attached != null and is_instance_valid(attached):
+		detach()
+	var world_xform := item.global_transform
+	if item.get_parent() != null:
+		item.get_parent().remove_child(item)
+	add_child(item)
+	item.global_transform = world_xform
+	attached = item
 
+func detach() -> Node3D:
+	if attached == null or not is_instance_valid(attached):
+		attached = null
+		return null
+	var item := attached
+	attached = null
+	var world_xform := item.global_transform
+	remove_child(item)
+	# Return to scene root so caller can reparent elsewhere
+	var scene_root := get_tree().current_scene
+	if scene_root != null:
+		scene_root.add_child(item)
+	item.global_transform = world_xform
+	return item
 
-func attach_node(node: Node3D) -> void:
-	detach()
-	add_child(node)
-	_attached = node
+func has_item() -> bool:
+	return attached != null and is_instance_valid(attached)
 
-
-func detach() -> void:
-	if _attached and is_instance_valid(_attached):
-		_attached.queue_free()
-	_attached = null
-
-
-func is_occupied() -> bool:
-	return _attached != null and is_instance_valid(_attached)
-
-
-## The currently attached node (or null). Used by the hero to swing the
-## held weapon visibly without walking the socket tree.
-func get_attachment() -> Node3D:
-	return _attached if is_occupied() else null
-
-
-static func find_socket(root: Node, id: String) -> AttachmentSocket:
-	for child in root.find_children("*", "AttachmentSocket", true, false):
-		if child.socket_id == id:
-			return child
-	return null
+func get_item() -> Node3D:
+	return attached if has_item() else null
