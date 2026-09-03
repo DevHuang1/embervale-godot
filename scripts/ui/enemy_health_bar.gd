@@ -1,180 +1,175 @@
-extends Node3D
-class_name EnemyHealthBar
+extends Node
 
-## World-space enemy health plate. It reads hp/max_hp from its parent so it
-## works for Hushlings, Fenlings, and BossBase without coupling to one class.
-@export var bar_width: float = 1.65
-@export var bar_height: float = 0.13
-@export var height_offset: float = 2.35
-@export var show_name_when_targeted: bool = true
+## === EnemyHealthBar — Boss / Elite HP Bar UI ===
+## Preloaded and instantiated by BossBase._ready() as:
+##   var health_bar := preload("res://scripts/ui/enemy_health_bar.gd").new()
+##   health_bar.name = "EnemyHealthBar"
+##   add_child(health_bar)
+##
+## Builds a floating ProgressBar + phase label above the entity.
+## Works as both a world-space bar (Label3D) and a screen-space bar
+## via a CanvasLayer — defaults to CanvasLayer for readability.
+##
+## Automatically connects to parent's:
+##   hp / max_hp properties   — polled each frame (no signal needed)
+##   is_defeated               — hides bar on death
+##   current_phase             — shown in phase label
 
-var _background: MeshInstance3D
-var _fill: MeshInstance3D
-var _fill_material: StandardMaterial3D
-var _lock_frame: MeshInstance3D
-var _lock_material: StandardMaterial3D
-var _name_label: Label3D
-var _hp_label: Label3D
-var _last_ratio := -1.0
-var _source: Node
-var _base_scale := 1.0
-var _lock_was := false
+var _bar_root  : Control = null
+var _bar       : ProgressBar = null
+var _label     : Label = null
+var _phase_lbl : Label = null
+var _canvas    : CanvasLayer = null
+var _entity    : Node3D = null
+var _camera    : Camera3D = null
 
 func _ready() -> void:
-    _source = get_parent()
-    if _source == null:
-        queue_free()
-        return
-    _base_scale = 1.25 if int(_source.get("max_hp")) >= 200 else 1.0
-    position = Vector3(0.0, height_offset * _base_scale, 0.0)
-    scale = Vector3.ONE * _base_scale
-    _build_bar()
-    _refresh(true)
+	_entity = get_parent() as Node3D
+	if _entity == null:
+		return
+	_build_ui()
+	_find_camera()
+
+func _find_camera() -> void:
+	if get_tree() == null: return
+	await get_tree().process_frame
+	_camera = get_viewport().get_camera_3d()
+	if _camera == null:
+		var scene := get_tree().current_scene
+		if scene:
+			_camera = scene.find_child("Camera3D", true, false) as Camera3D
+
+# ─── UI Build ─────────────────────────────────────────────────────────────────
+
+func _build_ui() -> void:
+	_canvas = CanvasLayer.new()
+	_canvas.layer = 8   # Above world, below FloatingText
+	add_child(_canvas)
+
+	var vp_size := Vector2(1080, 1920)   # Match project viewport
+
+	_bar_root = Control.new()
+	_bar_root.name = "EnemyBarRoot"
+	_bar_root.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_bar_root.size = Vector2(720, 80)
+	_bar_root.position = Vector2(vp_size.x * 0.5 - 360, 32)
+	_canvas.add_child(_bar_root)
+
+	# Background shadow
+	var bg := ColorRect.new()
+	bg.color  = Color(0.0, 0.0, 0.0, 0.55)
+	bg.size   = Vector2(720, 52)
+	bg.position = Vector2(0, 20)
+	_bar_root.add_child(bg)
+
+	# Boss name label
+	_label = Label.new()
+	_label.text          = _entity.name if _entity else "???"
+	_label.add_theme_font_size_override("font_size", 28)
+	_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.55))
+	_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_label.size      = Vector2(720, 22)
+	_label.position  = Vector2(0, 0)
+	_bar_root.add_child(_label)
+
+	# HP bar
+	_bar = ProgressBar.new()
+	_bar.min_value   = 0
+	_bar.max_value   = 1
+	_bar.value       = 1
+	_bar.show_percentage = false
+	_bar.size        = Vector2(720, 28)
+	_bar.position    = Vector2(0, 24)
+	# Style
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color(0.85, 0.22, 0.08)
+	fill.corner_radius_top_left    = 3
+	fill.corner_radius_top_right   = 3
+	fill.corner_radius_bottom_left = 3
+	fill.corner_radius_bottom_right= 3
+	_bar.add_theme_stylebox_override("fill", fill)
+	var bg2 := StyleBoxFlat.new()
+	bg2.bg_color = Color(0.10, 0.06, 0.05)
+	bg2.corner_radius_top_left    = 3
+	bg2.corner_radius_top_right   = 3
+	bg2.corner_radius_bottom_left = 3
+	bg2.corner_radius_bottom_right= 3
+	_bar.add_theme_stylebox_override("background", bg2)
+	_bar_root.add_child(_bar)
+
+	# Phase / guard label (shown below bar)
+	_phase_lbl = Label.new()
+	_phase_lbl.text = ""
+	_phase_lbl.add_theme_font_size_override("font_size", 22)
+	_phase_lbl.add_theme_color_override("font_color", Color(1.0, 0.72, 0.28))
+	_phase_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_phase_lbl.size     = Vector2(720, 20)
+	_phase_lbl.position = Vector2(0, 54)
+	_bar_root.add_child(_phase_lbl)
+
+	_bar_root.visible = false
+
+# ─── Per-frame update ─────────────────────────────────────────────────────────
 
 func _process(_delta: float) -> void:
-    if not is_instance_valid(_source):
-        queue_free()
-        return
-    _refresh(false)
+	if _bar_root == null or _entity == null or not is_instance_valid(_entity):
+		return
 
-func _build_bar() -> void:
-    var plate := Node3D.new()
-    plate.name = "HealthPlate"
-    add_child(plate)
+	var defeated : bool = bool(_entity.get("is_defeated") if _entity.get("is_defeated") != null else false)
+	if defeated:
+		_bar_root.visible = false
+		return
 
-    var back_mesh := QuadMesh.new()
-    back_mesh.size = Vector2(bar_width, bar_height)
-    var back_material := _make_material(Color(0.025, 0.018, 0.02, 0.92))
-    back_mesh.material = back_material
-    _background = MeshInstance3D.new()
-    _background.name = "HealthBackground"
-    _background.mesh = back_mesh
-    _background.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-    plate.add_child(_background)
+	var hp     := float(_entity.get("hp")     if _entity.get("hp")     != null else 0)
+	var max_hp := float(_entity.get("max_hp") if _entity.get("max_hp") != null else 1)
+	if max_hp <= 0:
+		_bar_root.visible = false
+		return
 
-    var fill_mesh := QuadMesh.new()
-    fill_mesh.size = Vector2(bar_width - 0.06, bar_height - 0.035)
-    _fill_material = _make_material(Color(0.20, 0.92, 0.34, 1.0))
-    fill_mesh.material = _fill_material
-    _fill = MeshInstance3D.new()
-    _fill.name = "HealthFill"
-    _fill.mesh = fill_mesh
-    _fill.position = Vector3(-(bar_width - 0.06) * 0.5, 0.0, -0.006)
-    _fill.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-    plate.add_child(_fill)
+	_bar_root.visible = true
+	_bar.value = hp / max_hp
 
-    # Lantern sigil: real annular geometry rather than a translucent QuadMesh.
-    # Only the ring owns pixels, so compatibility renderers cannot expose a
-    # square texture boundary on the marked enemy.
-    var lock_mesh := _make_lock_sigil_mesh()
-    _lock_material = _make_material(Color(1.0, 0.74, 0.30, 0.0))
-    lock_mesh.surface_set_material(0, _lock_material)
-    _lock_frame = MeshInstance3D.new()
-    _lock_frame.name = "LockFrame"
-    _lock_frame.mesh = lock_mesh
-    _lock_frame.position = Vector3(-bar_width * 0.5 - 0.26, 0.0, -0.002)
-    _lock_frame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-    _lock_frame.visible = false
-    plate.add_child(_lock_frame)
+	# Tint bar red at low HP
+	var ratio := hp / max_hp
+	var fill := _bar.get_theme_stylebox("fill") as StyleBoxFlat
+	if fill != null:
+		fill.bg_color = Color(0.85, 0.22 * ratio, 0.08 * ratio)
 
-    _name_label = Label3D.new()
-    _name_label.name = "EnemyName"
-    _name_label.position = Vector3(0.0, 0.18, 0.0)
-    _name_label.font_size = 32
-    _name_label.modulate = Color(1.0, 0.90, 0.72, 0.96)
-    _name_label.outline_size = 6
-    _name_label.outline_modulate = Color(0.03, 0.02, 0.02, 0.9)
-    _name_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-    _name_label.no_depth_test = true
-    _name_label.text = _clean_name(str(_source.name))
-    plate.add_child(_name_label)
+	# Phase label (BossBase sets boss_phase_label.text externally,
+	# but we also read current_phase for display)
+	if _phase_lbl != null:
+		var phase := _entity.get("current_phase")
+		if phase != null:
+			var phase_names := ["PHASE I", "PHASE II", "PHASE III", "ENRAGE"]
+			_phase_lbl.text = phase_names[clampi(int(phase), 0, 3)]
+		else:
+			_phase_lbl.text = ""
 
-    _hp_label = Label3D.new()
-    _hp_label.name = "EnemyHP"
-    _hp_label.position = Vector3(0.0, -0.18, 0.0)
-    _hp_label.font_size = 22
-    _hp_label.modulate = Color(1.0, 0.96, 0.90, 0.9)
-    _hp_label.outline_size = 4
-    _hp_label.outline_modulate = Color(0.03, 0.02, 0.02, 0.9)
-    _hp_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-    _hp_label.no_depth_test = true
-    plate.add_child(_hp_label)
+	# Entity name (update once on first show)
+	if _label != null and _label.text in ["", "???", "Node"]:
+		var cls := _entity.get_class()
+		# Friendly class name mapping
+		var boss_names := {
+			"HushlingMatriarch":    "The Matriarch",
+			"MistfenSiltCrawler":  "Silt Crawler",
+			"HeartwoodCinderColossus": "Cinder Colossus",
+			"MoonfenVoidWeaver":   "Void Weaver",
+			"BrambleThornWarden":  "Thorn Warden",
+		}
+		_label.text = boss_names.get(cls, _entity.name.replace("_", " "))
 
-func _make_material(color: Color) -> StandardMaterial3D:
-    var material := StandardMaterial3D.new()
-    material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-    material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-    material.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
-    material.cull_mode = BaseMaterial3D.CULL_DISABLED
-    material.albedo_color = color
-    material.disable_receive_shadows = true
-    material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-    return material
+# ─── External API (called by BossBase) ────────────────────────────────────────
 
-func _make_lock_sigil_mesh() -> ArrayMesh:
-    const SEGMENTS := 28
-    const INNER_RADIUS := 0.105
-    const OUTER_RADIUS := 0.175
-    var surface := SurfaceTool.new()
-    surface.begin(Mesh.PRIMITIVE_TRIANGLES)
-    for i in SEGMENTS:
-        var a0 := TAU * float(i) / float(SEGMENTS)
-        var a1 := TAU * float(i + 1) / float(SEGMENTS)
-        var inner0 := Vector3(cos(a0) * INNER_RADIUS, sin(a0) * INNER_RADIUS, 0.0)
-        var outer0 := Vector3(cos(a0) * OUTER_RADIUS, sin(a0) * OUTER_RADIUS, 0.0)
-        var inner1 := Vector3(cos(a1) * INNER_RADIUS, sin(a1) * INNER_RADIUS, 0.0)
-        var outer1 := Vector3(cos(a1) * OUTER_RADIUS, sin(a1) * OUTER_RADIUS, 0.0)
-        for vertex in [inner0, outer0, outer1, inner0, outer1, inner1]:
-            surface.set_normal(Vector3(0.0, 0.0, 1.0))
-            surface.add_vertex(vertex)
-    return surface.commit() as ArrayMesh
+## BossBase._show_boss_health_bar() calls this (or we auto-show in _process).
+func show() -> void:
+	if _bar_root != null:
+		_bar_root.visible = true
 
-## Immediate damage hook used by enemy and boss damage handlers. The normal
-## process refresh remains as a safety net for regeneration and scripted damage.
-func notify_damage() -> void:
-    if _fill == null or _fill_material == null:
-        return
-    _last_ratio = -1.0
-    _refresh(true)
-    var original := _fill_material.albedo_color
-    var flash := create_tween()
-    _fill_material.albedo_color = Color(1.0, 0.92, 0.62)
-    flash.tween_property(_fill_material, "albedo_color", original, 0.16) \
-        .set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+func hide_bar() -> void:
+	if _bar_root != null:
+		_bar_root.visible = false
 
-func _refresh(force: bool) -> void:
-    var max_hp := maxi(1, int(_source.get("max_hp")))
-    var hp := clampi(int(_source.get("hp")), 0, max_hp)
-    var ratio := clampf(float(hp) / float(max_hp), 0.0, 1.0)
-    if force or not is_equal_approx(ratio, _last_ratio):
-        _last_ratio = ratio
-        _fill.scale = Vector3(maxf(ratio, 0.001), 1.0, 1.0)
-        var healthy := Color(0.18, 0.92, 0.34)
-        var danger := Color(0.96, 0.16, 0.10)
-        _fill_material.albedo_color = danger.lerp(healthy, smoothstep(0.0, 0.72, ratio))
-        _hp_label.text = "%d / %d" % [hp, max_hp]
-    var defeated := bool(_source.get("is_defeated")) or hp <= 0
-    visible = not defeated
-    var is_locked := false
-    if show_name_when_targeted:
-        var game_state := get_node_or_null("/root/GameState")
-        var target = game_state.enemy_target if game_state != null else null
-        is_locked = target == _source
-        _name_label.visible = is_locked or hp < max_hp
-    if is_locked and not _lock_was:
-        _lock_was = true
-        _name_label.modulate = Color(1.0, 0.74, 0.30, 1.0)
-        _name_label.text = "◈ %s" % _clean_name(str(_source.name))
-    elif not is_locked and _lock_was:
-        _lock_was = false
-        _name_label.modulate = Color(1.0, 0.90, 0.72, 0.96)
-        _name_label.text = _clean_name(str(_source.name))
-    _lock_frame.visible = is_locked
-    if is_locked and _lock_material:
-        var pulse := 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.006)
-        _lock_material.albedo_color = Color(1.0, 0.74, 0.30,
-            0.16 + 0.16 * pulse)
-
-func _clean_name(value: String) -> String:
-    var parts := value.split("@", false)
-    return parts[parts.size() - 1] if not parts.is_empty() else value
+## Called by BossBase when phase label text is set.
+func set_phase_text(text: String) -> void:
+	if _phase_lbl != null:
+		_phase_lbl.text = text
