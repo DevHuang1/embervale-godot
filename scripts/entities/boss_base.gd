@@ -20,7 +20,8 @@ signal encounter_reset
 enum BossPhase { PHASE_1, PHASE_2, PHASE_3, ENRAGE }
 
 @export var max_hp: int = 500
-var velocity: Vector3 = Vector3.ZERO
+# NOTE: `velocity` is the native CharacterBody3D property — do NOT redeclare
+# it here; shadowing it is a parse error that kills the whole BossBase class.
 @export var phase_thresholds: Array = [0.7, 0.3, 0.1]  # HP percentages for phase transitions
 @export var base_atk: int = 12
 @export var move_speed: float = 3.6
