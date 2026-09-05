@@ -295,8 +295,7 @@ func _attack_ground_pound(_player: Node3D) -> void:
 	animator.trigger_attack() if animator else null
 	CombatFx.spawn_shockwave(self, global_position, arena_radius * 0.55, COL_MAGMA, 0.65)
 	_deal_area_damage(global_position, 4.5, int(base_atk * 1.4))
-	ImpactDirector.apply_feedback(self, "heavy", global_position, Vector3.UP, 0.8) \
-		if get_node_or_null("/root/ImpactDirector") != null else null
+	ImpactDirector.apply_feedback(self, "heavy", global_position, Vector3.UP, 0.8)
 
 func _attack_magma_fist(player: Node3D) -> void:
 	_shake_camera(0.38)

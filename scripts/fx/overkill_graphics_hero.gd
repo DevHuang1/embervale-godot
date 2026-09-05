@@ -194,7 +194,7 @@ func _update_lantern(delta: float) -> void:
 	# Read hero state
 	var combat_state := 0
 	if _hero.has_method("get") and _hero.get("game_state") != null:
-		var gs := _hero.get("game_state")
+		var gs: Node = _hero.get("game_state")
 		if gs != null:
 			combat_state = int(gs.get("combat_state") if gs.get("combat_state") != null else 0)
 
@@ -219,7 +219,7 @@ func _update_lantern(delta: float) -> void:
 	if _flare_mat != null:
 		var has_target := false
 		if _hero.get("game_state") != null:
-			var gs := _hero.get("game_state")
+			var gs: Node = _hero.get("game_state")
 			has_target = bool(gs.get("enemy_selected") if gs.get("enemy_selected") != null else false)
 		var target_alpha := 0.55 if has_target else 0.0
 		_flare_mat.albedo_color.a = lerpf(_flare_mat.albedo_color.a, target_alpha, delta * 6.0)
@@ -440,7 +440,7 @@ func _update_shadow(delta: float) -> void:
 func _update_element_theme() -> void:
 	if _hero == null:
 		return
-	var gs := _hero.get("game_state")
+	var gs: Node = _hero.get("game_state")
 	if gs == null:
 		return
 	var weapon : Dictionary = gs.get("equipped_weapon") if gs.get("equipped_weapon") != null else {}

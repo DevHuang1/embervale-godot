@@ -56,9 +56,9 @@ func _ready() -> void:
 	if quit_button:     quit_button.pressed.connect(_on_quit)
 
 	# Fade in
-	modulate = Color(1, 1, 1, 0)
+	$Root.modulate = Color(1, 1, 1, 0)
 	var tw := create_tween()
-	tw.tween_property(self, "modulate:a", 1.0, 0.65).set_trans(Tween.TRANS_QUAD)
+	tw.tween_property($Root, "modulate:a", 1.0, 0.65).set_trans(Tween.TRANS_QUAD)
 
 # ─── Button handlers ──────────────────────────────────────────────────────────
 
@@ -106,7 +106,7 @@ func _start_new_game() -> void:
 
 func _fade_to_game() -> void:
 	var tw := create_tween()
-	tw.tween_property(self, "modulate:a", 0.0, 0.5).set_trans(Tween.TRANS_QUAD)
+	tw.tween_property($Root, "modulate:a", 0.0, 0.5).set_trans(Tween.TRANS_QUAD)
 	tw.tween_callback(_load_grove)
 
 func _load_grove() -> void:

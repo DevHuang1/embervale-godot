@@ -31,7 +31,7 @@ func _run() -> void:
 		if sock != null:
 			var bone := sock.get_parent() as Node3D
 			print(pair[0], " parent=", sock.get_parent().name,
-				" occupied=", sock.is_occupied(),
+				" occupied=", sock.has_item(),
 				" sock_gpos=", sock.global_position,
 				" bone_gpos=", bone.global_position if bone != null else Vector3.INF,
 				" dist=", sock.global_position.distance_to(bone.global_position) if bone != null else -1.0)

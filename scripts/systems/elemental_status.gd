@@ -228,7 +228,7 @@ func _chain_lightning(attacker: Node3D, jumps: int, radius: float, damage: int) 
 		for candidate in _entity.get_tree().get_nodes_in_group("enemy"):
 			if candidate in hit or not is_instance_valid(candidate):
 				continue
-			var d := candidate.global_position.distance_to(source_pos)
+			var d: float = candidate.global_position.distance_to(source_pos)
 			if d < best_d:
 				best_d = d
 				best = candidate

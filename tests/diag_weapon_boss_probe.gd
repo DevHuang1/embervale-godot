@@ -49,8 +49,8 @@ func _run() -> void:
 			if sock == null:
 				print("  ", sock_name, ": MISSING")
 				continue
-			var occ: bool = sock.is_occupied()
-			var att = sock.get_attachment() if occ else null
+			var occ: bool = sock.has_item()
+			var att = sock.get_item() if occ else null
 			print("  ", sock_name, ": occupied=", occ,
 				" attached=", att.name if att else "none",
 				" vis=", att.visible if att else "-",

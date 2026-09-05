@@ -26,7 +26,7 @@ func attach(item: Node3D) -> void:
 		return
 	if attached != null and is_instance_valid(attached):
 		detach()
-	var world_xform := item.global_transform
+	var world_xform := item.global_transform if item.is_inside_tree() else item.transform
 	if item.get_parent() != null:
 		item.get_parent().remove_child(item)
 	add_child(item)

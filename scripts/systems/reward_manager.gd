@@ -1,5 +1,4 @@
 extends Node
-class_name RewardManager
 
 ## === RewardManager — Centralised Reward Dispatcher (AutoLoad) ===
 ##

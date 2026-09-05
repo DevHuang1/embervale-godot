@@ -506,7 +506,7 @@ func _sig_mire_stalker() -> void:
 		patch.rotation.y = ang
 		_visual.add_child(patch)
 		# Shimmer cycle
-		var tw := mat.create_tween().set_loops()
+		var tw: Tween = mat.create_tween().set_loops()
 		tw.tween_property(mat, "emission_energy_multiplier", 1.4, randf_range(0.5, 1.2))
 		tw.tween_property(mat, "emission_energy_multiplier", 0.0, randf_range(0.5, 1.2))
 

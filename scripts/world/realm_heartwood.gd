@@ -312,7 +312,7 @@ func _build_heat_floor() -> void:
 	floor_mesh.position.y = 0.015
 	floor_mesh.rotation.x = -PI * 0.5
 	add_child(floor_mesh)
-	var tw := mat.create_tween().set_loops()
+	var tw: Tween = mat.create_tween().set_loops()
 	tw.tween_property(mat, "emission_energy_multiplier", 0.38, 1.3).set_trans(Tween.TRANS_SINE)
 	tw.tween_property(mat, "emission_energy_multiplier", 0.08, 1.6).set_trans(Tween.TRANS_SINE)
 
@@ -360,7 +360,7 @@ func _grow_terrain_for_phase(phase: int) -> void:
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
-func _seam_mat(base: Color, seam: Color, rough: float) -> ShaderMaterial:
+func _seam_mat(base: Color, seam: Color, rough: float) -> StandardMaterial3D:
 	# Inline GDScript-driven StandardMaterial that approximates seams via emission
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = base

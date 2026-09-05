@@ -350,7 +350,7 @@ func _attack_burrow(player: Node3D) -> void:
 		_deal_area_damage(global_position, 3.5, int(base_atk * 1.8))
 		_shake_camera(0.55)
 		if player.has_method("apply_move_slow"):
-			player.call("apply_move_slow", 0.55, 2.0)
+			player.call("apply_move_slow", 0.55, 2.0))
 
 func _attack_cold_snap(player: Node3D) -> void:
 	# Flash freeze ground around player — expanding ice rings

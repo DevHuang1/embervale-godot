@@ -27,12 +27,12 @@ func _run() -> void:
 		print("FAIL: textured breastplate material missing")
 	else:
 		var material := plate.material_override as ShaderMaterial
-		if material.get_shader_parameter("normal_texture") == null \
-				or material.get_shader_parameter("orm_texture") == null:
+		if material.get_shader_parameter("normal_tex") == null \
+				or material.get_shader_parameter("orm_tex") == null:
 			failures += 1
 			print("FAIL: armor PBR texture bindings missing")
 	var hand := hero.find_child("HandSocketL", true, false) as AttachmentSocket
-	var weapon := hand.get_attachment() if hand != null else null
+	var weapon: Node3D = hand.get_item() if hand != null else null
 	if weapon == null or weapon.position.length() <= 0.001:
 		failures += 1
 		print("FAIL: sword grip calibration missing")

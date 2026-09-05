@@ -25,12 +25,12 @@ applied manually or by an agent following the instructions in each fix file.
 
 ## Status
 
-- [ ] FIX-1 applied
-- [ ] FIX-2 applied
-- [ ] FIX-3 applied
-- [ ] FIX-4 applied
-- [ ] FIX-5 applied
-- [ ] FIX-6 applied
+- [x] FIX-1 applied — `_any_model()` resolves .glb/.fbx; `set_visual_root` path replaced by AnimTreeBridge wiring; sockets bind via Skeleton3D `BoneAttachment3D`
+- [x] FIX-2 applied — slot retyped to `Node3D`; target tracking handled in `_process` (plus in-tree staleness check)
+- [x] FIX-3 applied — HUD `_on_skill_pressed` auto-marks via `hero.nearest_enemy(14.0)`, the exact keyboard parity range
+- [x] FIX-4 applied — loot uses `result.get("items")` / `result.get("gear")` guards
+- [x] FIX-5 applied — `hero._anim_bridge()` `has_meta`-guarded helper at both call sites
+- [x] FIX-6 applied — `TargetMarker` now extends `Node3D`; `tests/test_target_marker.gd` passes
 
 ## After applying fixes
 

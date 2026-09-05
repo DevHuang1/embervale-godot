@@ -1,5 +1,4 @@
 extends Node
-class_name SkillExecutor
 
 ## === SkillExecutor — Weapon Skill World Effects ===
 ## AutoLoad (or placed in scene). Fires all 12 weapon skills in the 3D world.
@@ -121,7 +120,7 @@ func _skill_heal_bloom(hero: Node3D, heal: int, gs: Node) -> void:
 	CombatFx.spawn_burst(hero, hero.global_position + Vector3(0, 1.2, 0), col, 24, 4.5, 0.65, 0.16)
 	CombatFx.spawn_ring(hero, hero.global_position, 2.8, col, 0.55)
 	if gs != null and gs.has_method("heal"):
-		var actual := gs.call("heal", heal)
+		var actual: int = gs.call("heal", heal)
 		FloatingText.spawn_on_entity(hero, "+%d" % actual, col)
 
 func _skill_strike(hero: Node3D, target: Node3D, damage: int) -> void:
@@ -197,8 +196,6 @@ func _skill_heavy_aoe(hero: Node3D, radius: float, damage: int) -> void:
 		_shake(0.60))
 
 func _shake(intensity: float) -> void:
-	var id := get_node_or_null("/root/ImpactDirector")
-	if id and id.has_method("apply_feedback") and get_tree():
-		var hero := _find_hero()
-		if hero:
-			id.call("apply_feedback", hero, "hit", hero.global_position, Vector3.UP, intensity)
+	var hero := _find_hero()
+	if hero:
+		ImpactDirector.apply_feedback(hero, "hit", hero.global_position, Vector3.UP, intensity)

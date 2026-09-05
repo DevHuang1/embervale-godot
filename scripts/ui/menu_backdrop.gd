@@ -15,6 +15,13 @@ var _t := randf() * TAU
 var _live := false
 
 func _ready() -> void:
+	# Defer building the backdrop until this menu scene is fully in the tree.
+	# Instantiating the grove synchronously here runs the world's entire _ready
+	# chain (hero, biome_manager, world_manager, combat FX) before their nodes
+	# are inside the tree, which triggers add_child/is_inside_tree errors.
+	building.call_deferred()
+
+func building() -> void:
 	var ps := load("res://scenes/world/grove.tscn") as PackedScene
 	if ps == null:
 		return

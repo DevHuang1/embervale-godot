@@ -52,7 +52,10 @@ func _ready() -> void:
 		skill_cd_labels.append(cd)
 		if btn:
 			var idx := i
-			btn.pressed.connect(func(): _on_skill_pressed(idx))
+			if btn is FightButton:
+				btn.fight_pressed.connect(func(): _on_skill_pressed(idx))
+			elif btn is BaseButton:
+				btn.pressed.connect(func(): _on_skill_pressed(idx))
 	_connect_signals()
 	_refresh_all()
 	if combat_card: combat_card.visible = false
@@ -119,19 +122,23 @@ func _on_weapon_changed(weapon: Dictionary) -> void:
 		var btn   = skill_buttons[i]       if i < skill_buttons.size()       else null
 		if i < skills.size():
 			if glyph: glyph.text = str(skills[i].get("name", "—"))[0]
-			if btn: btn.disabled = false
+			if btn is FightButton: btn.dimmed = false
+			elif btn: btn.disabled = false
 		else:
 			if glyph: glyph.text = "—"
-			if btn: btn.disabled = true
+			if btn is FightButton: btn.dimmed = true
+			elif btn: btn.disabled = true
 
 func _on_skill_cooldown_changed(slot: int, remaining: float) -> void:
 	if slot < 0 or slot >= 3: return
 	var cd  = skill_cd_labels[slot]  if slot < skill_cd_labels.size()  else null
 	var btn = skill_buttons[slot]    if slot < skill_buttons.size()    else null
 	if cd:  cd.text = "" if remaining <= 0.0 else "%ds" % ceili(remaining)
-	if btn: btn.disabled = remaining > 0.0
+	if btn is FightButton: btn.dimmed = remaining > 0.0
+	elif btn: btn.disabled = remaining > 0.0
 
 func _on_skill_pressed(slot: int) -> void:
+	_auto_mark_for_skill(slot)
 	var result := game_state.use_skill(slot)
 	if result.get("success", false):
 		var se := get_node_or_null("/root/SkillExecutor")
@@ -141,6 +148,24 @@ func _on_skill_pressed(slot: int) -> void:
 			se.call("execute_skill", slot, result.get("skill", {}))
 	else:
 		_push_field_note(str(result.get("message", "")))
+
+## Mobile/keyboard parity: keyboard rites auto-snap onto the nearest foe
+## (hero._on_skill_slot_pressed), so HUD presses must mark the same way or
+## touch players get "no target lit" with no visible way to mark one.
+func _auto_mark_for_skill(slot: int) -> void:
+	var sk := game_state.get_skill(slot)
+	if sk.is_empty() or str(sk.get("type", "")) == "heal_bloom":
+		return
+	var locked := game_state.enemy_target as Node3D
+	if locked != null and is_instance_valid(locked):
+		return
+	var hero := get_tree().get_first_node_in_group("player") as Node3D
+	if hero == null or not is_instance_valid(hero) \
+			or not hero.has_method("nearest_enemy"):
+		return
+	var near := (hero.call("nearest_enemy", 14.0) as Node3D)
+	if near != null:
+		game_state.engage_enemy(near)
 
 func show_combat_card(enemy: Node3D) -> void:
 	if enemy == null or not is_instance_valid(enemy): hide_combat_card(); return
@@ -218,7 +243,7 @@ func _push_field_note(msg: String) -> void:
 
 func _show_next_field_note() -> void:
 	if _field_note_queue.is_empty(): return
-	var msg := _field_note_queue.pop_front()
+	var msg: String = _field_note_queue.pop_front()
 	if field_note:
 		field_note.text = msg
 		field_note.modulate = Color.WHITE

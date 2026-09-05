@@ -1,4 +1,4 @@
-extends Node
+extends Node3D
 class_name TargetMarker
 
 ## === TargetMarker — Lantern Lock-On Visual System ===
@@ -17,6 +17,10 @@ class_name TargetMarker
 signal target_changed(target: Node3D)
 signal target_lost
 
+## Most recently created marker. bind_lantern() falls back to this when the
+## lantern node has no CharacterBody3D ancestor (test scenes, split rigs).
+static var _active: TargetMarker = null
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Static factory / singleton-per-hero
 # ─────────────────────────────────────────────────────────────────────────────
@@ -24,22 +28,29 @@ signal target_lost
 static func ensure(hero: Node3D) -> TargetMarker:
 	var existing := hero.get_node_or_null("TargetMarker")
 	if existing is TargetMarker:
-		return existing as TargetMarker
+		_active = existing as TargetMarker
+		return _active
 	var tm := TargetMarker.new()
 	tm.name = "TargetMarker"
 	hero.add_child(tm)
 	tm._hero = hero
+	_active = tm
 	return tm
 
 static func bind_lantern(lantern: Node3D) -> void:
 	if lantern == null:
 		return
-	var hero := lantern.get_parent()
-	while hero != null and not hero is CharacterBody3D:
-		hero = hero.get_parent()
-	if hero == null:
-		return
-	var tm := hero.get_node_or_null("TargetMarker") as TargetMarker
+	# Prefer the marker owned by an ancestor CharacterBody3D (the hero rig);
+	# fall back to the active singleton when the lantern hangs somewhere
+	# else (tests, detached prop lanterns).
+	var host: Node = lantern.get_parent()
+	while host != null and not host is CharacterBody3D:
+		host = host.get_parent()
+	var tm: TargetMarker = null
+	if host != null:
+		tm = host.get_node_or_null("TargetMarker") as TargetMarker
+	if tm == null:
+		tm = _active
 	if tm != null:
 		tm._lantern = lantern
 
@@ -54,11 +65,14 @@ var _target  : Node3D = null
 var _ring    : MeshInstance3D = null
 var _ring_mat : StandardMaterial3D = null
 var _beam    : MeshInstance3D = null
+var _halo    : MeshInstance3D = null
+var _halo_mat : StandardMaterial3D = null
 var _t       : float = 0.0
 
 func _ready() -> void:
 	_hero = get_parent()
 	_build_ring()
+	_build_halo()
 	_build_beam()
 	# Connect to GameState
 	var gs := get_node_or_null("/root/GameState")
@@ -76,6 +90,11 @@ func _process(delta: float) -> void:
 	var current_target : Node3D = null
 	if gs != null:
 		current_target = gs.get("enemy_target") as Node3D
+	# A foe removed from the tree (death cleanup, realm unload) must drop
+	# the mark immediately — never hold a stale ring over empty ground.
+	if current_target != null and (not is_instance_valid(current_target)
+			or not current_target.is_inside_tree()):
+		current_target = null
 
 	if current_target != _target:
 		_target = current_target
@@ -83,6 +102,11 @@ func _process(delta: float) -> void:
 			target_changed.emit(_target)
 		else:
 			target_lost.emit()
+
+	# The marker node itself hugs the marked foe so tests, map pings and
+	# world-space consumers can read one authoritative lock position.
+	if _target != null:
+		global_position = _target.global_position + Vector3(0, 0.07, 0)
 
 	_update_ring(delta)
 	_update_beam(delta)
@@ -94,7 +118,7 @@ func _build_ring() -> void:
 	tm.inner_radius  = 0.42
 	tm.outer_radius  = 0.52
 	tm.ring_segments = 32
-	tm.rings         = 2
+	tm.rings         = 3
 	_ring.mesh = tm
 	_ring_mat = StandardMaterial3D.new()
 	_ring_mat.albedo_color               = Color(1.0, 0.88, 0.28, 0.0)
@@ -107,9 +131,28 @@ func _build_ring() -> void:
 	_ring.rotation.x = PI * 0.5
 	add_child(_ring)
 
+func _build_halo() -> void:
+	# Soft glow halo that rides just above the marked foe so the lock is
+	# legible even when the ring is behind geometry or fog.
+	_halo = MeshInstance3D.new()
+	_halo.name = "FoeHalo"
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.9, 0.9)
+	_halo.mesh = qm
+	_halo_mat = StandardMaterial3D.new()
+	_halo_mat.albedo_color               = Color(1.0, 0.88, 0.28, 0.0)
+	_halo_mat.transparency               = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_halo_mat.emission_enabled           = true
+	_halo_mat.emission                   = Color(1.0, 0.80, 0.25)
+	_halo_mat.emission_energy_multiplier = 2.0
+	_halo_mat.billboard_mode             = BaseMaterial3D.BILLBOARD_ENABLED
+	_halo_mat.shading_mode               = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_halo.material_override = _halo_mat
+	add_child(_halo)
+
 func _build_beam() -> void:
 	_beam = MeshInstance3D.new()
-	_beam.name = "LanternBeam"
+	_beam.name = "LanternTether"
 	var qm := QuadMesh.new()
 	qm.size = Vector2(0.025, 1.0)
 	_beam.mesh = qm
@@ -127,10 +170,13 @@ func _build_beam() -> void:
 
 func _update_ring(delta: float) -> void:
 	if _target == null or not is_instance_valid(_target):
+		# Fast fade (~70 ms to invisible) so a dropped mark never lingers as
+		# a ghost ring on the ground the player already left.
 		if _ring_mat != null:
-			_ring_mat.albedo_color.a = lerpf(_ring_mat.albedo_color.a, 0.0, delta * 8.0)
-		if _ring != null:
-			_ring.visible = _ring_mat.albedo_color.a > 0.01
+			_ring_mat.albedo_color.a = lerpf(_ring_mat.albedo_color.a, 0.0, delta * 14.0)
+		if _halo_mat != null:
+			_halo_mat.albedo_color.a = lerpf(_halo_mat.albedo_color.a, 0.0, delta * 14.0)
+		visible = _ring_mat != null and _ring_mat.albedo_color.a > 0.01
 		return
 
 	# Float ring above target
@@ -138,10 +184,16 @@ func _update_ring(delta: float) -> void:
 	_ring.global_position = target_pos + Vector3(0, sin(_t * 2.2) * 0.10, 0)
 	_ring.rotation.y     += delta * 1.8
 
+	# Halo rides just over the foe's silhouette
+	_halo.global_position = _target.global_position + Vector3(0, 1.55, 0)
+	_halo_mat.albedo_color.a = lerpf(_halo_mat.albedo_color.a, 0.42, delta * 6.0)
+
 	# Alpha pulse
 	var pulse := 0.55 + sin(_t * 4.5) * 0.25
 	_ring_mat.albedo_color.a = lerpf(_ring_mat.albedo_color.a, pulse, delta * 6.0)
+	visible = true
 	_ring.visible = true
+	_halo.visible = true
 
 func _update_beam(delta: float) -> void:
 	var beam_mat := _beam.material_override as StandardMaterial3D
@@ -162,7 +214,7 @@ func _update_beam(delta: float) -> void:
 		beam_mat.albedo_color.a = lerpf(beam_mat.albedo_color.a, 0.30, delta * 6.0)
 	_beam.visible = true
 
-func _on_mark_locked(_flare: float) -> void:
+func _on_mark_locked(_target: Node3D) -> void:
 	# Spike ring brightness on lock-on
 	if _ring_mat != null:
 		var tw := create_tween()

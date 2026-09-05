@@ -159,8 +159,8 @@ func _simulate(chain: Chain, delta: float) -> void:
 			lnk["node"].global_position = apos
 			continue
 
-		var vel := (lnk["pos"] - lnk["prev"]) * damping
-		var new_pos := lnk["pos"] + vel + accel
+		var vel: Vector3 = (lnk["pos"] - lnk["prev"]) * damping
+		var new_pos: Vector3 = lnk["pos"] + vel + accel
 		new_pos.y   = maxf(new_pos.y, floor_y)
 		lnk["prev"]  = lnk["pos"]
 		lnk["pos"]   = new_pos
@@ -170,12 +170,12 @@ func _simulate(chain: Chain, delta: float) -> void:
 		for i in range(1, chain.links.size()):
 			var a: Dictionary = chain.links[i - 1]
 			var b: Dictionary = chain.links[i]
-			var diff := b["pos"] - a["pos"]
-			var dist := diff.length()
+			var diff: Vector3 = b["pos"] - a["pos"]
+			var dist: float = diff.length()
 			if dist < 0.00001:
 				continue
-			var target := b["seg_len"]
-			var corr   := diff * ((dist - target) / dist) * 0.5
+			var target: float = b["seg_len"]
+			var corr: Vector3 = diff * ((dist - target) / dist) * 0.5
 			# Stiffness: allow spring stretch proportional to (1-stiffness)
 			var flex := 1.0 - clampf(stiffness, 0.0, 1.0)
 			corr *= flex
@@ -191,7 +191,7 @@ func _simulate(chain: Chain, delta: float) -> void:
 	for i in range(chain.links.size() - 1):
 		var a: Dictionary = chain.links[i]
 		var b: Dictionary = chain.links[i + 1]
-		var dir := (b["pos"] - a["pos"])
+		var dir: Vector3 = (b["pos"] - a["pos"])
 		if dir.length_squared() > 0.0001 and is_instance_valid(a["node"]):
 			var basis := Basis.looking_at(-dir, Vector3.UP)
 			a["node"].global_transform.basis = basis

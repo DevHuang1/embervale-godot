@@ -34,6 +34,10 @@ enum Pattern { ORBIT, FEINT, LUNGE, WINDUP, RECOVER, BRAMBLE_BURST,
 # Hard-tier flag: bursts become a tracking 3-spike thorn volley.
 @export var thorn_volley: bool = false
 @export var archetype: String = "hushling"
+## Authored-model drop-in: world-unit height target + replacing the procedural
+## silhouette with the mounted rig once the shared creature FBX ships.
+@export var authored_rig_height: float = 0.85
+@export var replace_procedural_on_mount := true
 
 ## Reusable behavior profiles keep memory low while making enemy silhouettes and
 ## combat rhythms distinct across realms. Movement multipliers are intentionally
@@ -1433,10 +1437,17 @@ func _spawn_loot() -> void:
 		game_state.add_material(mat.id, mat.qty)
 		FloatingText.spawn_on_entity(self, "+%d %s" % [mat.qty, game_state.MATERIAL_DEFS.get(mat.id, {}).get("name", mat.id)],
 			Color(0.52, 0.90, 1.0), 1.1)
-	if result.gear != null:
-		var gear: Dictionary = result.gear
+	# roll_enemy() returns drops as an `items` list; `gear` only exists on the
+	# boss hoard (roll_boss). Use .get() so either shape is safe to consume.
+	for item in result.get("items", []):
+		var item_id := str(item.get("id", ""))
+		if item_id != "":
+			LootDrop.spawn_item(self, drop_pos, item_id, int(item.get("qty", 1)), 1)
+	var gear: Variant = result.get("gear")
+	if gear is Dictionary:
 		var item_id := "moss_tonic"
-		LootDrop.spawn_item(self, drop_pos + Vector3(0.2, 0, 0), item_id, 1, gear.rarity)
+		LootDrop.spawn_item(self, drop_pos + Vector3(0.2, 0, 0), item_id, 1,
+			int(gear.get("rarity", 1)))
 
 func _on_death_animation_finished() -> void:
 	var sm := get_node_or_null("/root/StoryManager")

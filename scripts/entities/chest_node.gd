@@ -129,7 +129,7 @@ func _build_geometry() -> void:
 	add_child(_glow_light)
 
 	# Idle pulse tween
-	var tw := _latch_mat.create_tween().set_loops()
+	var tw: Tween = _latch_mat.create_tween().set_loops()
 	tw.tween_property(_latch_mat, "emission_energy_multiplier",
 		TIER_GLOW.get(chest_tier, 0.8) * 1.6, 1.2).set_trans(Tween.TRANS_SINE)
 	tw.tween_property(_latch_mat, "emission_energy_multiplier",

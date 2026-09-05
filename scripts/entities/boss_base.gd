@@ -833,7 +833,7 @@ func _spawn_idol_crown(c: BossCustomization) -> void:
 	var rig := Node3D.new()
 	rig.name = "IdolCrown"
 	var mi := MeshInstance3D.new()
-	mi.mesh = c.idol_mesh
+	mi.mesh = c.idol_mesh.mesh
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	rig.add_child(mi)
 	rig.position = crit_zone_center + Vector3(0, 0.9, 0)

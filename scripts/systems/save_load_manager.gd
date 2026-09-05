@@ -1,5 +1,4 @@
 extends Node
-class_name SaveLoadManager
 
 ## === Save / Load Manager ===
 ## Full file I/O implementation for GameState persistence.

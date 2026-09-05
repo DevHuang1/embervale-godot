@@ -42,7 +42,7 @@ var _practice_altar: Node3D = null
 var _post_boss_root: Node3D = null
 
 var _relic_trophy: Node3D = null
-var _realm_expansion: Node3D = null
+var _realm_expansion: RealmExpansion = null
 
 @onready var relic_pedestal: Node3D = get_node_or_null("RelicPedestal")
 

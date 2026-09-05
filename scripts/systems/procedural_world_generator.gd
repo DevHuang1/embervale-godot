@@ -367,7 +367,7 @@ func _place_resource_nodes() -> void:
 	var mats    := _realm_materials()
 	for i in resource_node_count:
 		var pos := _rand_ring(4.0, world_radius * 0.82)
-		var mat_id := mats[i % mats.size()]
+		var mat_id: String = mats[i % mats.size()]
 		var rn := ResourceGatherNode.new() if ClassDB.class_exists("ResourceGatherNode") else Node3D.new()
 		rn.name = "ResourceNode_%d" % i
 		host.add_child(rn)
@@ -415,7 +415,7 @@ func _place_landmarks() -> void:
 	var names  := _realm_landmark_names()
 	for i in landmark_count:
 		var pos  := _rand_ring(5.0, world_radius * 0.65)
-		var lname := names[i % names.size()]
+		var lname: String = names[i % names.size()]
 		_build_landmark(host, _world.global_position + Vector3(pos.x, 0, pos.y), lname, i)
 
 func _realm_landmark_names() -> Array:
@@ -507,7 +507,7 @@ func _place_boss_altar() -> void:
 	altar.add_child(ring)
 
 	# Pulse tween
-	var tw := rmat.create_tween().set_loops()
+	var tw: Tween = rmat.create_tween().set_loops()
 	tw.tween_property(rmat, "emission_energy_multiplier", 1.4, 1.5).set_trans(Tween.TRANS_SINE)
 	tw.tween_property(rmat, "emission_energy_multiplier", 0.25, 1.5).set_trans(Tween.TRANS_SINE)
 

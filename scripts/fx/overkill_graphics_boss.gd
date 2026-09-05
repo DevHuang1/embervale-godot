@@ -352,7 +352,7 @@ func _build_root_legs() -> void:
 		_visual.add_child(leg_root)
 		_leg_roots.append(leg_root)
 
-		var ang := outward_angles[i]
+		var ang: float = outward_angles[i]
 		# Upper segment
 		var upper := _leg_segment(leg_root, 0.12, 0.06, 0.65)
 		upper.rotation = Vector3(0.55, ang, 0.0)
@@ -366,7 +366,7 @@ func _build_root_legs() -> void:
 
 		# Three claw tips
 		for c in 3:
-			var cang := ang + (float(c) - 1.0) * 0.38
+			var cang: float = ang + (float(c) - 1.0) * 0.38
 			var claw := MeshInstance3D.new()
 			var cm := CylinderMesh.new()
 			cm.top_radius    = 0.0

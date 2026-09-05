@@ -1,5 +1,4 @@
 extends Node
-class_name PackCoordinator
 
 ## === Pack AI Coordinator ===
 ## Singleton/autoload blackboard for Hushling group behaviour.
@@ -107,7 +106,7 @@ func get_target_arc(enemy: Node3D) -> float:
 func get_arc_position(enemy: Node3D, orbit_distance: float) -> Vector3:
 	if _player == null:
 		return enemy.global_position
-	var ang := _arcs.get(enemy, 0.0)
+	var ang: float = _arcs.get(enemy, 0.0)
 	return _player.global_position + Vector3(sin(ang), 0.0, cos(ang)) * orbit_distance
 
 ## Returns true if this enemy is allowed to start its attack lunge right now.
@@ -156,8 +155,8 @@ func _assign_roles() -> void:
 		return a.global_position.distance_squared_to(player_pos) \
 			 < b.global_position.distance_squared_to(player_pos))
 
-	var attacker_slots := min(max_concurrent_attackers, count)
-	var flanker_slots  := min(2, count - attacker_slots)
+	var attacker_slots := mini(max_concurrent_attackers, count)
+	var flanker_slots  := mini(2, count - attacker_slots)
 
 	for i in count:
 		var m := _members[i]
@@ -195,7 +194,7 @@ func _assign_arcs() -> void:
 
 	# Attackers: aim directly at player (arc = bearing from player → behind player)
 	for m in attackers:
-		var dir_to_enemy := m.global_position - player_pos
+		var dir_to_enemy: Vector3 = m.global_position - player_pos
 		_arcs[m] = atan2(dir_to_enemy.x, dir_to_enemy.z)
 
 	# Flankers: ±90° from the base angle (player's sides)
@@ -213,7 +212,7 @@ func _assign_arcs() -> void:
 			# Ensure minimum separation from flankers
 			var too_close := false
 			for fa in flank_angles:
-				var diff := abs(wrapf(candidate - fa, -PI, PI))
+				var diff: float = abs(wrapf(candidate - fa, -PI, PI))
 				if diff < min_orbit_sep:
 					candidate += min_orbit_sep * sign(candidate - fa)
 					too_close = true

@@ -603,6 +603,12 @@ func play_enemy_telegraph() -> void:
 func play_enemy_special() -> void:
 	play_cue("spore_burst")
 
+## Generic enemy impact hit — the "vanilla" SFX profile's hit cue for
+## Hushlings and similar creatures. Slightly lower and shorter than the
+## player's play_hit so hits from each side read distinctly.
+func play_enemy_hit() -> void:
+	play_chime(196.0, 0.0, 0.10, 0.06)
+
 # === Boss/enemy SFX profiles (player-chosen flavor) ===
 ## Parameter sets over the chime synth: freq scale, decay stretch, volume.
 ## Locked boss stingers never route through here — only generic cues do.
@@ -634,6 +640,11 @@ func play_profile_cue(preset: String, kind: String) -> void:
 		"vocal":
 			play_chime(58.0 * f, 0.0, 0.34 * d, 0.06 * v)
 			play_chime(87.0 * f, 0.06, 0.26 * d, 0.045 * v)
+		"bite":
+			play_chime(130.8 * f, 0.0, 0.14 * d, 0.055 * v)
+			play_chime(98.0 * f, 0.03, 0.18 * d, 0.045 * v)
+		"hit":
+			play_chime(196.0 * f, 0.0, 0.10 * d, 0.06 * v)
 
 # === Procedural Ambient Pad ===
 ## Seamless 12-second loop; every partial completes whole cycles so the

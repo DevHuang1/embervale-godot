@@ -179,7 +179,7 @@ static func boss_matriarch() -> LootTable:
 	t.add({"type":"diamond", "min":4,   "max":6,   "weight":1.0, "rarity":3,  "guaranteed":true})
 	t.add({"type":"item",    "id":"hushling_thorn","min":4,"max":8,"weight":2.0,"rarity":1})
 	t.add({"type":"item",    "id":"moss_tonic","min":2,"max":3,"weight":1.5,"rarity":0})
-	t.add({"type":"material","id":"monster_core","min":2,"max":4,,"weight":1.2,"rarity":2})
+	t.add({"type":"material","id":"monster_core","min":2,"max":4,"weight":1.2,"rarity":2})
 	return t
 
 static func chest_common() -> LootTable:
@@ -200,7 +200,7 @@ static func chest_rare() -> LootTable:
 	t.add({"type":"gold",    "min":50,  "max":120, "weight":2.5})
 	t.add({"type":"xp",      "min":60,  "max":120, "weight":2.0})
 	t.add({"type":"diamond", "min":2,   "max":5,   "weight":1.5, "rarity":2})
-	t.add({"type":"item",    "id":"moss_tonic","min":2,"max":3","weight":1.2,"rarity":0})
+	t.add({"type":"item",    "id":"moss_tonic","min":2,"max":3,"weight":1.2,"rarity":0})
 	t.add({"type":"material","id":"iron_shard","weight":1.3,"rarity":1})
 	t.add({"type":"material","id":"monster_core","weight":0.9,"rarity":2})
 	t.add({"type":"material","id":"crystal_fragment","weight":0.6,"rarity":2})
@@ -215,11 +215,11 @@ static func chest_boss() -> LootTable:
 	t.add({"type":"gold",    "min":100, "max":220, "weight":1.0, "guaranteed":true})
 	t.add({"type":"diamond", "min":3,   "max":8,   "weight":1.0, "rarity":3,  "guaranteed":true})
 	t.add({"type":"xp",      "min":150, "max":300, "weight":1.0, "guaranteed":true})
-	t.add({"type":"material","id":"monster_core","min":2,"max":4,,"weight":2.0,"rarity":2})
+	t.add({"type":"material","id":"monster_core","min":2,"max":4,"weight":2.0,"rarity":2})
 	t.add({"type":"material","id":"crystal_fragment","weight":1.5,"rarity":2})
 	t.add({"type":"weapon",  "id":"matriarch_scepter","weight":0.8,"rarity":4})
 	t.add({"type":"armor",   "id":"warden_plate",  "weight":0.9, "rarity":2})
-	t.add({"type":"item",    "id":"hushling_thorn","min":4,"max":8","weight":1.2,"rarity":1})
+	t.add({"type":"item",    "id":"hushling_thorn","min":4,"max":8,"weight":1.2,"rarity":1})
 	return t
 
 ## Build a table for a specific realm and tier (used by RewardManager)
@@ -229,3 +229,48 @@ static func for_enemy(realm_id: String, tier: String) -> LootTable:
 		"heartwood": return heartwood_common()
 		_:
 			return bramblewood_common() if tier == "normal" else bramblewood_elite()
+
+## Convenience: roll a table for an enemy archetype and return
+## { gold: int, materials: Array[{id, qty}], items: Array, xp: int }.
+## Used by Hushling._spawn_loot().
+static func roll_enemy(archetype: String) -> Dictionary:
+	var table := bramblewood_elite() if archetype == "elite" else bramblewood_common()
+	var drops := table.roll()
+	var result := { "gold": 0, "xp": 0, "materials": [], "items": [] }
+	for drop in drops:
+		var dtype := str(drop.get("type", ""))
+		var qty := int(drop.get("quantity", 1))
+		match dtype:
+			"gold":
+				result["gold"] += qty
+			"xp":
+				result["xp"] += qty
+			"material":
+				result["materials"].append({ "id": str(drop.get("id", "")), "qty": qty })
+			"item":
+				result["items"].append({ "id": str(drop.get("id", "")), "qty": qty })
+	return result
+
+## Convenience: roll the boss hoard for a defeated boss and return
+## { gold: int, xp: int, materials: Array[{id, qty}], gear: Dictionary or null }.
+## Used by BossBase._spawn_rewards(); tables stay centralized here.
+static func roll_boss(boss_id: String) -> Dictionary:
+	var drops := chest_boss().roll()
+	var result := { "gold": 0, "xp": 0, "materials": [], "gear": null }
+	for drop in drops:
+		var dtype := str(drop.get("type", ""))
+		var qty := int(drop.get("quantity", 1))
+		match dtype:
+			"gold":
+				result["gold"] += qty
+			"xp":
+				result["xp"] += qty
+			"material":
+				result["materials"].append({ "id": str(drop.get("id", "")), "qty": qty })
+			"weapon", "armor":
+				if result["gear"] == null:
+					result["gear"] = {
+						"id": str(drop.get("id", "")),
+						"rarity": int(drop.get("rarity", 1)),
+					}
+	return result

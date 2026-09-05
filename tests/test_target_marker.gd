@@ -160,7 +160,9 @@ func _run() -> void:
 
 	if failures == 0:
 		print("ALL TARGET MARKER TESTS PASSED")
+		scene_root.free()
 		quit(0)
 	else:
 		print("%d TARGET MARKER TEST(S) FAILED" % failures)
+		scene_root.free()
 		quit(1)

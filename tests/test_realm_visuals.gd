@@ -168,9 +168,6 @@ func _run() -> void:
 		var audio := root.get_node("/root/AudioManager")
 		if audio != null:
 			audio.stop_all_playback()
-		# The lantern marker holds static refs; free it with the realm or it
-		# lingers as an orphaned node holding its script past exit.
-		load("res://scripts/systems/target_marker.gd").shutdown()
 		await process_frame
 		finals += 1
 		gs.reset()

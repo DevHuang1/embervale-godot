@@ -26,6 +26,10 @@ signal interact_pressed
 ## Visual-only shrink applied to the Rig wrapper — never collision, ranges
 ## or camera. Characters read smaller; bosses keep their authored size.
 @export var visual_scale: float = 0.78
+## Authored-model drop-in: world-unit height the mounted Knight is normalized
+## to, and whether the procedural capsule silhouette is replaced by it.
+@export var authored_rig_height: float = 1.6
+@export var replace_procedural_on_mount := true
 @export var move_speed: float = 3.4
 @export var turn_speed: float = 12.0
 @export var accel_rate: float = 11.0
@@ -528,6 +532,12 @@ func _nearest_enemy(max_dist: float) -> Node3D:
 				best = enemy
 	return best
 
+## Public targeting probe so HUD/touch skill presses mark the same foe the
+## keyboard rites would (hero._on_skill_slot_pressed auto-snaps onto the
+## nearest enemy; HUD must behave identically or mobile skills refuse to cast).
+func nearest_enemy(max_dist: float) -> Node3D:
+	return _nearest_enemy(max_dist)
+
 func _on_dodge_pressed(screen_dir: Vector2) -> void:
 	_try_dodge(screen_dir)
 
@@ -1006,7 +1016,7 @@ func _build_hero_gear() -> void:
 func _apply_lantern_state() -> void:
 	var active := world != null and world.lantern_active
 	if active and world.day_night != null:
-		active = not world.day_night.is_daylight()
+		active = not world.day_night.time_of_day > 0.5
 	lantern_is_active = active
 	lantern_light.visible = active
 	lantern_mesh.visible = active
@@ -1175,12 +1185,21 @@ func _enemy_by_id(id: int) -> Node3D:
 			return e
 	return null
 
+func _anim_bridge() -> AnimTreeBridge:
+	## Null-safe lookup: Object.get_meta(name, null) still errors when the key
+	## is absent (a null literal is treated as "no default provided"), so guard
+	## explicitly. Authored rigs register the bridge in CharacterRigLoader.
+	if not has_meta("anim_bridge"):
+		return null
+	var value: Variant = get_meta("anim_bridge")
+	return value as AnimTreeBridge
+
 ## Authored rigs swing on clip time: when the bridge owns the attack cue,
 ## return the clip's real impact moment so the blade arc and swing clock can
 ## conform to the visible arm. -1 keeps the procedural clock (no clip / no
 ## authored rig).
 func _authored_impact_seconds(cue: String, impact_fraction: float) -> float:
-	var bridge := get_meta("anim_bridge", null) as AnimTreeBridge
+	var bridge := _anim_bridge()
 	if bridge == null or not bridge.has_cue(cue):
 		return -1.0
 	return bridge.cue_impact_time(cue, impact_fraction)
@@ -1424,7 +1443,7 @@ func _on_authored_impact(_cue: String) -> void:
 ## Wait for the animator’s authoritative impact frame. The serial check prevents
 ## a late-await race, while the timeout keeps old/custom rigs playable.
 func _wait_for_animator_impact(max_wait: float = 1.25, baseline: int = -1) -> bool:
-	var bridge := get_meta("anim_bridge", null) as AnimTreeBridge
+	var bridge := _anim_bridge()
 	var authored_cue := str(animator.authored_attack_cue) if animator != null else ""
 	var use_authored := bridge != null and not authored_cue.is_empty() \
 		and bridge.has_cue(authored_cue)
@@ -2207,7 +2226,7 @@ func _refresh_weapon_visual() -> void:
 		holder.add_child(mi)
 		holder.rotation_degrees = Vector3(6.0, 180.0, -8.0)
 		holder.scale = Vector3.ONE * 0.75
-		weapon_socket.attach_node(holder)
+		weapon_socket.attach(holder)
 	else:
 		var rarity := int(current_weapon.get("rarity", 0))
 		if rarity < 3:
@@ -2242,7 +2261,7 @@ func _refresh_weapon_visual() -> void:
 			gem.material_override = gem_mat
 			staff.add_child(gem)
 
-			weapon_socket.attach_node(staff)
+			weapon_socket.attach(staff)
 
 	_refresh_hand_weapon()
 	_play_weapon_equip_feedback.call_deferred()
@@ -2303,8 +2322,8 @@ func _refresh_hand_weapon() -> void:
 				_drive_socket = hand_socket_r
 	# Track the attached holder so strikes can swing it (works on the FBX
 	# rig too — sockets get re-parented to the model bones, not rebuilt).
-	if _drive_socket != null and _drive_socket.is_occupied():
-		_drive_swing = _drive_socket.get_attachment()
+	if _drive_socket != null and _drive_socket.has_item():
+		_drive_swing = _drive_socket.get_item()
 		_swing_base_rot = _drive_swing.rotation if _drive_swing else Vector3.ZERO
 	else:
 		_drive_swing = null
@@ -2327,7 +2346,7 @@ func _mount_hand_weapon(socket: AttachmentSocket, prop: Node3D, weapon_id: Strin
 	}.get(weapon_id, [Vector3.ZERO, Vector3.ZERO])
 	prop.position += profile[0] as Vector3
 	prop.rotation_degrees += profile[1] as Vector3
-	socket.attach_node(prop)
+	socket.attach(prop)
 
 func _gear_material(color: Color, roughness: float, metallic: float,
 		emission: Color = Color.BLACK, emission_energy: float = 0.0) -> ShaderMaterial:
@@ -2337,11 +2356,11 @@ func _gear_material(color: Color, roughness: float, metallic: float,
 	material.set_shader_parameter("roughness", roughness)
 	material.set_shader_parameter("metallic", metallic)
 	material.set_shader_parameter("specular", 0.42 if metallic > 0.4 else 0.28)
-	material.set_shader_parameter("albedo_texture", GEAR_GRAIN)
+	material.set_shader_parameter("albedo_tex", GEAR_GRAIN)
 	material.set_shader_parameter("albedo_mix", 0.22 if metallic > 0.4 else 0.38)
-	material.set_shader_parameter("normal_texture", GEAR_NORMAL)
+	material.set_shader_parameter("normal_tex", GEAR_NORMAL)
 	material.set_shader_parameter("normal_mix", 0.18)
-	material.set_shader_parameter("orm_texture", GEAR_ORM)
+	material.set_shader_parameter("orm_tex", GEAR_ORM)
 	material.set_shader_parameter("orm_mix", 0.24)
 	material.set_shader_parameter("detail_normal", GEAR_NORMAL)
 	material.set_shader_parameter("detail_normal_strength", 0.25 if metallic > 0.4 else 0.42)

@@ -38,10 +38,18 @@ static func elder_hushling() -> CharacterModelData:
 	return d
 
 
+# Animator tuning
+@export var archetype: String = ""   # realm/encounter archetype (set via for_realm)
+
+
 func configure_entity(entity: Node3D) -> void:
 	if entity == null or not is_instance_valid(entity):
 		return
 	
+	# Archetype hook before stats so variant behavior keys apply first
+	if not archetype.is_empty() and entity.has_method("configure_archetype"):
+		entity.call("configure_archetype", archetype)
+
 	entity.scale *= model_scale
 	
 	# Retint shader materials under the visual tree
@@ -75,3 +83,19 @@ func configure_entity(entity: Node3D) -> void:
 	var animator := entity.get_node_or_null("Animator")
 	if animator and animator.has_method("apply_model_data"):
 		animator.apply_model_data(self)
+## Variant config from the Bestiary for a realm + tier ("normal" / "hard" / "elite").
+## Used by encounter zones to tint and stat-pack a freshly spawned enemy.
+static func for_realm(realm_id: String, tier: String) -> CharacterModelData:
+	var variant : Dictionary = Bestiary.variant_for(realm_id, tier)
+	if variant.is_empty():
+		return CharacterModelData.new()
+	var md := CharacterModelData.new()
+	md.display_name    = str(variant.get("display", "Enemy"))
+	md.model_scale     = float(variant.get("scale", 1.0))
+	md.body_tint       = variant.get("tint", Color(0, 0, 0, 0)) as Color
+	md.eye_glow_color  = variant.get("eye",  Color(0, 0, 0, 0)) as Color
+	md.max_hp_override = int(variant.get("hp", 0))
+	md.base_atk_bonus  = int(variant.get("atk_bonus", 0))
+	md.move_speed_mult = float(variant.get("speed", 1.0))
+	md.archetype       = str(variant.get("kind", "hushling"))
+	return md

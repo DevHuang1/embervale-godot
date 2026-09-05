@@ -153,8 +153,8 @@ func _update_spring_chains(delta: float) -> void:
 				lnk["prev"] = lnk["anchor_world"]
 				lnk["node"].global_position = lnk["anchor_world"]
 				continue
-			var vel := (lnk["pos"] - lnk["prev"]) * 0.88
-			var new_pos := lnk["pos"] + vel + (gravity + wind) * (delta * delta)
+			var vel: Vector3 = (lnk["pos"] - lnk["prev"]) * 0.88
+			var new_pos: Vector3 = lnk["pos"] + vel + (gravity + wind) * (delta * delta)
 			# Floor clamp so tendrils don't clip into terrain
 			new_pos.y = maxf(new_pos.y, lnk["anchor_world"].y - lnk["seg_len"] * chain.size())
 			lnk["prev"] = lnk["pos"]
@@ -163,11 +163,11 @@ func _update_spring_chains(delta: float) -> void:
 		for i in range(chain.size() - 1, 0, -1):
 			var a: Dictionary = chain[i - 1]
 			var b: Dictionary = chain[i]
-			var diff := b["pos"] - a["pos"]
-			var dist := diff.length()
+			var diff: Vector3 = b["pos"] - a["pos"]
+			var dist: float = diff.length()
 			if dist < 0.0001:
 				continue
-			var corr := diff * (1.0 - b["seg_len"] / dist) * 0.5
+			var corr: Vector3 = diff * (1.0 - b["seg_len"] / dist) * 0.5
 			if not a["anchor"]:
 				a["pos"] += corr
 			b["pos"] -= corr
@@ -269,7 +269,7 @@ func _build_slow_fields() -> void:
 		field.body_entered.connect(_on_spore_entered)
 		field.body_exited.connect(_on_spore_exited)
 		# Opacity pulse
-		var tw := cmat.create_tween().set_loops()
+		var tw: Tween = cmat.create_tween().set_loops()
 		tw.tween_property(cmat, "albedo_color:a", 0.16, _rng.randf_range(1.4, 2.2)) \
 			.set_trans(Tween.TRANS_SINE)
 		tw.tween_property(cmat, "albedo_color:a", 0.52, _rng.randf_range(1.4, 2.2)) \
