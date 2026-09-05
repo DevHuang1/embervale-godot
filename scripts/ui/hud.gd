@@ -52,10 +52,14 @@ func _ready() -> void:
 		skill_cd_labels.append(cd)
 		if btn:
 			var idx := i
+			# Touch presses route through the SAME InputManager signal the
+			# keyboard uses (hero._on_skill_slot_pressed) so mobile and
+			# desktop share auto-marking, execution FX and refusal feedback.
 			if btn is FightButton:
-				btn.fight_pressed.connect(func(): _on_skill_pressed(idx))
+				btn.fight_pressed.connect(func(): InputManager.skill_slot_pressed.emit(idx))
 			elif btn is BaseButton:
-				btn.pressed.connect(func(): _on_skill_pressed(idx))
+				btn.pressed.connect(func(): InputManager.skill_slot_pressed.emit(idx))
+	_wire_action_buttons()
 	_connect_signals()
 	_refresh_all()
 	if combat_card: combat_card.visible = false
@@ -134,38 +138,43 @@ func _on_skill_cooldown_changed(slot: int, remaining: float) -> void:
 	var cd  = skill_cd_labels[slot]  if slot < skill_cd_labels.size()  else null
 	var btn = skill_buttons[slot]    if slot < skill_buttons.size()    else null
 	if cd:  cd.text = "" if remaining <= 0.0 else "%ds" % ceili(remaining)
-	if btn is FightButton: btn.dimmed = remaining > 0.0
+	if btn is FightButton:
+		# Radial cooldown ring + countdown, fed by the same numbers the
+		# refusal path uses (skill cooldown is padded 1.20x in use_skill).
+		var sk := game_state.get_skill(slot)
+		var total := (float(sk.get("cooldown", 1.0)) * 1.20) if not sk.is_empty() else 1.0
+		btn.set_cooldown(remaining, total)
+		btn.dimmed = remaining > 0.0
 	elif btn: btn.disabled = remaining > 0.0
 
-func _on_skill_pressed(slot: int) -> void:
-	_auto_mark_for_skill(slot)
-	var result := game_state.use_skill(slot)
-	if result.get("success", false):
-		var se := get_node_or_null("/root/SkillExecutor")
-		if se == null:
-			se = get_tree().current_scene.find_child("SkillExecutor", true, false)
-		if se:
-			se.call("execute_skill", slot, result.get("skill", {}))
-	else:
-		_push_field_note(str(result.get("message", "")))
+## The Attack/Dodge/Jump FightButtons are plain Controls — nothing wired
+## them before, so the primary STRIKE button literally did nothing on
+## touch. Route them through InputManager exactly like their keyboard
+## twins so there is one canonical input path into the hero.
+func _wire_action_buttons() -> void:
+	var attack_btn := get_node_or_null("Root/SkillBar/AttackButton") as FightButton
+	if attack_btn != null:
+		attack_btn.fight_pressed.connect(func(): InputManager.attack_pressed.emit())
+		attack_btn.fight_released.connect(func(): InputManager.attack_released.emit())
+	var dodge_btn := get_node_or_null("Root/DodgeButton") as FightButton
+	if dodge_btn != null:
+		dodge_btn.fight_pressed.connect(func(): InputManager.dodge_pressed.emit(Vector2.ZERO))
+	var jump_btn := get_node_or_null("Root/JumpButton") as FightButton
+	if jump_btn != null:
+		jump_btn.fight_pressed.connect(func(): InputManager.jump_pressed.emit())
+	# The whole action row breathes with the lantern mark: pulsing lock
+	# ring on skill + attack buttons while a foe is lit.
+	game_state.mark_locked.connect(func(_t: Node3D): _set_lock_glow(true))
+	game_state.mark_released.connect(func(): _set_lock_glow(false))
 
-## Mobile/keyboard parity: keyboard rites auto-snap onto the nearest foe
-## (hero._on_skill_slot_pressed), so HUD presses must mark the same way or
-## touch players get "no target lit" with no visible way to mark one.
-func _auto_mark_for_skill(slot: int) -> void:
-	var sk := game_state.get_skill(slot)
-	if sk.is_empty() or str(sk.get("type", "")) == "heal_bloom":
-		return
-	var locked := game_state.enemy_target as Node3D
-	if locked != null and is_instance_valid(locked):
-		return
-	var hero := get_tree().get_first_node_in_group("player") as Node3D
-	if hero == null or not is_instance_valid(hero) \
-			or not hero.has_method("nearest_enemy"):
-		return
-	var near := (hero.call("nearest_enemy", 14.0) as Node3D)
-	if near != null:
-		game_state.engage_enemy(near)
+func _set_lock_glow(on: bool) -> void:
+	var all: Array = skill_buttons.duplicate()
+	var atk := get_node_or_null("Root/SkillBar/AttackButton")
+	if atk != null:
+		all.append(atk)
+	for btn in all:
+		if btn is FightButton:
+			(btn as FightButton).set_lock_glow(on)
 
 func show_combat_card(enemy: Node3D) -> void:
 	if enemy == null or not is_instance_valid(enemy): hide_combat_card(); return

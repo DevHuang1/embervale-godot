@@ -660,7 +660,7 @@ func die() -> void:
 		audio.play_victory()
 	var ws := get_node_or_null("/root/WorldState")
 	if ws != null and ws.has_method("gust"):
-		ws.gust(1.0)   # the grove recoils as the Matriarch falls
+		ws.gust(Vector2.ZERO, 1.0)   # the grove recoils as the Matriarch falls
 
 ## Ragdoll-or-tumble for the boss body (deferred context).
 func _launch_death_physics() -> void:

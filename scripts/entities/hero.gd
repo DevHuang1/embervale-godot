@@ -74,6 +74,9 @@ var _swing_tween: Tween = null
 # Instance id of the enemy we glide toward after pressing attack; -1 = none
 var _attack_run_target := -1
 var auto_strike_cooldown: float =      0.85
+## Bumped on every strike start so the authored-rig bridge restarts the
+## swing clip even when the same cue id repeats (combo resets, spaced taps).
+var _attack_seq: int = 0
 var approach_distance: float = 1.42
 var hit_flash_timer: float = 0.0
 var invulnerable_timer: float = 0.0
@@ -246,7 +249,13 @@ func _ready() -> void:
 	animator.anim_event.connect(_on_anim_event)
 
 	# Authored-model drop-in (silent no-op until assets/models/hero.glb ships)
-	CharacterRigLoader.try_if_wire(self, "hero")
+	if CharacterRigLoader.try_if_wire(self, "hero"):
+		# The mounted rig animates itself: hand the bridge a live state
+		# snapshot so idle/walk/run/swing/roll clips play autonomously
+		# instead of the imported Knight standing frozen in a T-pose.
+		var bridge := _anim_bridge()
+		if bridge != null:
+			bridge.state_provider = _authored_anim_state
 	# Mount the hand/back tools on the knight's own bones so the mace/sword/
 	# staff ride his real fists (and sway on the walk) instead of floating on
 	# the hidden ghost body's arms. No-op unless the rig is present.
@@ -1194,6 +1203,22 @@ func _anim_bridge() -> AnimTreeBridge:
 	var value: Variant = get_meta("anim_bridge")
 	return value as AnimTreeBridge
 
+## Live state snapshot consumed by AnimTreeBridge's autonomous cue driver
+## (idle/walk/run/swing/roll). Speed thresholds match the real locomotion
+## tune — anything below walking pace holds idle, sprint speed runs.
+func _authored_anim_state() -> Dictionary:
+	if game_state.hp <= 0.0:
+		return {"dead": true}
+	var speed := Vector3(velocity.x, 0.0, velocity.z).length()
+	return {
+		"attacking": auto_strike_timer > 0.0,
+		"attack_cue": str(animator.authored_attack_cue) if animator != null else "",
+		"attack_serial": _attack_seq,
+		"dodging": dodge_timer > 0.0,
+		"moving": speed > 0.35,
+		"running": speed > 2.6,
+	}
+
 ## Authored rigs swing on clip time: when the bridge owns the attack cue,
 ## return the clip's real impact moment so the blade arc and swing clock can
 ## conform to the visible arm. -1 keeps the procedural clock (no clip / no
@@ -1263,6 +1288,7 @@ func _perform_auto_strike(enemy: Node3D) -> void:
 		return
 	
 	auto_strike_timer = auto_strike_cooldown / game_state.attack_speed_mult()
+	_attack_seq += 1
 	animator.attack_style = weapon_style()
 	# One clock: the body's windup/snap/settle mirror the weapon arc's
 	# anticipation/contact/recovery, so blade, body, impact FX and damage
@@ -1323,7 +1349,8 @@ func _perform_auto_strike(enemy: Node3D) -> void:
 		# Resolve the payload on the animator’s actual contact frame. This keeps
 		# authored FBX swings, proxy swings, VFX, SFX, and damage together.
 		await _wait_for_animator_impact()
-		if not is_instance_valid(enemy) or enemy.is_dead():
+		if not is_instance_valid(enemy) \
+				or (enemy.has_method("is_dead") and enemy.is_dead()):
 			return
 	
 	# Impact director: surface-aware cue + coordinated shake/hitstop/chroma.
@@ -1716,6 +1743,7 @@ func _on_attack_released() -> void:
 		return
 	auto_strike_timer = maxf(0.75,
 		float(current_weapon.get("swing_time", 0.36)) * 3.2)
+	_attack_seq += 1
 	animator.attack_style = weapon_style()
 	# Heavy conformance: the authored slam clip owns the impact beat, so the
 	# blade arc draws and crashes on the clip's schedule, not the base clock.
@@ -2068,7 +2096,7 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 			_damage_props_near(global_position, slam_radius)
 			var ws := get_node_or_null("/root/WorldState")
 			if ws != null and ws.has_method("gust"):
-				ws.gust(0.8)   # ground pound surges the canopy
+				ws.gust(Vector2.ZERO, 0.8)   # ground pound surges the canopy
 			CombatFx.impact(self, 0.24, 0.06, 0.10, 0.55)
 		_:
 			pass
