@@ -17,15 +17,19 @@ config/features=PackedStringArray("4.7")
 [autoload]
 
 GameState="*res://scripts/autoload/game_state.gd"
+IconRegistry="*res://scripts/autoload/icon_registry.gd"
 ScanManager="*res://scripts/autoload/scan_manager.gd"
 AudioManager="*res://scripts/autoload/audio_manager.gd"
 InputManager="*res://scripts/autoload/input_manager.gd"
+TimeScaleGuard="*res://scripts/autoload/time_scale_guard.gd"
 WorldState="*res://scripts/autoload/world_state.gd"
 StoryManager="*res://scripts/autoload/story_manager.gd"
 PackCoordinator="*res://scripts/systems/pack_coordinator.gd"
 SaveLoadManager="*res://scripts/systems/save_load_manager.gd"
 RewardManager="*res://scripts/systems/reward_manager.gd"
 SkillExecutor="*res://scripts/systems/skill_executor.gd"
+QuizManager="*res://scripts/systems/quiz_manager.gd"
+CampProgression="*res://scripts/systems/camp_progression.gd"
 
 [debug]
 

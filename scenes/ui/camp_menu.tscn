@@ -1,0 +1,45 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/camp_menu.gd" id="1"]
+
+[node name="CampMenu" type="CanvasLayer"]
+layer = 30
+visible = false
+script = ExtResource("1")
+
+[node name="Dim" type="ColorRect" parent="."]
+offset_right = 1080.0
+offset_bottom = 1920.0
+color = Color(0.01, 0.02, 0.02, 0.86)
+
+[node name="Root" type="PanelContainer" parent="."]
+offset_left = 60.0
+offset_top = 130.0
+offset_right = 1020.0
+offset_bottom = 1790.0
+
+[node name="VBox" type="VBoxContainer" parent="Root"]
+theme_override_constants/separation = 18
+
+[node name="Title" type="Label" parent="Root/VBox"]
+text = "LANTERN CAMP · LEVEL 1"
+theme_type_variation = &"MenuTitle"
+
+[node name="Intro" type="Label" parent="Root/VBox"]
+text = "Strengthen the light you carry between realms."
+autowrap_mode = 2
+
+[node name="CardsScroll" type="ScrollContainer" parent="Root/VBox"]
+size_flags_vertical = 3
+
+[node name="Cards" type="VBoxContainer" parent="Root/VBox/CardsScroll"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="Status" type="Label" parent="Root/VBox"]
+text = ""
+horizontal_alignment = 1
+
+[node name="Close" type="Button" parent="Root/VBox"]
+text = "RETURN TO ROUTE"
+custom_minimum_size = Vector2(0, 64)

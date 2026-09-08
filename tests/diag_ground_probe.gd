@@ -34,6 +34,8 @@ func _snap(path: String) -> void:
 
 func _run() -> void:
 	var gs = root.get_node("/root/GameState")
+	# Diagnostic captures must never touch the player's real progression file.
+	gs.save_path = "/tmp/embervale_ground_probe_%d.cfg" % OS.get_process_id()
 	gs.delete_save()
 	gs.reset()
 	if gs.get("current_realm") != null:
@@ -100,6 +102,13 @@ func _run() -> void:
 		for k in ["tex_saturation", "tex_gain", "tex_blend", "grass_color",
 				"terrain_brightness", "uv_world_scale", "realm_tint"]:
 			print("  param ", k, " = ", mat.get_shader_parameter(k))
+		for texture_key in ["grass_tex", "dirt_tex", "sand_tex", "rock_tex"]:
+			var texture_value: Variant = mat.get_shader_parameter(texture_key)
+			print("  sampler ", texture_key, " valid=", texture_value is Texture2D,
+				" value=", texture_value)
+		var terrain_mesh_resource := trelief.mesh as ArrayMesh
+		print("  mesh surfaces=", terrain_mesh_resource.get_surface_count(),
+			" aabb=", terrain_mesh_resource.get_aabb())
 		# Hide all siblings (vegetation, entities, props) for pure-ground view
 		for child in trelief.get_parent().get_children():
 			if child != trelief and child is Node3D:

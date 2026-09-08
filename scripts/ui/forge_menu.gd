@@ -9,8 +9,9 @@ class_name ForgeMenu
 @onready var scan_manager: ScanManager = ScanManager
 @onready var audio: AudioManager = AudioManager
 
-@onready var camera_view: SubViewportContainer = get_node_or_null("Root/VBox/CameraView")
-@onready var camera_feed = get_node_or_null("Root/VBox/CameraView/SubViewport/CameraFeed")
+@onready var camera_view: PanelContainer = get_node_or_null("Root/VBox/CameraView")
+@onready var camera_feed: TextureRect = get_node_or_null("Root/VBox/CameraView/CameraFeed")
+@onready var camera_status: Label = get_node_or_null("Root/VBox/CameraView/CameraStatus")
 @onready var pipeline: PanelContainer = $Root/VBox/Pipeline
 @onready var result_panel: PanelContainer = $Root/VBox/Result
 @onready var weapon_glyph: Label = $Root/VBox/Result/ResultVBox/WeaponGlyph
@@ -27,10 +28,13 @@ class_name ForgeMenu
 @onready var equip_button: Button = $Root/VBox/Result/ResultVBox/EquipButton
 @onready var scan_button: Button = $Root/VBox/ScanButton
 @onready var close_button: Button = $Root/VBox/Header/CloseButton
+@onready var scan_count: Label = $Root/VBox/ScanCount
 
 var is_scanning: bool = false
 var pending_base: Dictionary = {}
 var pending_rarity: int = 0
+var pending_confidence: float = 0.0
+var discard_button: Button
 
 var _freeze_was_visible := false
 var element_switcher: PanelContainer = null
@@ -68,6 +72,13 @@ func _ready() -> void:
 	UiKit.style_primary_button(equip_button)
 	UiKit.style_button(close_button, UiKit.SAGE)
 	_build_element_switcher()
+	discard_button = Button.new()
+	discard_button.text = "DISCARD RESULT"
+	discard_button.custom_minimum_size = Vector2(0, 48)
+	UiKit.style_secondary_button(discard_button)
+	discard_button.pressed.connect(_on_discard_pressed)
+	$Root/VBox/Result/ResultVBox.add_child(discard_button)
+	discard_button.visible = false
 	_connect_signals()
 	
 	close_button.pressed.connect(_on_close_pressed)
@@ -82,8 +93,11 @@ func _connect_signals() -> void:
 	scan_manager.scan_started.connect(_on_scan_started)
 	scan_manager.scan_completed.connect(_on_scan_completed)
 	scan_manager.forge_completed.connect(_on_forge_completed)
+	scan_manager.scan_failed.connect(_on_scan_failed)
 	game_state.weapon_changed.connect(_refresh_element_switcher)
 	game_state.gold_changed.connect(_on_element_forge_gold_changed)
+	game_state.scans_changed.connect(_on_scans_changed)
+	_on_scans_changed(game_state.scans_remaining)
 
 func _build_element_switcher() -> void:
 	element_switcher = PanelContainer.new()
@@ -126,17 +140,32 @@ func _refresh_element_switcher(_weapon: Dictionary = {}) -> void:
 	var current := str(game_state.equipped_weapon.get("element", ""))
 	if current.is_empty():
 		current = "none"
-	element_status.text = "CURRENT\n%s\nGOLD %d" % [current.to_upper(), game_state.gold]
+	var can_afford := game_state.gold >= GameState.ELEMENT_SWITCH_COST
+	element_status.text = "CURRENT\n%s\nGOLD %d%s" % [current.to_upper(), game_state.gold,
+		"" if can_afford else " · NEED %d" % (GameState.ELEMENT_SWITCH_COST - game_state.gold)]
 	for element in element_buttons:
 		var button: Button = element_buttons[element]
-		button.disabled = element == current or game_state.gold < GameState.ELEMENT_SWITCH_COST
+		var same_element: bool = str(element) == current
+		var state := UiKit.action_state("equipped" if same_element else ("available" if can_afford else "unavailable"),
+			"Already attuned" if same_element else ("Need %d more gold" %
+			(GameState.ELEMENT_SWITCH_COST - game_state.gold) if not can_afford else
+			"Costs %d gold · binds %s" % [GameState.ELEMENT_SWITCH_COST, element.to_upper()]))
+		button.disabled = bool(state.get("disabled", false))
+		button.tooltip_text = "%s · %s" % [str(state.get("label", "")),
+			str(state.get("detail", ""))]
 
 func _on_element_forge_gold_changed(_gold: int) -> void:
 	_refresh_element_switcher()
 
 func _on_element_pressed(element: String) -> void:
+	var restoring := UiKit.action_state("restoring", "Binding elemental payload")
+	element_status.text = "%s\n%s" % [str(restoring.get("label", "RESTORING…")),
+		str(restoring.get("detail", ""))]
 	var result: Dictionary = game_state.switch_weapon_element(element)
-	element_status.text = str(result.get("message", ""))
+	var final_state := UiKit.action_state("purchased" if bool(result.get("success", false)) else "failed",
+		"Saved immediately" if bool(result.get("success", false)) else "No gold was deducted")
+	element_status.text = "%s · %s" % [str(final_state.get("label", "FAILED")),
+		str(result.get("message", ""))]
 	if bool(result.get("success", false)):
 		audio.play_forge_success()
 	else:
@@ -161,18 +190,63 @@ func _start_scan() -> void:
 	pipeline.visible = true
 	_hide_result()
 	
-	# Start camera on mobile
-	if OS.has_feature("mobile") and camera_feed:
-		camera_feed.start()
+	_start_camera_preview()
 	
 	scan_manager.start_scan()
 
+func _start_camera_preview() -> void:
+	if camera_feed == null:
+		return
+	if not OS.has_feature("mobile"):
+		var simulated := UiKit.action_state("loading", "DESKTOP PREVIEW · SIMULATED DETECTION")
+		camera_status.text = "%s · %s\nLOCAL PROCESSING · NO PHOTO UPLOAD" % [simulated.get("label", "LOADING…"), simulated.get("detail", "")] if camera_status else ""
+		return
+	CameraServer.set_monitoring_feeds(true)
+	var feeds := CameraServer.feeds()
+	if feeds.is_empty():
+		var unavailable := UiKit.action_state("unavailable", "USING OFFLINE FALLBACK")
+		camera_status.text = "%s · %s" % [unavailable.get("label", "UNAVAILABLE"), unavailable.get("detail", "")] if camera_status else ""
+		return
+	var feed: CameraFeed = feeds[0]
+	feed.feed_is_active = true
+	var texture := CameraTexture.new()
+	texture.camera_feed_id = feed.get_id()
+	camera_feed.texture = texture
+	camera_status.text = "CAMERA USE: LOCAL CAPTURE · NO PHOTO UPLOAD\nPOINT AT AN OBJECT TO FORGE ONE BOUNDED RELIC" if camera_status else ""
+
 func _on_scan_started() -> void:
+	audio.play_ui_blip()
+	_on_scans_changed(game_state.scans_remaining)
+
+func _on_scans_changed(remaining: int) -> void:
+	if scan_count == null:
+		return
+	scan_count.text = "SCANS AVAILABLE: %d · FRAGMENTS: %d/%d" % [remaining, game_state.scan_fragments, game_state.SCAN_FRAGMENTS_PER_SCAN]
+	scan_count.add_theme_color_override("font_color", Color(0.95, 0.78, 0.42) if remaining > 0 else Color(0.92, 0.40, 0.34))
+	scan_button.disabled = is_scanning or remaining <= 0
+	if remaining <= 0:
+		var unavailable := UiKit.action_state("unavailable", "EARN OR BUY")
+		scan_button.text = "%s · %s" % [unavailable.get("label", "UNAVAILABLE"), unavailable.get("detail", "")]
+	elif is_scanning:
+		scan_button.text = str(UiKit.action_state("scanning").get("label", "SCANNING…"))
+	else:
+		scan_button.text = "SCAN OBJECT"
+	scan_button.tooltip_text = "Earn scans from quests or buy a scan pack." if remaining <= 0 else "Camera use: local capture only · forge one bounded relic."
+
+func _on_scan_failed(message: String) -> void:
+	is_scanning = false
+	pipeline.visible = false
+	_hide_result()
+	_on_scans_changed(game_state.scans_remaining)
+	kit_preview.text = message
+	kit_preview.visible = true
 	audio.play_ui_blip()
 
 func _on_scan_completed(detected_class: String, confidence: float) -> void:
 	# Camera feed will be stopped in ScanManager
 	is_scanning = false
+	pending_confidence = clampf(confidence, 0.0, 1.0)
+	kit_preview.text = "TEMPLATE %s · CONFIDENCE %d%% · bounded stat roll" % [detected_class.to_upper(), roundi(pending_confidence * 100.0)]
 	pipeline.visible = false
 
 func _on_forge_completed(weapon_id: String, rarity: int) -> void:
@@ -193,7 +267,22 @@ func _show_result(weapon_id: String, rarity: int) -> void:
 		Color(0.96, 0.72, 0.29)
 	]
 	
-	weapon_glyph.text = str(base.get("glyph", "✦"))
+	weapon_glyph.text = "WEAPON"
+	var old_icon := weapon_glyph.get_parent().get_node_or_null("WeaponIcon")
+	if old_icon != null:
+		old_icon.queue_free()
+	var weapon_icon := IconRegistry.icon_for(weapon_id)
+	if weapon_icon != null:
+		var icon_view := TextureRect.new()
+		icon_view.name = "WeaponIcon"
+		icon_view.texture = weapon_icon
+		icon_view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon_view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon_view.custom_minimum_size = Vector2(72, 72)
+		weapon_glyph.visible = false
+		weapon_glyph.get_parent().add_child(icon_view)
+	else:
+		weapon_glyph.visible = true
 	UiKit.style_label(weapon_glyph, &"Title", 56)
 	UiKit.style_label(rarity_label, &"RowLabel")
 	rarity_label.text = "RARITY: %s" % rarity_names[pending_rarity]
@@ -206,11 +295,15 @@ func _show_result(weapon_id: String, rarity: int) -> void:
 	_refresh_preview()
 	
 	result_panel.visible = true
+	if discard_button != null:
+		discard_button.visible = true
 	audio.play_loot_fanfare()
 
 func _hide_result() -> void:
 	result_panel.visible = false
 	pending_base = {}
+	if discard_button != null:
+		discard_button.visible = false
 
 func _on_name_input_changed(_text: String = "") -> void:
 	_refresh_preview()
@@ -233,7 +326,8 @@ func _refresh_preview() -> void:
 			parts.append("%s (ULT) · %.2f× blast · %s CD" % [sk.name, sk.dmg_mult, cd_text])
 		else:
 			parts.append("%s · %.2f× hit · %s CD" % [sk.name, sk.dmg_mult, cd_text])
-	kit_preview.text = " · ".join(parts)
+	var confidence_text := "CONFIDENCE %d%%" % roundi(pending_confidence * 100.0)
+	kit_preview.text = "%s · %s · BOUNDED ROLL · SAVE AS NEW INVENTORY ID" % [confidence_text, " · ".join(parts)]
 
 func _skill_name_inputs() -> Array:
 	var names := []
@@ -251,3 +345,10 @@ func _on_equip_pressed() -> void:
 	var satchel = get_tree().root.find_child("SatchelUI", true, false)
 	if satchel:
 		satchel.visible = true
+
+func _on_discard_pressed() -> void:
+	if pending_base.is_empty():
+		return
+	_hide_result()
+	kit_preview.text = "Result discarded. The scan was already consumed; no inventory item was created."
+	audio.play_ui_back()

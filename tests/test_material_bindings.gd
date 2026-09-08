@@ -6,6 +6,7 @@ extends SceneTree
 
 const SHADERS := [
 	"res://assets/shaders/terrain_ground.gdshader",
+	"res://assets/shaders/terrain_ground_layers.gdshader",
 	"res://assets/shaders/rock.gdshader",
 	"res://assets/shaders/bark.gdshader",
 	"res://assets/shaders/canopy.gdshader",
@@ -17,6 +18,7 @@ const REALM_MATERIALS := ["bramblewood", "whispergrove", "mistfen",
 	"heartwood", "moonfen"]
 
 const BOUND_SAMPLERS := ["grass_tex", "dirt_tex", "sand_tex", "rock_tex",
+	"moss_tex", "mud_tex",
 	"grass_norm", "dirt_norm", "sand_norm", "rock_norm",
 	"grass_rough", "dirt_rough", "sand_rough", "rock_rough"]
 
@@ -47,11 +49,30 @@ func _run() -> void:
 			failures += 1
 			print("FAIL: realm material invalid: ", path)
 			continue
+		if not mat.shader.resource_path.ends_with("terrain_ground.gdshader"):
+			failures += 1
+			print("FAIL: realm material does not use terrain_ground shader: ", path)
 		for sampler in BOUND_SAMPLERS:
 			var tex = mat.get_shader_parameter(sampler)
 			if tex == null or not (tex is Texture2D):
 				failures += 1
 				print("FAIL: %s unbound sampler '%s'" % [path, sampler])
+		var moss_strength := float(mat.get_shader_parameter("moss_strength"))
+		var moisture_strength := float(mat.get_shader_parameter("moisture_strength"))
+		if moss_strength <= 0.0 or moisture_strength <= 0.0:
+			failures += 1
+			print("FAIL: %s has no readable moss/moisture profile" % path)
+
+	for surface in ["moss", "mud"]:
+		var surface_path := "res://assets/textures/stylized/%s_v2/albedo.png" % surface
+		var surface_texture := load(surface_path) as Texture2D
+		if surface_texture == null or surface_texture.get_width() > 512:
+			failures += 1
+			print("FAIL: %s is missing or exceeds the mobile texture size budget" % surface_path)
+		var import_text := FileAccess.get_file_as_string(surface_path + ".import")
+		if not import_text.contains("mipmaps/generate=true"):
+			failures += 1
+			print("FAIL: %s has mipmaps disabled" % surface_path)
 
 	# --- Entity v3 material pass ---
 	const ENTITY_MATERIALS := ["entity_hero", "entity_hero_ember", "entity_hushling", "entity_boss"]

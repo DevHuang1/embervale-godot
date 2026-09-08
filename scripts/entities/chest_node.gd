@@ -51,6 +51,9 @@ const TIER_GLOW := {
 }
 
 func _ready() -> void:
+	add_to_group("interactable")
+	add_to_group("chest")
+	add_to_group("structure")
 	_build_geometry()
 	_build_interact_area()
 	_build_prompt()
@@ -281,7 +284,7 @@ func _on_reward_granted(summary: Dictionary) -> void:
 	var pos := global_position + Vector3(0, 0.9, 0)
 	var gold := int(summary.get("gold", 0))
 	if gold > 0:
-		FloatingText.spawn_on_entity(self, "+%d 🪙" % gold, Color(1.0, 0.85, 0.30))
+		FloatingText.spawn_on_entity(self, "+%d GOLD" % gold, Color(1.0, 0.85, 0.30))
 		y_offset += 0.28
 	var xp := int(summary.get("xp", 0))
 	if xp > 0:
@@ -289,7 +292,7 @@ func _on_reward_granted(summary: Dictionary) -> void:
 		y_offset += 0.28
 	var diamonds := int(summary.get("diamonds", 0))
 	if diamonds > 0:
-		FloatingText.spawn_on_entity(self, "+%d 💎" % diamonds, Color(0.55, 0.75, 1.00))
+		FloatingText.spawn_on_entity(self, "+%d DIAMONDS" % diamonds, Color(0.55, 0.75, 1.00))
 
 func _reset_chest() -> void:
 	_is_open = false

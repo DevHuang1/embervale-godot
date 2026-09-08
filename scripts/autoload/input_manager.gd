@@ -18,7 +18,7 @@ signal tap_foe(enemy: Node3D)
 
 @export var touch_deadzone: float = 0.15
 @export var flick_threshold: float = 1600.0
-var is_mobile: bool = OS.has_feature("mobile")
+var is_mobile: bool = OS.has_feature("mobile") or OS.get_name() in ["Android", "iOS"]
 var last_tap_time: float = 0.0
 var tap_threshold: float = 0.3
 var world_gesture_active: bool = false  # true while two-finger camera gesture
@@ -26,39 +26,153 @@ var first_person_active: bool = false   # true while CameraRig drives a 1-finger
 var active_camera: Camera3D = null
 var held_move_keys: Dictionary = {}
 var _drag_samples: Dictionary = {}  # index -> {speed: float, dir: Vector2}
+var _joystick_pointer_ids: Dictionary = {}
+var _first_person_look_pointer: int = -1
+const SETTINGS_PATH := "user://settings.cfg"
+const DEFAULT_KEY_BINDINGS: Dictionary = {
+	"scan": KEY_F, "skill_0": KEY_Q, "skill_1": KEY_E, "skill_2": KEY_R,
+	"interact": KEY_SPACE, "pause": KEY_ESCAPE, "dodge": KEY_SHIFT, "jump": KEY_C,
+}
+var key_bindings: Dictionary = DEFAULT_KEY_BINDINGS.duplicate()
 
 func _ready() -> void:
 	Input.set_use_accumulated_input(false)
+	add_to_group("input_manager")
+	_load_key_bindings()
+
+func get_key_binding(action: String) -> int:
+	return int(key_bindings.get(action, DEFAULT_KEY_BINDINGS.get(action, -1)))
+
+func set_key_binding(action: String, keycode: int) -> bool:
+	if not DEFAULT_KEY_BINDINGS.has(action) or keycode <= 0:
+		return false
+	for other_action in key_bindings:
+		if str(other_action) != action and int(key_bindings[other_action]) == keycode:
+			return false
+	key_bindings[action] = keycode
+	_save_key_bindings()
+	return true
+
+func reset_key_bindings() -> void:
+	key_bindings = DEFAULT_KEY_BINDINGS.duplicate()
+	_save_key_bindings()
+
+func _load_key_bindings() -> void:
+	var config := ConfigFile.new()
+	if config.load(SETTINGS_PATH) != OK:
+		return
+	for action in DEFAULT_KEY_BINDINGS:
+		var saved := int(config.get_value("key_bindings", str(action), DEFAULT_KEY_BINDINGS[action]))
+		if saved > 0:
+			key_bindings[action] = saved
+	# Invalid/duplicate saved layouts are discarded atomically.
+	if not _bindings_are_valid(key_bindings):
+		key_bindings = DEFAULT_KEY_BINDINGS.duplicate()
+
+func _save_key_bindings() -> void:
+	var config := ConfigFile.new()
+	config.load(SETTINGS_PATH)
+	for action in DEFAULT_KEY_BINDINGS:
+		config.set_value("key_bindings", str(action), get_key_binding(str(action)))
+	config.save(SETTINGS_PATH)
+
+func _bindings_are_valid(bindings: Dictionary) -> bool:
+	var used: Dictionary = {}
+	for action in DEFAULT_KEY_BINDINGS:
+		var keycode := int(bindings.get(action, -1))
+		if keycode <= 0 or used.has(keycode):
+			return false
+		used[keycode] = true
+	return true
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		_handle_key(event)
 	elif event is InputEventScreenTouch and is_mobile:
+		if _is_joystick_pointer(event.index):
+			_handle_joystick_pointer(event.index, event.pressed)
+			return
 		_handle_touch(event)
 	elif event is InputEventScreenDrag and is_mobile:
+		if _is_joystick_pointer(event.index):
+			return
 		_handle_drag(event)
 	elif event is InputEventMouseButton and not is_mobile:
 		_handle_mouse(event)
 	elif event is InputEventMouseMotion and not is_mobile:
 		_handle_mouse_motion(event)
+	elif event is InputEventJoypadButton:
+		_handle_joypad_button(event)
+	elif event is InputEventJoypadMotion:
+		_handle_joypad_motion(event)
+
+func set_joystick_pointer(pointer_id: int, owned: bool) -> void:
+	if pointer_id < 0:
+		return
+	if owned:
+		_joystick_pointer_ids[pointer_id] = true
+	else:
+		_joystick_pointer_ids.erase(pointer_id)
+
+func clear_joystick_pointers() -> void:
+	_joystick_pointer_ids.clear()
+	_drag_samples.clear()
+
+func _is_joystick_pointer(pointer_id: int) -> bool:
+	return _joystick_pointer_ids.has(pointer_id)
+
+## Camera and world gesture owners use this guard so a HUD joystick touch can
+## never become an orbit gesture when a second finger is added.
+func is_joystick_pointer_owned(pointer_id: int) -> bool:
+	return _is_joystick_pointer(pointer_id)
+
+func begin_first_person_look(pointer_id: int) -> void:
+	if pointer_id < 0 or _is_joystick_pointer(pointer_id):
+		return
+	_first_person_look_pointer = pointer_id
+	_drag_samples.erase(pointer_id)
+
+func end_first_person_look(pointer_id: int) -> void:
+	if pointer_id == -1 or _first_person_look_pointer == pointer_id:
+		_first_person_look_pointer = -1
+	if pointer_id >= 0:
+		_drag_samples.erase(pointer_id)
+
+func _handle_joystick_pointer(pointer_id: int, pressed: bool) -> void:
+	if not pressed:
+		_joystick_pointer_ids.erase(pointer_id)
+		_drag_samples.erase(pointer_id)
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		clear_joystick_pointers()
+		_first_person_look_pointer = -1
+		world_gesture_active = false
 
 func _handle_key(event: InputEventKey) -> void:
 	if event.pressed and event.echo:
 		return
 	if event.pressed:
 		held_move_keys[event.keycode] = true
-		match event.keycode:
-			KEY_F: scan_pressed.emit()
-			KEY_Q: skill_slot_pressed.emit(0)
-			KEY_E: skill_slot_pressed.emit(1)
-			KEY_R: skill_slot_pressed.emit(2)
-			KEY_SPACE, KEY_ENTER: interact_pressed.emit()
-			KEY_ESCAPE: pause_pressed.emit()
-			KEY_SHIFT: dodge_pressed.emit(Vector2.ZERO)
-			KEY_C, KEY_CTRL: jump_pressed.emit()
+		if event.keycode == get_key_binding("scan"):
+			scan_pressed.emit()
+		elif event.keycode == get_key_binding("skill_0"):
+			skill_slot_pressed.emit(0)
+		elif event.keycode == get_key_binding("skill_1"):
+			skill_slot_pressed.emit(1)
+		elif event.keycode == get_key_binding("skill_2"):
+			skill_slot_pressed.emit(2)
+		elif event.keycode == get_key_binding("interact") or event.keycode == KEY_ENTER:
+			interact_pressed.emit()
+		elif event.keycode == get_key_binding("pause"):
+			pause_pressed.emit()
+		elif event.keycode == get_key_binding("dodge"):
+			dodge_pressed.emit(Vector2.ZERO)
+		elif event.keycode == get_key_binding("jump") or event.keycode == KEY_CTRL:
+			jump_pressed.emit()
 	else:
 		held_move_keys.erase(event.keycode)
-		if event.keycode == KEY_SPACE or event.keycode == KEY_ENTER:
+		if event.keycode == get_key_binding("interact") or event.keycode == KEY_ENTER:
 			interact_released.emit()
 	_emit_keyboard_move()
 
@@ -77,6 +191,11 @@ func _emit_keyboard_move() -> void:
 func _handle_touch(event: InputEventScreenTouch) -> void:
 	var now = Time.get_ticks_msec() / 1000.0
 	if event.pressed:
+		if first_person_active:
+			# CameraRig owns this gesture. Do not turn it into tap-to-move,
+			# interaction, or a dodge flick.
+			begin_first_person_look(event.index)
+			return
 		_drag_samples[event.index] = {"speed": 0.0, "dir": Vector2.ZERO, "time": Time.get_ticks_msec() / 1000.0}
 		if now - last_tap_time < tap_threshold:
 			interact_pressed.emit()
@@ -87,11 +206,36 @@ func _handle_touch(event: InputEventScreenTouch) -> void:
 		else:
 			last_tap_time = now
 	else:
+		if first_person_active:
+			end_first_person_look(event.index)
+			return
 		if not world_gesture_active and _drag_samples.has(event.index):
 			var sample: Dictionary = _drag_samples[event.index]
 			if sample.speed > flick_threshold:
 				dodge_pressed.emit(sample.dir)
 		_drag_samples.erase(event.index)
+
+func _handle_joypad_button(event: InputEventJoypadButton) -> void:
+	if not event.pressed:
+		if event.button_index == JOY_BUTTON_A:
+			interact_released.emit()
+		return
+	match event.button_index:
+		JOY_BUTTON_A: interact_pressed.emit()
+		JOY_BUTTON_B: dodge_pressed.emit(Vector2.ZERO)
+		JOY_BUTTON_X: skill_slot_pressed.emit(0)
+		JOY_BUTTON_Y: skill_slot_pressed.emit(1)
+		JOY_BUTTON_LEFT_SHOULDER: skill_slot_pressed.emit(2)
+		JOY_BUTTON_RIGHT_SHOULDER: scan_pressed.emit()
+		JOY_BUTTON_START: pause_pressed.emit()
+
+func _handle_joypad_motion(event: InputEventJoypadMotion) -> void:
+	if event.axis != JOY_AXIS_LEFT_X and event.axis != JOY_AXIS_LEFT_Y:
+		return
+	var direction := Vector2(
+		Input.get_joy_axis(event.device, JOY_AXIS_LEFT_X),
+		Input.get_joy_axis(event.device, JOY_AXIS_LEFT_Y))
+	move_input.emit(direction.limit_length(1.0) if direction.length() > touch_deadzone else Vector2.ZERO)
 
 func _handle_drag(event: InputEventScreenDrag) -> void:
 	if world_gesture_active:
@@ -100,7 +244,8 @@ func _handle_drag(event: InputEventScreenDrag) -> void:
 	# In first-person view a one-finger drag is camera free-look (consumed by
 	# CameraRig). Keep tracking the sample so fast flicks still dodge.
 	if first_person_active:
-		_track_drag_sample(event, event.relative)
+		# CameraRig consumes this pointer. It must never become movement or
+		# dodge input, even when the drag is fast.
 		return
 	var relative := event.relative
 	if relative.length() > touch_deadzone:

@@ -28,11 +28,11 @@ func _ready() -> void:
 
 # Coco-SSD style classes mapped to weapons
 const CLASS_TO_WEAPON: Dictionary = {
-	"cup": {"id": "mug_mace", "name": "MUG MACE", "glyph": "☕", "atk": 7, "swing_time": 0.38, "range": 8.2, "skill": {"name": "MUG SLAM", "type": "aoe", "cooldown": 4.0, "radius": 13.0, "dmg_mult": 1.5}},
-	"cell phone": {"id": "pocket_blade", "name": "POCKET BLADE", "glyph": "📱", "atk": 5, "swing_time": 0.26, "range": 6.4, "skill": {"name": "FLASH BANG", "type": "stun", "cooldown": 6.0, "radius": 15.0, "power": 1.5}},
-	"scissors": {"id": "snip_twins", "name": "SNIP TWINS", "glyph": "✂️", "atk": 6, "swing_time": 0.32, "range": 7.2, "skill": {"name": "SNIP DASH", "type": "dash", "cooldown": 3.5, "power": 20.0, "dmg_mult": 1.2}},
-	"bottle": {"id": "soda_cannon", "name": "SODA CANNON", "glyph": "🍾", "atk": 6, "swing_time": 0.34, "range": 7.6, "skill": {"name": "SODA SPRAY", "type": "projectile", "cooldown": 2.5, "power": 34.0, "dmg_mult": 1.6}},
-	"laptop": {"id": "slab_hammer", "name": "SLAB HAMMER", "glyph": "💻", "atk": 10, "swing_time": 0.52, "range": 9.2, "skill": {"name": "EM PULSE", "type": "heavy_aoe", "cooldown": 7.0, "radius": 17.5, "dmg_mult": 1.8}}
+	"cup": {"id": "mug_mace", "name": "MUG MACE", "glyph": "mace", "atk": 7, "swing_time": 0.38, "range": 8.2, "skill": {"name": "MUG SLAM", "type": "aoe", "cooldown": 4.0, "radius": 13.0, "dmg_mult": 1.5}},
+	"cell phone": {"id": "pocket_blade", "name": "POCKET BLADE", "glyph": "blade", "atk": 5, "swing_time": 0.26, "range": 6.4, "skill": {"name": "FLASH BANG", "type": "stun", "cooldown": 6.0, "radius": 15.0, "power": 1.5}},
+	"scissors": {"id": "snip_twins", "name": "SNIP TWINS", "glyph": "blade", "atk": 6, "swing_time": 0.32, "range": 7.2, "skill": {"name": "SNIP DASH", "type": "dash", "cooldown": 3.5, "power": 20.0, "dmg_mult": 1.2}},
+	"bottle": {"id": "soda_cannon", "name": "SODA CANNON", "glyph": "potion", "atk": 6, "swing_time": 0.34, "range": 7.6, "skill": {"name": "SODA SPRAY", "type": "projectile", "cooldown": 2.5, "power": 34.0, "dmg_mult": 1.6}},
+	"laptop": {"id": "slab_hammer", "name": "SLAB HAMMER", "glyph": "mace", "atk": 10, "swing_time": 0.52, "range": 9.2, "skill": {"name": "EM PULSE", "type": "heavy_aoe", "cooldown": 7.0, "radius": 17.5, "dmg_mult": 1.8}}
 }
 
 const RARITY_WEIGHTS: Array = [
@@ -50,6 +50,12 @@ var _capture_viewport: SubViewport = null
 
 func start_scan() -> void:
 	if is_scanning:
+		return
+	var game_state := get_node_or_null("/root/GameState")
+	if game_state == null or not game_state.consume_scan():
+		if game_state != null and game_state.has_method("record_activity"):
+			game_state.call("record_activity", "SCAN FAILED · no charges")
+		scan_failed.emit("No scans remaining. Earn one from quests or buy a scan pack.")
 		return
 	
 	is_scanning = true
@@ -102,6 +108,9 @@ func _on_detection_complete() -> void:
 	var detected_classes = CLASS_TO_WEAPON.keys()
 	var detected = detected_classes.pick_random()
 	var confidence = randf_range(min_confidence, 0.98)
+	var game_state := get_node_or_null("/root/GameState")
+	if game_state != null and game_state.has_method("record_activity"):
+		game_state.call("record_activity", "SCAN RESULT · %s · %d%%" % [detected, int(confidence * 100.0)])
 	
 	scan_completed.emit(detected, confidence)
 	
@@ -204,6 +213,9 @@ func get_weapon_data(class_name_str: String) -> Dictionary:
 func simulate_scan(class_name_str: String = "") -> void:
 	if not OS.has_feature("mobile"):
 		var detected = class_name_str if class_name_str else CLASS_TO_WEAPON.keys().pick_random()
+		var game_state := get_node_or_null("/root/GameState")
+		if game_state != null and game_state.has_method("record_activity"):
+			game_state.call("record_activity", "SCAN RESULT · %s · 90%%" % detected)
 		scan_completed.emit(detected, 0.9)
 		var weapon_data = CLASS_TO_WEAPON[detected].duplicate(true)
 		var rarity = _roll_rarity()

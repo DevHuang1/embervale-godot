@@ -1,5 +1,7 @@
 shader_type spatial;
-render_mode blend_mix, depth_draw_opaque, cull_back, specular_schlick_ggx;
+// Opaque/depth-writing in every view. Disabled culling is a controlled
+// fallback for steep first-person crest views; alpha is never used.
+render_mode blend_mix, depth_draw_opaque, cull_disabled, specular_schlick_ggx;
 
 // === Terrain Ground v4 (UE-style, higher-quality pass) ===
 // Additions over v3:
@@ -37,23 +39,27 @@ uniform vec3 moss_color : source_color = vec3(0.22, 0.42, 0.24);
 uniform float moss_strength : hint_range(0.0, 1.0) = 0.0;
 
 // --- Scanned PBR layers (CC0 sets from assets/textures/pbr/) ---
-uniform sampler2D grass_tex : source_color, hint_default_white;
-uniform sampler2D dirt_tex : source_color, hint_default_white;
-uniform sampler2D sand_tex : source_color, hint_default_white;
-uniform sampler2D rock_tex : source_color, hint_default_white;
-uniform sampler2D grass_norm : hint_normal;
-uniform sampler2D dirt_norm : hint_normal;
-uniform sampler2D sand_norm : hint_normal;
-uniform sampler2D rock_norm : hint_normal;
-uniform sampler2D grass_rough : hint_default_white;
-uniform sampler2D dirt_rough : hint_default_white;
-uniform sampler2D sand_rough : hint_default_white;
-uniform sampler2D rock_rough : hint_default_white;
+uniform sampler2D grass_tex : source_color, hint_default_white, repeat_enable;
+uniform sampler2D dirt_tex : source_color, hint_default_white, repeat_enable;
+uniform sampler2D sand_tex : source_color, hint_default_white, repeat_enable;
+uniform sampler2D rock_tex : source_color, hint_default_white, repeat_enable;
+uniform sampler2D moss_tex : source_color, hint_default_white, repeat_enable;
+uniform sampler2D mud_tex : source_color, hint_default_white, repeat_enable;
+uniform sampler2D grass_norm : hint_normal, repeat_enable;
+uniform sampler2D dirt_norm : hint_normal, repeat_enable;
+uniform sampler2D sand_norm : hint_normal, repeat_enable;
+uniform sampler2D rock_norm : hint_normal, repeat_enable;
+uniform sampler2D grass_rough : hint_default_white, repeat_enable;
+uniform sampler2D dirt_rough : hint_default_white, repeat_enable;
+uniform sampler2D sand_rough : hint_default_white, repeat_enable;
+uniform sampler2D rock_rough : hint_default_white, repeat_enable;
 
 // World units per texture tile
 uniform float uv_world_scale : hint_range(0.02, 3.0) = 0.9;
 // How strongly detail textures modulate the tint colors (0 = flat colors)
 uniform float tex_blend : hint_range(0.0, 1.0) = 0.95;
+uniform float tex_gain : hint_range(0.5, 2.5) = 1.0;
+uniform float tex_saturation : hint_range(0.0, 1.5) = 1.0;
 // Sandy dry patches on flat open ground
 uniform float sand_amount : hint_range(0.0, 1.0) = 0.34;
 
@@ -99,6 +105,9 @@ uniform float ember_fleck_intensity : hint_range(0.0, 4.0) = 0.85;
 // Macro colour variation (v4): low-frequency albedo modulation
 uniform float macro_variation_strength : hint_range(0.0, 0.6) = 0.18;
 uniform float macro_variation_scale : hint_range(0.001, 0.05) = 0.008;
+uniform float macro_breakup_strength : hint_range(0.0, 1.0) = 0.42;
+uniform float micro_grain_strength : hint_range(0.0, 1.0) = 0.24;
+uniform float puddle_sheen_strength : hint_range(0.0, 1.0) = 0.18;
 
 // Puddle accumulation (v4) — activated by world_rain_level
 uniform float puddle_threshold : hint_range(0.0, 1.0) = 0.32;
@@ -147,6 +156,14 @@ float fbm(vec2 p) {
 }
 
 float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+vec3 grade_texture(vec3 c) {
+	float l = lum(c);
+	vec3 saturated = mix(vec3(l), c, tex_saturation);
+	// Gain is centered around mid-grey, preserving dark cracks instead of
+	// lifting the complete texture toward a single bright realm tint.
+	return clamp((saturated - vec3(0.5)) * tex_gain + vec3(0.5), vec3(0.0), vec3(1.0));
+}
 
 mat2 rot2(float a) {
 	float c = cos(a); float s = sin(a);
@@ -275,7 +292,10 @@ void vertex() {
 void fragment() {
 	vec3 n = normalize(world_normal);
 	float slope = 1.0 - clamp(n.y, 0.0, 1.0);
-	float cam_dist = length(VERTEX);
+	// Terrain is one large mesh, so local vertex distance measures from its
+	// centre and incorrectly removes detail away from world origin. Measure
+	// from the active camera so close texture relief follows the player.
+	float cam_dist = distance(CAMERA_POSITION_WORLD, world_pos);
 
 	// --- Macro masks (region layout) ---
 	vec2 wp = world_pos.xz;
@@ -287,8 +307,10 @@ void fragment() {
 		fbm(wp * patch_scale * 0.22 + macro * 2.0));
 	float dryness = fbm(wp * patch_scale * 0.13 + vec2(51.2, 17.4));
 	float flatness = smoothstep(0.28, 0.05, slope);
-	float sand_mask = sand_amount * flatness
-		* smoothstep(0.38, 0.68, dryness) * (1.0 - patches);
+	// Make secondary surfaces readable at gameplay distance. The old narrow
+	// threshold produced tiny sand islands that disappeared under lighting.
+	float sand_mask = sand_amount * flatness * 1.65
+		* smoothstep(0.28, 0.58, dryness) * (1.0 - patches * 0.72);
 	float rock_mask = smoothstep(slope_start - 0.07, slope_end + 0.05, slope);
 	float crest = smoothstep(1.4, 2.6, world_pos.y);
 	float wr = max(rock_mask, crest * (1.0 - patches));
@@ -296,10 +318,12 @@ void fragment() {
 	vec2 uv = wp * uv_world_scale;
 
 	// --- Base weights -> height-modulated weights (UE heightlerp) ---
-	float wg = 1.0;
-	float wd = patches;
-	float ws = sand_mask;
-	float wrr = wr;
+	// Partition the base layers before height blending. Keeping grass fixed at
+	// 1.0 made every other surface a weak tint laid over a nearly solid field.
+	float wg = max(0.035, (1.0 - patches) * (1.0 - sand_mask) * (1.0 - wr));
+	float wd = patches * (1.0 - wr) * 1.75;
+	float ws = sand_mask * (1.0 - wr) * 1.15;
+	float wrr = wr * 1.45;
 	vec2 uvg = layer_uv(uv, 0);
 	vec2 uvd = layer_uv(uv, 1);
 	vec2 uvs = layer_uv(uv, 2);
@@ -316,6 +340,12 @@ void fragment() {
 	vec3 dc = stochastic_sample(dirt_tex, uvd, stoch_fade);
 	vec3 sc = texture(sand_tex, uvs).rgb;
 	vec3 rc = texture(rock_tex, uvr).rgb;
+	vec3 mc = texture(moss_tex, uv * 0.82).rgb;
+	vec3 mudc = texture(mud_tex, uv * 0.72).rgb;
+	gc = grade_texture(gc);
+	dc = grade_texture(dc);
+	sc = grade_texture(sc);
+	rc = grade_texture(rc);
 	float wsum = wg + wd + ws + wrr;
 	float hg = lum(gc);
 	float hd = lum(dc);
@@ -346,6 +376,12 @@ void fragment() {
 		dc = stochastic_sample(dirt_tex, uvd, stoch_fade);
 		sc = texture(sand_tex, uvs).rgb;
 		rc = texture(rock_tex, uvr).rgb;
+		mc = texture(moss_tex, puv * 0.82).rgb;
+		mudc = texture(mud_tex, puv * 0.72).rgb;
+		gc = grade_texture(gc);
+		dc = grade_texture(dc);
+		sc = grade_texture(sc);
+		rc = grade_texture(rc);
 	}
 
 	// Triplanar side-projection for rock on steep slopes (only meaningful
@@ -357,11 +393,18 @@ void fragment() {
 	}
 
 	// --- Height-blended albedo under realm tints ---
-	vec3 col = wg * (grass_tint * mix(vec3(1.0), gc, tex_blend));
-	col += wd * (dirt_tint_of(wp) * mix(vec3(1.0), dc, tex_blend));
-	col += ws * (mix(grass_dry, vec3(0.62, 0.55, 0.40), 0.45)
-		* mix(vec3(1.0), sc, tex_blend));
-	col += wrr * (stone_color * mix(vec3(1.0), rc, tex_blend));
+	// Preserve the authored texture's painted shapes. Multiplying dark source
+	// albedo by a dark realm tint crushed its internal contrast into one color.
+	// Keep imported PBR albedo detail visually authoritative. The previous
+	// extra 0.78 multiplier compounded with realm tinting and made valid maps
+	// read as a single color at normal camera distance.
+	float authored_mix = clamp(tex_blend, 0.0, 1.0);
+	vec3 col = wg * mix(grass_tint, gc, authored_mix);
+	col += wd * mix(dirt_tint_of(wp), dc, authored_mix);
+	col = mix(col, grade_texture(mudc) * dirt_color * 2.0, clamp(patches * 0.42, 0.0, 0.48));
+	col += ws * mix(mix(grass_dry, vec3(0.62, 0.55, 0.40), 0.45),
+		sc, authored_mix);
+	col += wrr * mix(stone_color, rc, authored_mix);
 
 	// Pebble speckle
 	vec2 cell = floor(wp * tile_scale * 14.0);
@@ -374,15 +417,41 @@ void fragment() {
 	float macro_var = fbm(wp * macro_variation_scale + vec2(17.3, 41.9));
 	float macro_boost = (macro_var - 0.5) * 2.0 * macro_variation_strength;
 	col *= (1.0 + macro_boost);
+	// Broad overlapping mineral/soil veins prevent the ground reading as a
+	// single flat wash while retaining soft, natural transitions.
+	float vein_a = fbm(wp * 0.041 + vec2(73.1, 14.8));
+	float vein_b = fbm(rot2(0.73) * wp * 0.067 + vec2(9.2, 48.6));
+	float soil_vein = smoothstep(0.48, 0.76, vein_a * 0.62 + vein_b * 0.38);
+	vec3 vein_tint = mix(grass_tint * 0.88, dirt_color * 1.06,
+		clamp(patches + sand_mask * 0.35, 0.0, 1.0));
+	col = mix(col, col * 0.78 + vein_tint * 0.22,
+		soil_vein * macro_breakup_strength * (1.0 - wr) * 0.36);
+	// Exposed earth islands provide a readable large-scale material change;
+	// their feathered noise edge avoids painted circles or hard tile borders.
+	float earth_field = fbm(wp * 0.052 + vec2(26.4, 83.1));
+	earth_field = earth_field * 0.68 + vein_b * 0.32;
+	float exposed_earth = smoothstep(0.54, 0.69, earth_field)
+		* dirt_amount * flatness * (1.0 - wr);
+	vec3 earth_col = mix(dirt_tint_of(wp), dc, authored_mix);
+	col = mix(col, earth_col, exposed_earth * 0.72);
 
 	float realm_field = fbm(wp * 0.024 + vec2(31.7, 11.4));
 	float moisture_field = fbm(wp * 0.080 + vec2(8.3, 19.1));
-	float moisture_mask = smoothstep(0.44, 0.80, moisture_field);
+	float moisture_mask = smoothstep(0.34, 0.70, moisture_field);
 	vec3 tint_mix = mix(vec3(1.0), realm_tint, realm_tint_strength);
 	col *= tint_mix;
-	float moss_mask = moss_strength * mix(0.35, 1.0, moisture_strength)
+	// A restrained local-contrast lift keeps grass, soil, and sand grain
+	// readable under fog/ambient lighting without changing their base hue.
+	vec3 texture_lift = mix(vec3(1.0), smoothstep(vec3(0.16), vec3(0.86),
+		col) * 1.12, clamp(tex_blend, 0.0, 1.0));
+	col *= texture_lift;
+	float moss_mask = moss_strength * mix(0.48, 1.0, moisture_strength)
 		* moisture_mask * (1.0 - wr) * flatness;
-	col = mix(col, moss_color * (0.78 + realm_field * 0.22), clamp(moss_mask, 0.0, 1.0));
+	// Preserve some grass texture inside the moss rather than replacing it with
+	// a flat green swatch; this gives moss visible organic breakup on mobile.
+	vec3 moss_surface = mix(moss_color, grade_texture(mc) * moss_color * 1.65, 0.58)
+		* (0.82 + realm_field * 0.24);
+	col = mix(col, moss_surface, clamp(moss_mask * 1.15, 0.0, 0.82));
 	float wet_response = moisture_strength * moisture_mask * (1.0 - wr) * 0.18;
 	col = mix(col, col * 0.90 + moss_color * 0.04, clamp(wet_response, 0.0, 1.0));
 	ALBEDO = col;
@@ -400,6 +469,10 @@ void fragment() {
 	float r_out = (wg * rg + wd * rd + ws * rs + wrr * rk) * roughness;
 	r_out *= mix(1.0, 0.82, wr);
 	r_out *= mix(1.0, 0.78, clamp(moisture_strength * moisture_mask, 0.0, 1.0));
+	// Authored moss and mud surfaces carry a distinct wet response instead of
+	// relying on color alone; keep the effect bounded for mobile readability.
+	r_out = mix(r_out, 0.58, clamp(moss_mask * 0.30, 0.0, 0.30));
+	r_out = mix(r_out, 0.46, clamp(patches * 0.24, 0.0, 0.24));
 
 	// Per-layer specular tuning (v4): rock a touch glossier, grass matte
 	SPECULAR = mix(0.42, 0.62, wrr) - wg * 0.06;
@@ -443,8 +516,15 @@ void fragment() {
 	AO = mix(0.80, 1.0, cav) * (1.0 - layer_cav * 0.18);
 
 	float grain = hash21(floor(world_pos.xz * 110.0));
-	ALBEDO *= mix(1.0, 0.95 + grain * 0.09, close_fade);
+	float grain_contrast = (grain - 0.5) * micro_grain_strength;
+	ALBEDO *= 1.0 + grain_contrast * close_fade;
 	ROUGHNESS = clamp(r_out * mix(0.96, 1.03, grain), 0.0, 1.0);
+	// Persistent dampness gives wet realms patchy material response even when
+	// it is not actively raining; it changes roughness, not gameplay geometry.
+	float damp_sheen = moisture_strength * moisture_mask * flatness
+		* (1.0 - wr) * puddle_sheen_strength;
+	ROUGHNESS = mix(ROUGHNESS, min(ROUGHNESS, 0.46), damp_sheen);
+	SPECULAR = mix(SPECULAR, 0.68, damp_sheen);
 
 	// --- Rain wetting + puddle accumulation (v4) ---
 	float wet = clamp(world_rain_level, 0.0, 1.0);

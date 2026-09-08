@@ -26,6 +26,8 @@ func interact() -> void:
             handler.open_checkpoint()
         "dungeon":
             handler.toggle_dungeon()
+        "dungeon_exit":
+            handler.toggle_dungeon()
 
 func mark_opened() -> void:
     opened = true

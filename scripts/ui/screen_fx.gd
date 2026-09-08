@@ -16,10 +16,12 @@ var _chroma := 0.0
 var _death_tween: Tween = null
 var _last_hp: int = 999
 var _world_state: Node = null   # mood source (rain, combat intensity)
+var _motion_scale: float = 1.0
 
 func _ready() -> void:
 	add_to_group("screen_fx")
 	layer = 5
+	_motion_scale = _load_motion_scale()
 	
 	_mat = ShaderMaterial.new()
 	_mat.shader = load("res://assets/shaders/screen_fx.gdshader")
@@ -76,10 +78,27 @@ func _on_defeated() -> void:
 
 # === Public API ===
 func pulse_vignette(strength: float = 0.22) -> void:
-	_pulse = maxf(_pulse, strength)
+	_pulse = maxf(_pulse, strength * _motion_scale)
 
 func punch_chroma(strength: float = 0.8) -> void:
-	_chroma = maxf(_chroma, strength)
+	_chroma = maxf(_chroma, strength * _motion_scale)
+
+func _load_motion_scale() -> float:
+	var config := ConfigFile.new()
+	if config.load(AudioManager.SETTINGS_PATH) != OK:
+		return 1.0
+	match str(config.get_value("gameplay", "motion_feedback", "full")):
+		"off": return 0.0
+		"reduced": return 0.35
+		"mobile": return 0.72
+		_: return 1.0
+
+func set_motion_feedback(mode: String) -> void:
+	match mode:
+		"off": _motion_scale = 0.0
+		"reduced": _motion_scale = 0.35
+		"mobile": _motion_scale = 0.72
+		_: _motion_scale = 1.0
 
 func reset() -> void:
 	_vignette_level = 0.0

@@ -13,6 +13,8 @@
 [ext_resource type="Texture2D" path="res://assets/textures/stylized/rock/albedo.png" id="11_ra"]
 [ext_resource type="Texture2D" path="res://assets/textures/stylized/rock/normal.png" id="12_rn"]
 [ext_resource type="Texture2D" path="res://assets/textures/stylized/rock/roughness.png" id="13_rr"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/moss/albedo.png" id="14_moss"]
+[ext_resource type="Texture2D" path="res://assets/textures/stylized/mud/albedo.png" id="15_mud"]
 
 [resource]
 render_priority = 0
@@ -26,6 +28,8 @@ shader_parameter/speckle_strength = 0.35
 shader_parameter/uv_world_scale = 0.32
 shader_parameter/tex_blend = 0.74
 shader_parameter/sand_amount = 0.34
+shader_parameter/moss_strength = 0.15
+shader_parameter/moisture_strength = 0.20
 shader_parameter/height_contrast = 1.65
 shader_parameter/pom_mode = 2
 shader_parameter/depth_scale = 0.018
@@ -59,3 +63,5 @@ shader_parameter/sand_rough = ExtResource("10_sr")
 shader_parameter/rock_tex = ExtResource("11_ra")
 shader_parameter/rock_norm = ExtResource("12_rn")
 shader_parameter/rock_rough = ExtResource("13_rr")
+shader_parameter/moss_tex = ExtResource("14_moss")
+shader_parameter/mud_tex = ExtResource("15_mud")

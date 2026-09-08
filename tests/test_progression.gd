@@ -80,6 +80,14 @@ func _run() -> void:
 	if str(gs.active_trail_color) != "73f2d9":
 		failures += 1
 		print("FAIL: trail color not equipped")
+	var cosmetic_ledger: Array[Dictionary] = gs.get_purchase_ledger()
+	if cosmetic_ledger.is_empty() or str(cosmetic_ledger[-1].get("currency", "")) != "diamonds":
+		failures += 1
+		print("FAIL: cosmetic purchase missing diamond ledger entry")
+	var pending_sync: Array[Dictionary] = gs.get_pending_cloud_intents()
+	if pending_sync.is_empty() or str(pending_sync[-1].get("action", "")) != "purchase_cosmetic":
+		failures += 1
+		print("FAIL: cosmetic purchase missing cloud intent")
 	if gs.purchase_cosmetic("trail_aurora", 4, "trail", "73f2d9") != true:
 		pass  # re-purchase is a no-op success by contract
 	gs.save_game()
@@ -91,6 +99,12 @@ func _run() -> void:
 	if str(gs.active_trail_color) != "73f2d9":
 		failures += 1
 		print("FAIL: active trail lost across load")
+	if gs.get_purchase_ledger().is_empty() or str(gs.get_purchase_ledger()[-1].get("currency", "")) != "diamonds":
+		failures += 1
+		print("FAIL: cosmetic ledger lost across load")
+	if gs.get_pending_cloud_intents().is_empty():
+		failures += 1
+		print("FAIL: cloud intent lost across load")
 
 	# --- Boss first-kill marking ---
 	if not gs.mark_boss_killed("boss_a"):

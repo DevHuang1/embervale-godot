@@ -19,6 +19,23 @@ class_name CharacterRigLoader
 ## reparent under the matching bone after the rig mounts.
 
 const MODEL_BASE_PATH := "res://assets/models/"
+## Realm boss silhouettes live in a dedicated subdirectory so they don't
+## clutter the top-level model list. _any_model falls back here so the
+## authored GLBs actually resolve for BiomeBoss profiles.
+const BOSS_VARIANT_DIR := "boss_variants/"
+const EXTERNAL_MODEL_PATHS := {
+	"npc_human": "res://assets/models/kenney_mini_dungeon/Models/character-human.fbx",
+	"npc_orc": "res://assets/models/kenney_mini_dungeon/Models/character-orc.fbx",
+	"merchant": "res://assets/models/kenney_mini_dungeon/Models/character-human.fbx",
+	"craftsman": "res://assets/models/kenney_mini_dungeon/Models/character-human.fbx",
+	"orc_brute": "res://assets/models/kenney_mini_dungeon/Models/character-orc.fbx",
+	"enemy_thorn_charger": "res://assets/models/enemies/quaternius/Rat.fbx",
+	"enemy_mire_stalker": "res://assets/models/enemies/quaternius/Frog.fbx",
+	"enemy_spore_weaver": "res://assets/models/enemies/quaternius/Spider.fbx",
+	"enemy_ember_warden": "res://assets/models/enemies/quaternius/Wasp.fbx",
+	"enemy_relic_leech": "res://assets/models/enemies/quaternius/Snake_angry.fbx",
+	"boss_thornwarden": "res://assets/models/boss_variants/boss_bramblewood_thornregent.glb",
+}
 
 # Model registry (populated by try_if_wire on first load)
 static var _loaded : Dictionary = {}   # profile → PackedScene or null
@@ -68,29 +85,45 @@ static func try_if_wire(entity: Node3D, profile: String) -> bool:
 	var rig: Node3D = packed.instantiate()
 	rig.name = "AuthoredRig"
 	rig_parent.add_child(rig)
+	# Mobile LOD: Blender exports three progressive silhouettes named
+	# _LOD0/_LOD1/_LOD2; the loader assigns near/mid/far camera-distance
+	# visibility ranges so only the budget-fit silhouette stays in front of
+	# the lens. Applied to every mounted rig so the contract never drifts.
+	_apply_mobile_lod_ranges(rig)
 
 	# Legacy FBX armatures frequently export at a different scale than the
 	# procedural model they replace (Blender cm-unit exports come in huge).
 	# `authored_rig_height` (>0, world units) normalises the mounted model to
 	# the host's authored height; 0 keeps the authored .glb size untouched.
-	var target_height := float(entity.get("authored_rig_height"))
+	# Not every entity opts in (bosses don't export it) — read null-safe so a
+	# missing/empty value keeps the authored size instead of choking float().
+	var raw_height: Variant = entity.get("authored_rig_height")
+	var target_height: float = 0.0
+	if raw_height is float or raw_height is int:
+		target_height = float(raw_height)
 	if target_height > 0.01:
 		_normalize_height(rig, target_height)
 
 	# A drop-in authored model replaces the procedural silhouette. Entities
-	# opt in via `replace_procedural_on_mount`; bosses (which layer FX onto
-	# their authored frame) stay fully untouched.
-	if bool(entity.get("replace_procedural_on_mount")):
+	# opt in via `replace_procedural_on_mount`; boss profiles (identified by
+	# the boss_variants/ path or a `boss_` profile name) always replace it so
+	# their procedural geometry never double-renders next to the authored
+	# model. Read null-safe: an entity that never exports the flag must not
+	# fail the mount.
+	var raw_replace: Variant = entity.get("replace_procedural_on_mount")
+	var boss_profile := path.contains(BOSS_VARIANT_DIR) \
+		or str(profile).begins_with("boss_")
+	if (raw_replace is bool and bool(raw_replace)) or boss_profile:
 		_hide_replaced_visuals(rig_parent, rig)
 
 	# Wire AnimTreeBridge so gameplay cues can drive the imported
 	# AnimationPlayer. The bridge binds lazily — hosts that never ask for a
 	# cue keep using the procedural animator untouched.
-	var bridge := entity.get_node_or_null("AnimBridge") as AnimTreeBridge
+	var bridge := rig.get_node_or_null("AnimBridge") as AnimTreeBridge
 	if bridge == null:
 		bridge = AnimTreeBridge.new()
 		bridge.name = "AnimBridge"
-		entity.add_child(bridge)
+		rig.add_child(bridge)
 	bridge.bind(rig)
 	entity.set_meta("anim_bridge", bridge)
 
@@ -109,6 +142,26 @@ static func _normalize_height(rig: Node3D, target_height: float) -> void:
 		return
 	rig.scale *= Vector3.ONE * (target_height / h)
 
+## Mobile LOD visibility ranges for the three progressive silhouettes the
+## exporter ships (near = _LOD0, mid = _LOD1, far = _LOD2). Near silhouettes
+## unload past 20 m, mid covers 18-36 m, far starts at 34 m with no upper
+## bound. These numbers are the single tunable source the authored-asset
+## test contract (tests/test_matriarch_authored_asset.gd) asserts against.
+static func _apply_mobile_lod_ranges(rig: Node3D) -> void:
+	for mi in rig.find_children("*", "MeshInstance3D", true, false):
+		var mesh := mi as MeshInstance3D
+		if mesh == null:
+			continue
+		var mesh_name := str(mesh.name).to_upper()
+		if mesh_name.ends_with("_LOD0"):
+			mesh.visibility_range_end = 20.0
+		elif mesh_name.ends_with("_LOD1"):
+			mesh.visibility_range_begin = 18.0
+			mesh.visibility_range_end = 36.0
+		elif mesh_name.ends_with("_LOD2"):
+			mesh.visibility_range_begin = 34.0
+			mesh.visibility_range_end = 0.0
+
 static func _world_height(root: Node3D) -> float:
 	var box := AABB()
 	var started := false
@@ -125,6 +178,34 @@ static func _world_height(root: Node3D) -> float:
 			else:
 				box = box.expand(wp)
 	return box.size.y if started else 0.0
+
+## Report authored clip coverage without making imported assets mandatory.
+## Animation names vary between packs, so matching is token-based and the
+## procedural animator remains the fallback for every missing category.
+static func animation_coverage(rig: Node3D) -> Dictionary:
+	var names: Array[String] = []
+	for node in rig.find_children("*", "AnimationPlayer", true, false):
+		var player := node as AnimationPlayer
+		if player == null:
+			continue
+		for animation_name in player.get_animation_list():
+			names.append(str(animation_name).to_lower())
+	var coverage := {
+		"idle": _has_animation_token(names, ["idle", "stand"]),
+		"move": _has_animation_token(names, ["walk", "run", "move"]),
+		"attack": _has_animation_token(names, ["attack", "swing", "cast"]),
+		"hit": _has_animation_token(names, ["hit", "hurt", "stagger"]),
+		"death": _has_animation_token(names, ["death", "die", "dead"]),
+	}
+	coverage["authored_ready"] = bool(coverage["idle"]) and bool(coverage["move"])
+	return coverage
+
+static func _has_animation_token(names: Array[String], tokens: Array[String]) -> bool:
+	for name in names:
+		for token in tokens:
+			if name.contains(token):
+				return true
+	return false
 
 ## Hide the procedural silhouette the mounted rig replaces. Weapon/armor
 ## meshes riding AttachmentSockets are preserved (they re-parent onto the
@@ -243,11 +324,18 @@ static func _find_socket_recursive(node: Node, socket_id: String) -> Node3D:
 static func preload_all() -> void:
 	var profiles := [
 		"hero", "hushling", "fenling", "moonfen_fenling",
-		"boss_matriarch", "boss_whispergrove_rootwarden", "boss_whispergrove_dewseer",
+		"npc_human", "npc_orc", "merchant", "craftsman", "orc_brute",
+		"boss_matriarch",
+		# All ten realm-authorized boss silhouettes (boss_variants/).
+		"boss_whispergrove_rootwarden", "boss_whispergrove_dewseer",
+		"boss_bramblewood_thornregent", "boss_bramblewood_briarwidow",
+		"boss_mistfen_veilmother", "boss_mistfen_drownedsage",
+		"boss_heartwood_cinderhart", "boss_heartwood_ashcolossus",
+		"boss_moonfen_tideoracle", "boss_moonfen_lunarleviathan",
 	]
 	for p in profiles:
-		var path: String = MODEL_BASE_PATH + p + ".glb"
-		if ResourceLoader.exists(path):
+		var path: String = _any_model(p)
+		if not path.is_empty():
 			_loaded[p] = ResourceLoader.load(path, "PackedScene", ResourceLoader.CACHE_MODE_REUSE)
 		else:
 			_loaded[p] = null
@@ -256,9 +344,32 @@ static func preload_all() -> void:
 ## over a legacy .fbx; returns "" when neither is present. Used by tests and
 ## by try_if_wire callers that need the exact mounted path.
 static func _any_model(profile: String) -> String:
+	var semantic_id: String = str({
+		"npc_human": "kenney_mini_dungeon_character_human",
+		"npc_orc": "kenney_mini_dungeon_character_orc",
+		"merchant": "kenney_mini_dungeon_character_human",
+		"craftsman": "kenney_mini_dungeon_character_human",
+		"orc_brute": "kenney_mini_dungeon_character_orc",
+	}.get(profile, ""))
+	var main_loop: MainLoop = Engine.get_main_loop()
+	var root: Node = null
+	if main_loop is SceneTree:
+		root = (main_loop as SceneTree).root
+	var game_state: Node = root.get_node_or_null("/root/GameState") if root != null else null
+	if game_state != null and not str(semantic_id).is_empty():
+		var resolved := ContentRegistry.resolve_asset_path(game_state.get_content_registry(),
+			"npc", str(semantic_id), "")
+		if not resolved.is_empty():
+			return resolved
+	var external_path := str(EXTERNAL_MODEL_PATHS.get(profile, ""))
+	if not external_path.is_empty() and ResourceLoader.exists(external_path):
+		return external_path
 	for ext in ["glb", "fbx"]:
 		var path: String = MODEL_BASE_PATH + profile + "." + ext
 		if ResourceLoader.exists(path):
 			return path
+		# Realm boss variants live in res://assets/models/boss_variants/.
+		var variant_path: String = MODEL_BASE_PATH + BOSS_VARIANT_DIR + profile + "." + ext
+		if ResourceLoader.exists(variant_path):
+			return variant_path
 	return ""
-

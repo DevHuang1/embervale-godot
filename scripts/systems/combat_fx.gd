@@ -8,7 +8,6 @@ class_name CombatFx
 
 static var _pool: Array[GPUParticles3D] = []
 static var _quad_mesh: QuadMesh = null
-static var _hit_stop_token := 0
 
 # === Centralized quality/budget center ===
 # Every pooled emitter, ribbon trail and transient light reads live budget
@@ -20,6 +19,16 @@ static var _hit_stop_token := 0
 static var _qual_scaler: QualityScaler = null
 static var _transient_lights: Array[Node] = []
 static var _vfx_sprite_cache: Dictionary = {}
+static var _burst_spawn_count: int = 0
+static var _light_spawn_count: int = 0
+static var _visual_nodes: Array[Dictionary] = []
+static var _particle_material_cache: Dictionary = {}
+static var _particle_owner_ids: Dictionary = {}
+static var _visual_spawn_count: int = 0
+static var _visual_drop_count: int = 0
+static var _mobile_prewarmed := false
+const MOBILE_VISUAL_LIMIT := 10
+const DESKTOP_VISUAL_LIMIT := 36
 
 static func _quality() -> QualityScaler:
 	if _qual_scaler == null or not is_instance_valid(_qual_scaler):
@@ -37,7 +46,10 @@ static func _density() -> float:
 
 ## Density-scaled emitter amount with a hard floor so LOW hits still read.
 static func _budget_amount(amount: int) -> int:
-	return maxi(3, int(round(float(amount) * _density())))
+	var scaled := maxi(3, int(round(float(amount) * _density())))
+	# Keep transparent particle work bounded on touch GPUs while retaining the
+	# same gameplay event and timing.
+	return mini(scaled, 8) if _is_mobile_runtime() else scaled
 
 ## Pooled emitter cap (QualityScaler.vfx_pool_limit; 24 HIGH, 10 LOW).
 static func _pool_limit() -> int:
@@ -53,6 +65,131 @@ static func _trail_limit() -> int:
 static func _transient_budget() -> int:
 	var q := _quality()
 	return q.transient_light_budget if q else 0
+
+static func _visual_limit() -> int:
+	return MOBILE_VISUAL_LIMIT if _is_mobile_runtime() else DESKTOP_VISUAL_LIMIT
+
+static func _is_mobile_runtime() -> bool:
+	return OS.has_feature("mobile") or OS.get_name() in ["Android", "iOS"]
+
+static func _cleanup_visual_nodes() -> void:
+	var alive: Array[Dictionary] = []
+	for entry in _visual_nodes:
+		var raw_node = entry.get("node")
+		if is_instance_valid(raw_node):
+			alive.append(entry)
+	_visual_nodes = alive
+
+static func _reserve_visual_slot(essential: bool = false) -> bool:
+	_cleanup_visual_nodes()
+	var limit := _visual_limit()
+	if _visual_nodes.size() < limit:
+		return true
+	# Essential telegraphs may replace the oldest visual cue, but decorative
+	# effects are dropped before they can create an allocation spike.
+	if not essential:
+		_visual_drop_count += 1
+		return false
+	var oldest: Dictionary = _visual_nodes.pop_front()
+	var old_node = oldest.get("node")
+	if is_instance_valid(old_node):
+		(old_node as Node).queue_free()
+	_visual_drop_count += 1
+	return true
+
+static func _register_visual(node: Node, owner: Node = null) -> void:
+	if node == null:
+		return
+	_visual_nodes.append({"node": node,
+		"owner_id": owner.get_instance_id() if owner != null else 0,
+		"created_msec": Time.get_ticks_msec()})
+	_visual_spawn_count += 1
+
+static func cancel_context_effects(owner: Node) -> void:
+	if owner == null:
+		return
+	var owner_id := owner.get_instance_id()
+	for particle in _pool:
+		if not is_instance_valid(particle):
+			continue
+		if int(_particle_owner_ids.get(particle.get_instance_id(), 0)) != owner_id:
+			continue
+		particle.emitting = false
+		_particle_owner_ids.erase(particle.get_instance_id())
+	for entry in _visual_nodes:
+		if int(entry.get("owner_id", 0)) != owner_id:
+			continue
+		var raw_node = entry.get("node")
+		if is_instance_valid(raw_node):
+			(raw_node as Node).queue_free()
+	_cleanup_visual_nodes()
+
+static func _burst_material(color: Color, speed: float, stretch: bool,
+		gravity: Vector3) -> ParticleProcessMaterial:
+	var key := "%s|%.2f|%s|%s" % [color.to_html(), speed, str(stretch), str(gravity)]
+	if _particle_material_cache.has(key):
+		return _particle_material_cache[key] as ParticleProcessMaterial
+	var mat := ParticleProcessMaterial.new()
+	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	mat.emission_sphere_radius = 0.17
+	mat.direction = Vector3.UP
+	mat.spread = 70.0 if not stretch else 34.0
+	mat.initial_velocity_min = speed * 0.4
+	mat.initial_velocity_max = speed
+	mat.gravity = gravity
+	mat.scale_min = 0.75
+	mat.scale_max = 1.5
+	mat.color = color
+	mat.color_ramp = _fade_ramp(color)
+	_particle_material_cache[key] = mat
+	return mat
+
+static func performance_report() -> Dictionary:
+	_transient_lights = _transient_lights.filter(func(n): return is_instance_valid(n))
+	_pool = _pool.filter(func(p): return is_instance_valid(p))
+	_cleanup_particle_owners()
+	_cleanup_visual_nodes()
+	return {"active_particles": _pool.size(), "active_lights": _transient_lights.size(),
+		"active_visual_nodes": _visual_nodes.size(),
+		"burst_spawns": _burst_spawn_count, "light_spawns": _light_spawn_count,
+		"visual_spawns": _visual_spawn_count, "visual_drops": _visual_drop_count,
+		"particle_material_cache": _particle_material_cache.size()}
+
+## Move the first particle/material setup out of the skill button callback.
+## This warm-up touches no gameplay, timer, damage, or time-scale state.
+static func prewarm_mobile(context: Node) -> void:
+	if not _is_mobile_runtime() or context == null or not context.is_inside_tree():
+		return
+	if _mobile_prewarmed:
+		return
+	_mobile_prewarmed = true
+	for texture_name in ["spark", "impact_star", "ring"]:
+		sprite_texture(texture_name)
+	radial_glow_texture()
+	_get_quad_mesh()
+	_burst_material(Color(1.0, 0.72, 0.24, 0.9), 4.0, false, Vector3(0, -3.5, 0))
+	_burst_material(Color(0.72, 0.60, 1.0, 0.9), 4.0, false, Vector3(0, -3.5, 0))
+	_burst_material(Color(0.62, 0.85, 0.45, 0.8), 3.0, false, Vector3.ZERO)
+	var warm_count := mini(_pool_limit(), 6)
+	while _pool.size() < warm_count:
+		_acquire_particle(context)
+
+static func active_effect_counts() -> Dictionary:
+	clear_expired_effects()
+	return {"particles": _pool.size(), "transient_lights": _transient_lights.size(),
+		"visual_nodes": _visual_nodes.size(), "trail_ribbons": _trail_ribbons.size()}
+
+static func clear_expired_effects() -> void:
+	_pool = _pool.filter(func(p): return is_instance_valid(p))
+	_cleanup_particle_owners()
+	_transient_lights = _transient_lights.filter(func(n): return is_instance_valid(n))
+	_cleanup_visual_nodes()
+	_trail_ribbons = _trail_ribbons.filter(func(n): return is_instance_valid(n))
+
+static func _cleanup_particle_owners() -> void:
+	for id in _particle_owner_ids.keys():
+		if not is_instance_valid(instance_from_id(int(id))):
+			_particle_owner_ids.erase(id)
 
 ## Renderer-neutral sprite lookup for the generated vfx set (spark, smoke,
 ## crescent, impact_star, distortion, ring). Kept in a static cache.
@@ -72,7 +209,7 @@ static func sprite_texture(name: String) -> Texture2D:
 static func spawn_impact_light(context: Node, pos: Vector3,
 		color: Color = Color(1.0, 0.9, 0.7), energy: float = 2.2,
 		range_radius: float = 4.0, duration: float = 0.22) -> OmniLight3D:
-	if context == null or not context.is_inside_tree():
+	if context == null or not context.is_inside_tree() or _is_mobile_runtime():
 		return null
 	var budget := _transient_budget()
 	if budget <= 0:
@@ -82,6 +219,7 @@ static func spawn_impact_light(context: Node, pos: Vector3,
 	if _transient_lights.size() >= budget:
 		return null
 	var light := OmniLight3D.new()
+	_light_spawn_count += 1
 	light.name = "ImpactLight"
 	light.light_color = color
 	light.light_energy = energy
@@ -101,15 +239,9 @@ static func spawn_impact_light(context: Node, pos: Vector3,
 static func hit_stop(context: Node, duration: float = 0.06, time_scale: float = 0.05) -> void:
 	if context == null or not context.is_inside_tree():
 		return
-	if Engine.time_scale < 0.99:
-		return  # kill-cam or another stop owns the clock
-	_hit_stop_token += 1
-	var token := _hit_stop_token
-	Engine.time_scale = time_scale
-	var timer := context.get_tree().create_timer(duration, true, false, true)
-	timer.timeout.connect(func():
-		if token == _hit_stop_token:
-			Engine.time_scale = 1.0)
+	# Retain the legacy API for callers, but never touch Engine.time_scale.
+	# Camera shake/FOV/chroma provide impact feedback without freezing the
+	# simulation or making a leaked lease look like recurring mobile lag.
 
 # === Pooled GPU burst ===
 static func spawn_burst(context: Node, pos: Vector3, color: Color, amount: int = 16,
@@ -117,6 +249,7 @@ static func spawn_burst(context: Node, pos: Vector3, color: Color, amount: int =
 		stretch: bool = false, gravity: Vector3 = Vector3(0, -3.5, 0)) -> void:
 	if context == null or not context.is_inside_tree():
 		return
+	_burst_spawn_count += 1
 	var fx := _acquire_particle(context)
 	fx.amount = _budget_amount(amount)
 	fx.lifetime = lifetime
@@ -128,19 +261,7 @@ static func spawn_burst(context: Node, pos: Vector3, color: Color, amount: int =
 		fx.transform_align = GPUParticles3D.TRANSFORM_ALIGN_Z_BILLBOARD_Y_TO_VELOCITY
 	else:
 		fx.transform_align = GPUParticles3D.TRANSFORM_ALIGN_DISABLED
-	var mat := ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	mat.emission_sphere_radius = 0.17
-	mat.direction = Vector3.UP
-	mat.spread = 70.0 if not stretch else 34.0
-	mat.initial_velocity_min = speed * 0.4
-	mat.initial_velocity_max = speed
-	mat.gravity = gravity
-	mat.scale_min = 0.75
-	mat.scale_max = 1.5
-	mat.color = color
-	mat.color_ramp = _fade_ramp(color)
-	fx.process_material = mat
+	fx.process_material = _burst_material(color, speed, stretch, gravity)
 	fx.global_position = pos
 	fx.restart()
 	fx.emitting = true
@@ -174,6 +295,11 @@ static func spawn_slash(context: Node, pos: Vector3,
 		color: Color = Color(1.0, 0.92, 0.7, 0.95)) -> void:
 	if context == null or not context.is_inside_tree():
 		return
+	if _is_mobile_runtime():
+		spawn_stretched_burst(context, pos, color, 6, 4.0, 0.18)
+		return
+	if not _reserve_visual_slot():
+		return
 	var quad := QuadMesh.new()
 	quad.size = Vector2(1.8, 0.26)
 	var material := StandardMaterial3D.new()
@@ -188,6 +314,7 @@ static func spawn_slash(context: Node, pos: Vector3,
 	mi.mesh = quad
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_fx_root(context).add_child(mi)
+	_register_visual(mi, context)
 	mi.global_position = pos
 	# Face the camera so the arc always reads, then tilt it like a swing
 	var cam := context.get_viewport().get_camera_3d()
@@ -210,6 +337,8 @@ static func spawn_telegraph(context: Node, pos: Vector3,
 		color: Color = Color(1.0, 0.84, 0.47),
 		protected: bool = false) -> MeshInstance3D:
 	if context == null or not context.is_inside_tree():
+		return null
+	if not _reserve_visual_slot(true):
 		return null
 	var quad := QuadMesh.new()
 	quad.size = Vector2(0.85, 0.85)
@@ -234,6 +363,7 @@ static func spawn_telegraph(context: Node, pos: Vector3,
 	mi.name = "TelegraphProtected" if protected else "Telegraph"
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_fx_root(context).add_child(mi)
+	_register_visual(mi, context)
 	mi.global_position = pos
 	var tween := mi.create_tween()
 	tween.set_parallel(true)
@@ -254,6 +384,8 @@ static func spawn_ground_telegraph(context: Node, pos: Vector3, radius: float,
 		duration: float = 0.6, thickness: float = 0.14) -> MeshInstance3D:
 	if context == null or not context.is_inside_tree():
 		return null
+	if not _reserve_visual_slot(true):
+		return null
 	var torus := TorusMesh.new()
 	torus.inner_radius = radius
 	torus.outer_radius = radius + thickness
@@ -270,8 +402,20 @@ static func spawn_ground_telegraph(context: Node, pos: Vector3, radius: float,
 	mi.mesh = torus
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_fx_root(context).add_child(mi)
+	_register_visual(mi, context)
 	mi.global_position = pos + Vector3(0, 0.10, 0)
 	mi.rotation.x = -PI / 2.0
+	if _color_safe_telegraphs_enabled():
+		var cue := Label3D.new()
+		cue.name = "TelegraphDangerCue"
+		cue.text = "DANGER"
+		cue.font_size = 18
+		cue.modulate = Color(1.0, 0.96, 0.86, 0.92)
+		cue.outline_size = 8
+		cue.outline_modulate = Color(0.04, 0.03, 0.02, 0.98)
+		cue.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		cue.position = Vector3(0, 0.18, 0)
+		mi.add_child(cue)
 	# Breathe without blinking: a gentle pulse that never passes visual
 	# blackout, then a clean fade + free at the end of the warning window.
 	var pulse := mi.create_tween().set_loops()
@@ -286,11 +430,24 @@ static func spawn_ground_telegraph(context: Node, pos: Vector3, radius: float,
 	fade.chain().tween_callback(mi.queue_free)
 	return mi
 
+static func _color_safe_telegraphs_enabled() -> bool:
+	var config := ConfigFile.new()
+	var enabled := false
+	if config.load(AudioManager.SETTINGS_PATH) == OK:
+		enabled = bool(config.get_value("accessibility", "color_safe_telegraphs", false))
+	if not enabled and config.load("user://settings.cfg") == OK:
+		enabled = bool(config.get_value("accessibility", "color_safe_telegraphs", false))
+	return enabled
+
 ## Weapon trail ribbon: a slash gradient quad that sweeps wide and fades at
 ## the impact frame of melee hits.
 static func spawn_arc_trail(context: Node, pos: Vector3,
 		color: Color = Color(1.0, 0.92, 0.7, 0.95)) -> void:
 	if context == null or not context.is_inside_tree():
+		return
+	if _is_mobile_runtime():
+		return
+	if not _reserve_visual_slot():
 		return
 	var quad := QuadMesh.new()
 	quad.size = Vector2(2.0, 0.6)
@@ -306,6 +463,7 @@ static func spawn_arc_trail(context: Node, pos: Vector3,
 	mi.mesh = quad
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_fx_root(context).add_child(mi)
+	_register_visual(mi, context)
 	mi.global_position = pos
 	var cam := context.get_viewport().get_camera_3d()
 	if cam:
@@ -336,6 +494,10 @@ static func _track_trail_ribbon(node: Node3D) -> void:
 static func spawn_skill_ribbon(context: Node, from_pos: Vector3, to_pos: Vector3,
 		color: Color, width: float = 0.34, duration: float = 0.28) -> void:
 	if context == null or not context.is_inside_tree():
+		return
+	if _is_mobile_runtime():
+		return
+	if not _reserve_visual_slot():
 		return
 	var travel := to_pos - from_pos
 	var length := travel.length()
@@ -376,6 +538,7 @@ static func spawn_skill_ribbon(context: Node, from_pos: Vector3, to_pos: Vector3
 	ribbon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	ribbon.extra_cull_margin = 2.0
 	_fx_root(context).add_child(ribbon)
+	_register_visual(ribbon, context)
 	ribbon.global_position = (from_pos + to_pos) * 0.5
 	ribbon.scale = Vector3(0.82, 0.82, 0.82)
 	_track_trail_ribbon(ribbon)
@@ -388,6 +551,8 @@ static func spawn_skill_ribbon(context: Node, from_pos: Vector3, to_pos: Vector3
 	tween.chain().tween_callback(ribbon.queue_free)
 
 	# A narrower white-hot core improves readability without another particle pass.
+	if not _reserve_visual_slot():
+		return
 	var core := MeshInstance3D.new()
 	core.name = "SkillRibbonCore"
 	core.mesh = ribbon_mesh.duplicate()
@@ -397,6 +562,7 @@ static func spawn_skill_ribbon(context: Node, from_pos: Vector3, to_pos: Vector3
 	core.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	core.scale = Vector3(0.72, 0.72, 0.72)
 	_fx_root(context).add_child(core)
+	_register_visual(core, context)
 	core.global_position = (from_pos + to_pos) * 0.5
 	_track_trail_ribbon(core)
 	var core_tween := core.create_tween()
@@ -411,14 +577,16 @@ static func spawn_vibrant_trail(context: Node, from_pos: Vector3, to_pos: Vector
 		primary: Color, secondary: Color, segments: int = 6) -> void:
 	if context == null or not context.is_inside_tree():
 		return
-	var count := clampi(segments, 2, 8)
+	# The mobile path keeps the same dash timing and silhouette, but avoids a
+	# per-segment particle/material burst chain that can hitch on touch devices.
+	var count := 2 if _is_mobile_runtime() else clampi(segments, 2, 8)
 	for index in range(count):
 		var t := float(index) / float(maxi(count - 1, 1))
 		var point := from_pos.lerp(to_pos, t)
 		var tint := primary.lerp(secondary, t)
 		spawn_stretched_burst(context, point,
 			Color(tint.r, tint.g, tint.b, 0.82 - t * 0.16), 3, 3.4 + t * 2.4, 0.28)
-		if index % 2 == 0:
+		if not _is_mobile_runtime() and index % 2 == 0:
 			spawn_motes(context, point, Color(secondary.r, secondary.g, secondary.b, 0.48),
 				2, 0.14, 0.34, 1.1)
 
@@ -427,6 +595,13 @@ static func spawn_bolt(context: Node, from_pos: Vector3, to_pos: Vector3,
 		color: Color = Color(0.96, 0.62, 0.22), flight_time: float = 0.28,
 		size: float = 0.3) -> void:
 	if context == null or not context.is_inside_tree():
+		return
+	if _is_mobile_runtime():
+		# Retain a small launch marker without allocating a sphere, ribbon,
+		# material, and tween from the skill callback.
+		spawn_stretched_burst(context, from_pos.lerp(to_pos, 0.5), color, 4, 3.5, 0.20)
+		return
+	if not _reserve_visual_slot():
 		return
 	var mi := MeshInstance3D.new()
 	var sphere := SphereMesh.new()
@@ -444,19 +619,21 @@ static func spawn_bolt(context: Node, from_pos: Vector3, to_pos: Vector3,
 	mi.mesh = sphere
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_fx_root(context).add_child(mi)
+	_register_visual(mi, context)
 	mi.global_position = from_pos
 	spawn_vibrant_trail(context, from_pos, to_pos, color,
 		Color(1.0, 0.96, 0.78, 0.95), 6)
 	spawn_skill_ribbon(context, from_pos, to_pos,
 		Color(color.r, color.g, color.b, minf(color.a + 0.12, 1.0)), size * 0.95, flight_time * 1.15)
 	# Spark trail shed along the flight path
-	var emit_tween := mi.create_tween()
-	emit_tween.tween_method(func(t: float):
-		if not is_instance_valid(mi):
-			return
-		spawn_burst(context, mi.global_position, Color(color.r, color.g, color.b, 0.55),
-			2, 1.6, 0.24, size * 0.42, false, Vector3.ZERO),
-		0.0, 1.0, flight_time)
+	if not _is_mobile_runtime():
+		var emit_tween := mi.create_tween()
+		emit_tween.tween_method(func(t: float):
+			if not is_instance_valid(mi):
+				return
+			spawn_burst(context, mi.global_position, Color(color.r, color.g, color.b, 0.55),
+				2, 1.6, 0.24, size * 0.42, false, Vector3.ZERO),
+			0.0, 1.0, flight_time)
 	var tween := mi.create_tween()
 	tween.tween_property(mi, "global_position", to_pos, flight_time) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
@@ -471,6 +648,10 @@ static func spawn_pillar(context: Node, pos: Vector3, height: float = 2.6,
 		color: Color = Color(0.75, 0.95, 0.55, 0.7), duration: float = 0.6,
 		width: float = 0.9) -> void:
 	if context == null or not context.is_inside_tree():
+		return
+	if _is_mobile_runtime():
+		return
+	if not _reserve_visual_slot():
 		return
 	var quad := QuadMesh.new()
 	quad.size = Vector2(width, height)
@@ -487,6 +668,7 @@ static func spawn_pillar(context: Node, pos: Vector3, height: float = 2.6,
 	mi.mesh = quad
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_fx_root(context).add_child(mi)
+	_register_visual(mi, context)
 	mi.global_position = pos + Vector3(0, height * 0.5, 0)
 	mi.scale = Vector3(0.25, 0.7, 1.0)
 	var tween := mi.create_tween()
@@ -521,24 +703,30 @@ static func spawn_motes(context: Node, pos: Vector3, color: Color,
 		rise_speed: float = 1.6) -> void:
 	if context == null or not context.is_inside_tree():
 		return
+	if _is_mobile_runtime():
+		amount = mini(amount, 6)
 	var fx := _acquire_particle(context)
 	fx.amount = _budget_amount(amount)
 	fx.lifetime = lifetime
 	fx.one_shot = true
 	fx.explosiveness = 0.0   # gentle stream, not a pop
 	fx.local_coords = false
-	var mat := ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	mat.emission_sphere_radius = radius
-	mat.direction = Vector3.UP
-	mat.spread = 18.0
-	mat.initial_velocity_min = rise_speed * 0.6
-	mat.initial_velocity_max = rise_speed
-	mat.gravity = Vector3.ZERO
-	mat.scale_min = 0.45
-	mat.scale_max = 1.0
-	mat.color = color
-	mat.color_ramp = _fade_ramp(color)
+	var key := "motes|%s|%.2f|%.2f" % [color.to_html(), radius, rise_speed]
+	var mat: ParticleProcessMaterial = _particle_material_cache.get(key) as ParticleProcessMaterial
+	if mat == null:
+		mat = ParticleProcessMaterial.new()
+		mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+		mat.emission_sphere_radius = radius
+		mat.direction = Vector3.UP
+		mat.spread = 18.0
+		mat.initial_velocity_min = rise_speed * 0.6
+		mat.initial_velocity_max = rise_speed
+		mat.gravity = Vector3.ZERO
+		mat.scale_min = 0.45
+		mat.scale_max = 1.0
+		mat.color = color
+		mat.color_ramp = _fade_ramp(color)
+		_particle_material_cache[key] = mat
 	fx.process_material = mat
 	fx.global_position = pos
 	fx.restart()
@@ -588,6 +776,13 @@ static func spawn_shockwave(context: Node, pos: Vector3, radius: float = 4.0,
 		color: Color = Color(1.0, 0.84, 0.47, 0.9), duration: float = 0.5) -> void:
 	if context == null or not context.is_inside_tree():
 		return
+	# Mobile skills already retain their readable ring/telegraph. The extra
+	# torus allocates a mesh and tween at the exact impact frame, so omit this
+	# decorative duplicate on touch devices without changing timing or damage.
+	if _is_mobile_runtime():
+		return
+	if not _reserve_visual_slot():
+		return
 	var inner := TorusMesh.new()
 	inner.inner_radius = 0.86
 	inner.outer_radius = 1.0
@@ -602,6 +797,7 @@ static func spawn_shockwave(context: Node, pos: Vector3, radius: float = 4.0,
 	mi.mesh = inner
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_fx_root(context).add_child(mi)
+	_register_visual(mi, context)
 	mi.global_position = pos + Vector3(0, 0.12, 0)
 	mi.scale = Vector3(0.15, 1.0, 0.15)
 	var tween := mi.create_tween()
@@ -619,6 +815,10 @@ static func spawn_charge_glow(context: Node, pos: Vector3,
 		end_scale: float = 1.6) -> MeshInstance3D:
 	if context == null or not context.is_inside_tree():
 		return null
+	if _is_mobile_runtime():
+		return null
+	if not _reserve_visual_slot():
+		return null
 	var mi := MeshInstance3D.new()
 	var sphere := SphereMesh.new()
 	sphere.radius = 0.16
@@ -635,6 +835,7 @@ static func spawn_charge_glow(context: Node, pos: Vector3,
 	mi.mesh = sphere
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_fx_root(context).add_child(mi)
+	_register_visual(mi, context)
 	mi.global_position = pos
 	mi.scale = Vector3.ONE * 0.2
 	var tween := mi.create_tween()
@@ -677,7 +878,7 @@ static func impact(context: Node, shake: float = 0.0, hitstop_duration: float = 
 			rig.add_shake(shake)
 	if hitstop_duration > 0.0:
 		hit_stop(context, hitstop_duration, hitstop_scale)
-	if chroma > 0.0:
+	if chroma > 0.0 and not _is_mobile_runtime():
 		var sfx := _find_screen_fx(context)
 		if sfx and sfx.has_method("punch_chroma"):
 			sfx.punch_chroma(chroma)
@@ -704,19 +905,23 @@ static func spawn_ring(context: Node, pos: Vector3, radius: float, color: Color,
 	fx.one_shot = true
 	fx.explosiveness = 1.0
 	fx.local_coords = false
-	var mat := ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_RING
-	mat.emission_ring_axis = Vector3.UP
-	mat.emission_ring_radius = radius
-	mat.emission_ring_inner_radius = maxf(radius - 0.25, 0.0)
-	mat.emission_ring_height = 0.05
-	mat.initial_velocity_min = 0.0
-	mat.initial_velocity_max = 0.0
-	mat.gravity = Vector3.ZERO
-	mat.scale_min = 0.7
-	mat.scale_max = 1.5
-	mat.color = color
-	mat.color_ramp = _fade_ramp(color)
+	var key := "ring|%s|%.2f" % [color.to_html(), radius]
+	var mat: ParticleProcessMaterial = _particle_material_cache.get(key) as ParticleProcessMaterial
+	if mat == null:
+		mat = ParticleProcessMaterial.new()
+		mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_RING
+		mat.emission_ring_axis = Vector3.UP
+		mat.emission_ring_radius = radius
+		mat.emission_ring_inner_radius = maxf(radius - 0.25, 0.0)
+		mat.emission_ring_height = 0.05
+		mat.initial_velocity_min = 0.0
+		mat.initial_velocity_max = 0.0
+		mat.gravity = Vector3.ZERO
+		mat.scale_min = 0.7
+		mat.scale_max = 1.5
+		mat.color = color
+		mat.color_ramp = _fade_ramp(color)
+		_particle_material_cache[key] = mat
 	fx.process_material = mat
 	fx.global_position = pos + Vector3(0, 0.08, 0)
 	fx.restart()
@@ -727,6 +932,13 @@ static func spawn_ring(context: Node, pos: Vector3, radius: float, color: Color,
 static func spawn_core_flash(context: Node, pos: Vector3,
 		color: Color = Color(1.0, 0.97, 0.90), size: float = 1.6) -> void:
 	if context == null or not context.is_inside_tree():
+		return
+	if _is_mobile_runtime():
+		# A bounded particle pop replaces the mesh/material/tween flash on
+		# mobile. The impact frame remains readable without a render allocation.
+		spawn_burst(context, pos, color, 4, 3.0, 0.18, minf(size * 0.10, 0.18))
+		return
+	if not _reserve_visual_slot():
 		return
 	var quad := QuadMesh.new()
 	quad.size = Vector2(size, size)
@@ -743,6 +955,7 @@ static func spawn_core_flash(context: Node, pos: Vector3,
 	mi.mesh = quad
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_fx_root(context).add_child(mi)
+	_register_visual(mi, context)
 	mi.global_position = pos
 	var tween := mi.create_tween()
 	tween.set_parallel(true)
@@ -757,17 +970,20 @@ static func _acquire_particle(context: Node) -> GPUParticles3D:
 	for p in _pool:
 		if not p.emitting:
 			p.global_position = Vector3.ZERO
+			_particle_owner_ids[p.get_instance_id()] = context.get_instance_id()
 			return p
 	# Pool hygiene: tier cap so burst-heavy fights never grow unbounded
 	if _pool.size() >= _pool_limit():
 		var steal: GPUParticles3D = _pool[0]
 		_pool.append(_pool.pop_front())
+		_particle_owner_ids[steal.get_instance_id()] = context.get_instance_id()
 		return steal
 	var fx := GPUParticles3D.new()
 	fx.draw_pass_1 = _get_quad_mesh()
 	fx.visibility_aabb = AABB(Vector3(-24, -8, -24), Vector3(48, 16, 48))
 	_fx_root(context).add_child(fx)
 	_pool.append(fx)
+	_particle_owner_ids[fx.get_instance_id()] = context.get_instance_id()
 	return fx
 
 static func _get_quad_mesh() -> QuadMesh:
@@ -832,6 +1048,12 @@ static func spawn_decal(context: Node, pos: Vector3, radius: float = 0.8,
 		ground_y: float = 0.06, style: String = "burn") -> void:
 	if context == null or not context.is_inside_tree():
 		return
+	# Ground decals are presentation-only and compile a separate impact shader
+	# on first use; they are not part of the mobile skill readability contract.
+	if _is_mobile_runtime():
+		return
+	if not _reserve_visual_slot():
+		return
 	var quad := QuadMesh.new()
 	quad.size = Vector2(radius * 2.0, radius * 2.0)
 	var material := ShaderMaterial.new()
@@ -846,6 +1068,7 @@ static func spawn_decal(context: Node, pos: Vector3, radius: float = 0.8,
 	mesh_instance.mesh = quad
 	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_fx_root(context).add_child(mesh_instance)
+	_register_visual(mesh_instance, context)
 	mesh_instance.global_position = Vector3(pos.x, pos.y + ground_y, pos.z)
 	# Lay flat just above terrain; random rotation makes repeated hits distinct.
 	mesh_instance.rotation.x = -PI / 2.0

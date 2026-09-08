@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="ContentManifestResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/systems/content_manifest_resource.gd" id="1_manifest"]
+
+[resource]
+script = ExtResource("1_manifest")
+manifest_version = 1
+content_schema = 1
+registry_schema = 1
+resource_name = "Embervale Content Manifest"

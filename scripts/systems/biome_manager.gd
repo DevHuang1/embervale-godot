@@ -1,4 +1,7 @@
-extends WorldManager
+## Use the source path here instead of the global class name so standalone
+## validation scenes resolve this dependency before the global class cache has
+## been populated.
+extends "res://scripts/systems/world_manager.gd"
 class_name BiomeManager
 
 ## === Biome Manager ===
@@ -8,12 +11,23 @@ class_name BiomeManager
 
 @export var biome_id: String = "bramblewood"
 
+## Pack budget is measured around the hero, not the whole realm, so enemies
+## cluster at the boss stone never starve the travel zones of encounters.
+const PACK_LIVE_RADIUS := 90.0
+## Idle pack leftovers behind the player are despawned beyond this radius.
+const DESPAWN_FAR_RADIUS := 130.0
+## Packs never spawn inside this radius around the arena stone (readable boss).
+const ARENA_CLEAR_RADIUS := 16.0
+
+var _despawn_sweep_in := 0.25
+
 var _biome_def: Dictionary = {}
 var _gates: Array[Dictionary] = []  # {node, dest}
 var _arena_stone: Node3D = null
 var _biome_boss: Node3D = null
 var _boss_down_at := -1.0
 var _traveling := false
+var _arrival_focus_played := false
 
 func _ready() -> void:
 	_biome_def = Bestiary.biome(biome_id)
@@ -32,10 +46,27 @@ func _enter_biome() -> void:
 	_apply_realm_theme(game_state.current_stage)
 	var title := str(_biome_def.get("title", biome_id.capitalize()))
 	game_state.quest_progress.emit("Now entering %s." % title)
+	_play_realm_audio(_visual_realm_id())
 	_build_gates()
 	_build_arena()
 	_spawn_wave(current_grove_state)
 	_start_respawner()
+	call_deferred("_play_realm_arrival")
+
+func _play_realm_arrival() -> void:
+	if _arrival_focus_played:
+		return
+	_arrival_focus_played = true
+	var focus: Node3D = _arena_stone if _arena_stone != null else hero
+	if focus == null or not is_instance_valid(focus):
+		return
+	var camera_rig := get_node_or_null("CameraRig")
+	if camera_rig != null and camera_rig.has_method("play_focus_moment"):
+		var anchor := Vector3(-5.5, 4.0, 7.0) if _arena_stone != null \
+			else Vector3(0.0, 3.5, 6.0)
+		var focus_offset := Vector3(0.0, 1.4, 0.0) if _arena_stone != null \
+			else Vector3(0.0, 1.2, 0.0)
+		camera_rig.play_focus_moment(focus, anchor, focus_offset, 1.6)
 
 func _realm_tint() -> Color:
 	return Bestiary.REALMS.get(_visual_realm_id(), {}).get(
@@ -79,22 +110,60 @@ func _start_respawner() -> void:
 func _on_respawn_tick() -> void:
 	if hero == null or not is_instance_valid(hero):
 		return
+	_despawn_distant_enemies()
+	# The cap is *nearby* only: leftovers from an earlier pack must not starve
+	# the traversal zones once the hero leaves the arena area. Without this,
+	# the global pool stayed pinned at pack_cap by enemies clustering around
+	# the boss stone and no pack ever respawned anywhere else in the realm.
 	var cap := int(_biome_def.get("pack_cap", 5))
-	if get_tree().get_nodes_in_group("enemy").size() >= cap:
+	if _nearby_enemy_count(hero.global_position, PACK_LIVE_RADIUS) >= cap:
 		return
 	_spawn_biome_pack(hero.global_position)
 
+## Idle pack enemies far behind the hero are culled so the realm's encounter
+## budget travels with the player instead of accumulating around the boss.
+## Bosses, elites, and anything in active combat are never swept.
+func _despawn_distant_enemies() -> void:
+	if hero == null or not is_instance_valid(hero):
+		return
+	var center := hero.global_position
+	for enemy in get_tree().get_nodes_in_group("enemy"):
+		if not (enemy is Node3D) or not is_instance_valid(enemy):
+			continue
+		if enemy.is_in_group("boss"):
+			continue
+		if enemy.global_position.distance_to(center) > DESPAWN_FAR_RADIUS:
+			enemy.queue_free()
+
+func _nearby_enemy_count(center: Vector3, radius: float) -> int:
+	var count := 0
+	for enemy in get_tree().get_nodes_in_group("enemy"):
+		if enemy is Node3D and is_instance_valid(enemy) \
+				and enemy.global_position.distance_to(center) <= radius:
+			count += 1
+	return count
+
 func _spawn_biome_pack(origin: Vector3) -> void:
+	# Keep the arena stone readable: packs materialise outside the boss circle
+	# unless the hero is already far away from it.
+	var anchor := origin
+	if _arena_stone != null and is_instance_valid(_arena_stone):
+		var to_arena := origin - _arena_stone.global_position
+		to_arena.y = 0.0
+		if to_arena.length() < ARENA_CLEAR_RADIUS:
+			var push := to_arena.normalized() if to_arena.length() > 0.1 else Vector3.BACK
+			anchor = _arena_stone.global_position + push * ARENA_CLEAR_RADIUS
+			anchor.y = origin.y
 	var comp: Dictionary = _biome_def.get("pack", {})
 	var hard_count := int(comp.get("hard", 0))
 	var normal_count := int(comp.get("normal", 0))
 	var total := hard_count + normal_count
 	var idx := 0
 	for i in hard_count:
-		_spawn_pack_enemy(origin, biome_id, true, idx, total)
+		_spawn_pack_enemy(anchor, biome_id, true, idx, total)
 		idx += 1
 	for i in normal_count:
-		_spawn_pack_enemy(origin, biome_id, false, idx, total)
+		_spawn_pack_enemy(anchor, biome_id, false, idx, total)
 		idx += 1
 
 ## === Travel gates ===
@@ -115,12 +184,13 @@ func _build_gates() -> void:
 		if route.size() > 1:
 			var route_index := 1 + (i * maxi(route.size() - 2, 1)) / maxi(dests.size(), 1)
 			pos = route[mini(route_index, route.size() - 1)]
-		pos.y = 0.1
 		_gates.append({"node": _make_monolith(dest, pos), "dest": dest})
 
 func _make_monolith(dest: String, pos: Vector3) -> Node3D:
 	var gate := Node3D.new()
 	gate.name = "Gate_%s" % dest
+	gate.add_to_group("portal")
+	gate.add_to_group("interactable")
 	var dest_tint: Color = Bestiary.REALMS.get(dest, {}).get("mist_tint", Color(0.7, 0.8, 0.75))
 	var stone_mat := StandardMaterial3D.new()
 	stone_mat.albedo_texture = load("res://assets/textures/stylized/rock/albedo.png")
@@ -200,6 +270,10 @@ func _make_monolith(dest: String, pos: Vector3) -> Node3D:
 	gate.add_child(glow)
 	add_child(gate)
 	gate.global_position = pos
+	var terrain := get_node_or_null("Terrain") as TerrainRelief
+	if terrain != null:
+		terrain.conform_anchor(gate, 0.06)
+	gate.set_meta("terrain_conformed", terrain != null)
 	return gate
 
 ## === Arena: walk the stone to wake the biome boss ===
@@ -243,6 +317,9 @@ func _build_arena() -> void:
 	add_child(_arena_stone)
 	_arena_stone.global_position = RealmLayoutData.profile(_visual_realm_id()).get(
 		"arena", player_spawn.global_position + Vector3(0, 0.1, -20))
+	var terrain := get_node_or_null("Terrain") as TerrainRelief
+	if terrain != null:
+		terrain.conform_anchor(_arena_stone, 0.08)
 
 func _engage_arena_boss() -> void:
 	var boss_id := str(_biome_def.get("boss_id", ""))
@@ -283,6 +360,12 @@ func _on_arena_boss_died() -> void:
 func _process(delta: float) -> void:
 	if _relic_trophy != null and is_instance_valid(_relic_trophy):
 		_relic_trophy.rotate_y(delta * 0.7)
+	# Throttled clean-up pass so packs left behind on the route are pruned
+	# between respawn ticks, keeping the nearby cap honest while travelling.
+	_despawn_sweep_in -= delta
+	if _despawn_sweep_in <= 0.0:
+		_despawn_sweep_in = 0.5
+		_despawn_distant_enemies()
 	if _traveling or hero == null or not is_instance_valid(hero):
 		return
 	var pos := hero.global_position

@@ -130,6 +130,28 @@ const FORGE_STYLE_BY_BASE := {
 	"soda_cannon":  "magic",
 }
 
+## Element affinity is authored at the base-kit boundary so a forged weapon
+## carries its identity in saved inventory data, not only in VFX fallback code.
+## Unknown future kits still receive a stable affinity from their base id.
+const FORGE_ELEMENT_BY_BASE := {
+	"mug_mace":     "fire",
+	"ember_sword":  "fire",
+	"arcane_staff": "frost",
+	"matriarch_scepter": "nature",
+	"slab_hammer":  "thunder",
+	"pocket_blade": "shadow",
+	"snip_twins":   "shock",
+	"soda_cannon":  "water",
+}
+const FORGE_ELEMENTS := ["fire", "frost", "shock", "nature", "water", "thunder", "shadow"]
+
+static func element_for_base(base: Dictionary) -> String:
+	var base_id := str(base.get("id", "mug_mace"))
+	var authored := str(base.get("element", FORGE_ELEMENT_BY_BASE.get(base_id, "")))
+	if authored in FORGE_ELEMENTS:
+		return authored
+	return FORGE_ELEMENTS[int(abs(base_id.hash())) % FORGE_ELEMENTS.size()]
+
 ## Builds the full weapon def Dictionary for a scan-forged relic kit:
 ## a three-rite loadout (strike → whirl → comet ULT) whose damage scales
 ## with the rarity roll. The returned def is add_weapon()-ready: it carries
@@ -160,7 +182,7 @@ static func build_weapon_def(base: Dictionary, rarity: int, item_name: String,
 		"glyph": str(base.get("glyph", "✦")),
 		"style": str(FORGE_STYLE_BY_BASE.get(base_id, "blunt")),
 		"relic": true,
-		"element": "",
+		"element": element_for_base(base),
 		"rarity": rarity_index,
 		"atk": maxi(1, int(round(float(base.get("atk", 6)) * mult))),
 		"swing_time": float(base.get("swing_time", 0.32)),

@@ -37,12 +37,12 @@ theme_override_colors/font_color = Color(0.62, 0.85, 1, 1)
 [node name="DiamondsLabel" type="Label" parent="Root/Center/Panel/VBox/Header"]
 layout_mode = 2
 theme_type_variation = &"RowLabel"
-text = "💎 0"
+text = "DIAMONDS  0"
 
 [node name="Note" type="Label" parent="Root/Center/Panel/VBox"]
 layout_mode = 2
 theme_type_variation = &"Subtitle"
-text = "Looks and voice only — never power. That's the deal."
+text = "Looks and voice only — never power. Scan packs stay unavailable until store setup is approved."
 horizontal_alignment = 1
 
 [node name="Scroll" type="ScrollContainer" parent="Root/Center/Panel/VBox"]

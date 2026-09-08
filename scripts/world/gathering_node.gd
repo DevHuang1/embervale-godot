@@ -21,6 +21,7 @@ var _interact_prompt: Node3D
 var _visual: Node3D
 var _progress_ring: MeshInstance3D
 var _prompt_label: Label3D
+var _ritual_label: String = "Gather local material"
 var opened: bool = false
 
 const NODE_STATE_KEY_PREFIX := "gather_"
@@ -30,6 +31,7 @@ func _game_state() -> Node:
 
 func _ready() -> void:
 	add_to_group("interactable")
+	add_to_group("gathering")
 	_build_visual()
 	_build_prompt()
 	_check_persistence()
@@ -41,6 +43,9 @@ func configure(mat_id: String, y_min: int, y_max: int, g_time: float, r_seconds:
 	gather_time = g_time
 	respawn_seconds = r_seconds
 	realm = rlm
+	_refresh_ritual_label()
+	if _prompt_label != null:
+		_prompt_label.text = "HOLD TO GATHER\n%s" % _ritual_label
 
 func _build_visual() -> void:
 	_visual = Node3D.new()
@@ -77,7 +82,8 @@ func _build_visual() -> void:
 func _build_prompt() -> void:
 	_prompt_label = Label3D.new()
 	_prompt_label.name = "PromptLabel"
-	_prompt_label.text = "Gather"
+	_refresh_ritual_label()
+	_prompt_label.text = "HOLD TO GATHER\n%s" % _ritual_label
 	_prompt_label.font_size = 18
 	_prompt_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_prompt_label.position.y = 0.7
@@ -96,6 +102,10 @@ func _build_prompt() -> void:
 	add_child(area)
 	area.body_entered.connect(_on_hero_enter)
 	area.body_exited.connect(_on_hero_exit)
+
+func _refresh_ritual_label() -> void:
+	var profile: Dictionary = RealmIdentityCatalog.for_realm(realm)
+	_ritual_label = str(profile.get("resource_ritual", "Gather local material"))
 
 func _process(delta: float) -> void:
 	if _depleted:
@@ -141,10 +151,15 @@ func _finish_gather() -> void:
 	_gathering = false
 	_progress_ring.visible = false
 	var qty := randi_range(yield_min, yield_max)
+	var camp := get_node_or_null("/root/CampProgression")
+	if camp != null and camp.has_method("gather_yield_bonus"):
+		qty += int(camp.gather_yield_bonus())
 	var gs := _game_state()
 	if gs == null:
 		return
 	gs.call("add_material", material_id, qty)
+	if camp != null:
+		camp.record_objective(realm, "gather")
 	gs.call("update_objective", "gather", material_id, qty)
 	var sm := get_node_or_null("/root/StoryManager")
 	if sm != null and sm.has_method("notify_objective"):

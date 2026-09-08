@@ -27,33 +27,63 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -280.0
-offset_top = -250.0
+offset_top = -520.0
 offset_right = 280.0
-offset_bottom = 250.0
+offset_bottom = 520.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="VBox" type="VBoxContainer" parent="Root/Panel"]
+[node name="Margin" type="MarginContainer" parent="Root/Panel"]
 layout_mode = 2
-theme_override_constants/separation = 20
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 16
 
-[node name="Title" type="Label" parent="Root/Panel/VBox"]
+[node name="VBox" type="VBoxContainer" parent="Root/Panel/Margin"]
 layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Header" type="HBoxContainer" parent="Root/Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Root/Panel/Margin/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_type_variation = &"MenuTitle"
 text = "SETTINGS"
-horizontal_alignment = 1
 
-[node name="MasterRow" type="HBoxContainer" parent="Root/Panel/VBox"]
+[node name="CloseButton" type="Button" parent="Root/Panel/Margin/VBox/Header"]
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+focus_mode = 0
+text = "✕"
+tooltip_text = "Close settings"
+theme_override_font_sizes/font_size = 24
+
+[node name="Scroll" type="ScrollContainer" parent="Root/Panel/Margin/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Rows" type="VBoxContainer" parent="Root/Panel/Margin/VBox/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 18
+
+[node name="MasterRow" type="HBoxContainer" parent="Root/Panel/Margin/VBox/Scroll/Rows"]
 layout_mode = 2
 theme_override_constants/separation = 16
 
-[node name="MasterLabel" type="Label" parent="Root/Panel/VBox/MasterRow"]
+[node name="MasterLabel" type="Label" parent="Root/Panel/Margin/VBox/Scroll/Rows/MasterRow"]
 layout_mode = 2
 custom_minimum_size = Vector2(150, 0)
 theme_type_variation = &"RowLabel"
 text = "MASTER"
 
-[node name="MasterSlider" type="HSlider" parent="Root/Panel/VBox/MasterRow"]
+[node name="MasterSlider" type="HSlider" parent="Root/Panel/Margin/VBox/Scroll/Rows/MasterRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -62,17 +92,17 @@ max_value = 1.0
 step = 0.05
 value = 1.0
 
-[node name="MusicRow" type="HBoxContainer" parent="Root/Panel/VBox"]
+[node name="MusicRow" type="HBoxContainer" parent="Root/Panel/Margin/VBox/Scroll/Rows"]
 layout_mode = 2
 theme_override_constants/separation = 16
 
-[node name="MusicLabel" type="Label" parent="Root/Panel/VBox/MusicRow"]
+[node name="MusicLabel" type="Label" parent="Root/Panel/Margin/VBox/Scroll/Rows/MusicRow"]
 layout_mode = 2
 custom_minimum_size = Vector2(150, 0)
 theme_type_variation = &"RowLabel"
 text = "MUSIC"
 
-[node name="MusicSlider" type="HSlider" parent="Root/Panel/VBox/MusicRow"]
+[node name="MusicSlider" type="HSlider" parent="Root/Panel/Margin/VBox/Scroll/Rows/MusicRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -81,17 +111,17 @@ max_value = 1.0
 step = 0.05
 value = 0.6
 
-[node name="SfxRow" type="HBoxContainer" parent="Root/Panel/VBox"]
+[node name="SfxRow" type="HBoxContainer" parent="Root/Panel/Margin/VBox/Scroll/Rows"]
 layout_mode = 2
 theme_override_constants/separation = 16
 
-[node name="SfxLabel" type="Label" parent="Root/Panel/VBox/SfxRow"]
+[node name="SfxLabel" type="Label" parent="Root/Panel/Margin/VBox/Scroll/Rows/SfxRow"]
 layout_mode = 2
 custom_minimum_size = Vector2(150, 0)
 theme_type_variation = &"RowLabel"
 text = "SOUND FX"
 
-[node name="SfxSlider" type="HSlider" parent="Root/Panel/VBox/SfxRow"]
+[node name="SfxSlider" type="HSlider" parent="Root/Panel/Margin/VBox/Scroll/Rows/SfxRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -100,20 +130,24 @@ max_value = 1.0
 step = 0.05
 value = 0.8
 
-[node name="HintLabel" type="Label" parent="Root/Panel/VBox"]
+[node name="HintLabel" type="Label" parent="Root/Panel/Margin/VBox/Scroll/Rows"]
 layout_mode = 2
 theme_type_variation = &"Caption"
 text = "Camera: choose first/third person above. Press V on desktop; drag or pinch to orbit and zoom."
 horizontal_alignment = 1
 autowrap_mode = 2
 
-[node name="BackButton" type="Button" parent="Root/Panel/VBox"]
+[node name="Footer" type="VBoxContainer" parent="Root/Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="BackButton" type="Button" parent="Root/Panel/Margin/VBox/Footer"]
 custom_minimum_size = Vector2(0, 64)
 layout_mode = 2
 text = "BACK"
 theme_override_font_sizes/font_size = 22
 
-[node name="QuitGameButton" type="Button" parent="Root/Panel/VBox"]
+[node name="QuitGameButton" type="Button" parent="Root/Panel/Margin/VBox/Footer"]
 custom_minimum_size = Vector2(0, 68)
 layout_mode = 2
 text = "QUIT GAME"

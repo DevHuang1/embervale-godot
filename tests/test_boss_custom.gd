@@ -55,9 +55,9 @@ func _run() -> void:
 		failures += 1
 		print("FAIL: stage-1 wave comp")
 	if str(Bestiary.variant_for(Bestiary.REALM_HEARTWOOD, "hard").get("kind", "")) \
-			!= "spitter":
+			!= "spore_weaver":
 		failures += 1
-		print("FAIL: Heartwood hard tier lost its Cinder Spitter role")
+		print("FAIL: Heartwood hard tier lost its Spore Weaver role")
 
 	# === Palette extraction ===
 	var img := Image.create(32, 32, false, Image.FORMAT_RGB8)

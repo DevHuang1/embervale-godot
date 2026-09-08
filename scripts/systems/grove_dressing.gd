@@ -26,12 +26,67 @@ class_name GroveDressing
 var rng := RandomNumberGenerator.new()
 
 const FOG_BANK_SCENE := preload("res://scenes/world/fog_bank.tscn")
+const AUTHORED_RUIN_PROPS := {
+	"whispergrove": "res://assets/models/kenney_nature/Models/tree_detailed.fbx",
+	"bramblewood": "res://assets/models/kenney_graveyard/Models/altar-stone.fbx",
+	"mistfen": "res://assets/models/kenney_mini_dungeon/Models/column.fbx",
+	"heartwood": "res://assets/models/kenney_graveyard/Models/coffin.fbx",
+	"moonfen": "res://assets/models/kenney_tower_defense/Models/detail-crystal.fbx",
+}
+const AUTHORED_PACK_PROP_SETS: Dictionary = {
+	"whispergrove": [
+		"res://assets/models/kenney_nature/Models/tree_default.fbx",
+		"res://assets/models/kenney_nature/Models/rock_smallA.fbx",
+		"res://assets/models/kenney_nature/Models/rock_largeA.fbx",
+		"res://assets/models/kenney_survival/Models/bedroll.fbx",
+		"res://assets/models/kenney_mini_dungeon/Models/chest.fbx"],
+	"bramblewood": [
+		"res://assets/models/kenney_nature/Models/log.fbx",
+		"res://assets/models/kenney_graveyard/Models/fence.fbx",
+		"res://assets/models/kenney_survival/Models/barrel.fbx",
+		"res://assets/models/kenney_survival/Models/fence.fbx",
+		"res://assets/models/kenney_mini_dungeon/Models/banner.fbx"],
+	"mistfen": [
+		"res://assets/models/kenney_graveyard/Models/candle.fbx",
+		"res://assets/models/kenney_graveyard/Models/grave.fbx",
+		"res://assets/models/kenney_survival/Models/bottle.fbx",
+		"res://assets/models/kenney_mini_dungeon/Models/column.fbx"],
+	"heartwood": [
+		"res://assets/models/kenney_graveyard/Models/coffin.fbx",
+		"res://assets/models/kenney_survival/Models/barrel-open.fbx",
+		"res://assets/models/kenney_tower_defense/Models/detail-rocks.fbx",
+		"res://assets/models/kenney_tower_defense/Models/detail-tree.fbx"],
+	"moonfen": [
+		"res://assets/models/kenney_tower_defense/Models/detail-crystal.fbx",
+		"res://assets/models/kenney_mini_dungeon/Models/wall.fbx",
+		"res://assets/models/kenney_mini_dungeon/Models/chair.fbx",
+		"res://assets/models/kenney_mini_dungeon/Models/barrel.fbx",
+		"res://assets/models/kenney_mini_dungeon/Models/floor.fbx",
+		"res://assets/models/kenney_nature/Models/mushroom_redGroup.fbx"],
+}
 
 ## Signature prop layer keyed to the explorable realm (falls back through
 ## biome_id, then the current travel realm, then Bramblewood).
 enum RealmFlavor { BRAMBLEWOOD, MISTFEN, HEARTWOOD, MOONFEN }
 
 func _ready() -> void:
+	if _is_streamed_realm():
+		## The chunk streamer owns all scatter for the extended grove world;
+		## keep only authored identity (palette, path, ruins, torches, flavor,
+		## world ground composition, fog, props and gathering).
+		_apply_visual_palette()
+		# WorldChunkStreamer owns grass in both authored and extended terrain.
+		# This node keeps landmarks and identity props only.
+		rng.seed = seed_value
+		_build_pale_path()
+		_build_ruins()
+		_build_torches()
+		_build_realm_flavor()
+		_build_world_ground_composition()
+		_apply_fog_quality_to_scene()
+		_build_props()
+		_build_gathering_nodes()
+		return
 	rng.seed = seed_value
 	_apply_visual_palette()
 	_build_trees()
@@ -61,7 +116,7 @@ func _ready() -> void:
 			ecosystem_id = "heartwood"
 		RealmFlavor.MOONFEN:
 			ecosystem_id = "moonfen"
-		_: 
+		_:
 			ecosystem_id = "bramblewood"
 	ecosystem.setup(ecosystem_id, seed_value + 1337, scatter_radius)
 
@@ -74,6 +129,14 @@ func _visual_realm_id() -> String:
 	if world_root != null and "biome_id" in world_root:
 		return str(world_root.get("biome_id"))
 	return active if not active.is_empty() else "bramblewood"
+
+## The chunk streamer extends the bramblewood-biome world (whispergrove and
+## bramblewood); for those realms the streamer replaces all static scatter.
+func _is_streamed_realm() -> bool:
+	var world_root := get_parent()
+	if world_root != null and "biome_id" in world_root:
+		return str(world_root.get("biome_id")) == "bramblewood"
+	return false
 
 ## Opaque foliage and broad material colors carry realm identity without
 ## transparent leaf cards or extra draw calls.
@@ -130,6 +193,7 @@ func _realm_flavor() -> int:
 			return RealmFlavor.BRAMBLEWOOD
 
 func _build_realm_flavor() -> void:
+	_build_activity_beacon()
 	match _realm_flavor():
 		RealmFlavor.MISTFEN:
 			_build_reeds()
@@ -143,6 +207,16 @@ func _build_realm_flavor() -> void:
 			_build_glowcaps()
 		_:
 			_build_thorn_arches()
+
+func _build_activity_beacon() -> void:
+	var beacon_script := load("res://scripts/world/realm_activity_beacon.gd") as GDScript
+	if beacon_script == null:
+		return
+	var beacon: Node3D = beacon_script.new()
+	beacon.name = "RealmActivityBeacon"
+	beacon.call("configure", _visual_realm_id())
+	beacon.position = Vector3(0.0, _ground_height(0.0, 0.0), -7.0)
+	add_child(beacon)
 
 func _build_fog_bank() -> void:
 	var fog := FOG_BANK_SCENE.instantiate() as GPUParticles3D
@@ -208,6 +282,37 @@ func _build_props() -> void:
 		prop.position = Vector3(p.x, _ground_height(p.x, p.y), p.y)
 		add_child(prop)
 		placed += 1
+	# One gameplay-scale Survival Kit camp prop anchors the route; it is
+	# intentionally bounded and loaded once during dressing, not per frame.
+	if _visual_realm_id() in ["whispergrove", "bramblewood"]:
+		_add_runtime_pack_prop(
+			"res://assets/models/kenney_survival/Models/tent.fbx",
+			Vector2(8.0, 7.0), "SurvivalCampTent")
+
+func _add_runtime_pack_prop(path: String, ground_point: Vector2, node_name: String) -> void:
+	if not ResourceLoader.exists(path):
+		return
+	var packed := ResourceLoader.load(path, "PackedScene", ResourceLoader.CACHE_MODE_REUSE) as PackedScene
+	if packed == null:
+		return
+	var prop := packed.instantiate() as Node3D
+	if prop == null:
+		return
+	prop.name = node_name
+	_normalize_authored_prop(prop, 2.8)
+	prop.position = Vector3(ground_point.x, _ground_height(ground_point.x, ground_point.y), ground_point.y)
+	add_child(prop)
+
+func _normalize_authored_prop(prop: Node3D, target_height: float) -> void:
+	var height := 0.0
+	for mesh_node in prop.find_children("*", "MeshInstance3D", true, false):
+		var mesh := mesh_node as MeshInstance3D
+		if mesh == null or mesh.mesh == null:
+			continue
+		height = maxf(height, mesh.get_aabb().size.y * mesh.global_transform.basis.get_scale().y)
+	if height > 0.001:
+		prop.scale *= Vector3.ONE * (target_height / height)
+	prop.scale *= Vector3.ONE * 1.15
 
 func _prop_anchors() -> Array[Vector2]:
 	var terrain = get_parent().get_node_or_null("Terrain")
@@ -520,12 +625,16 @@ func _build_tufts() -> void:
 	grass.shader = load("res://assets/shaders/grass_blade.gdshader")
 	grass.set_shader_parameter("blade_color", tuft_color)
 	grass.set_shader_parameter("tip_color", tuft_color.lightened(0.18))
+	grass.set_shader_parameter("root_color", tuft_color.darkened(0.58))
+	grass.set_shader_parameter("dry_color", tuft_color.lerp(Color(0.38, 0.31, 0.12), 0.52))
 	grass.set_shader_parameter("blade_height", 0.36)
 	grass.set_shader_parameter("root_height_offset", 0.0)
 
 	var density_scale := _grass_density_scale()
 	var carpet_radius := _grass_carpet_radius()
-	var spacing := 0.68 / sqrt(maxf(density_scale, 0.1))
+	# Denser near-field carpet: each clump is now narrow, so tighter spacing is
+	# required to read as a continuous tile of grass rather than isolated stars.
+	var spacing := 0.54 / sqrt(maxf(density_scale, 0.1))
 	var carpet: Array[Transform3D] = []
 	var grid_radius := int(ceil(carpet_radius / spacing))
 	for gx in range(-grid_radius, grid_radius + 1):
@@ -614,12 +723,14 @@ func _make_grass_clump() -> ArrayMesh:
 	var surface := SurfaceTool.new()
 	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var blade_specs := [
-		{"offset": Vector3(-0.16, 0, -0.05), "angle": 0.10, "height": 0.30, "width": 0.10, "lean": Vector2(0.045, 0.02)},
-		{"offset": Vector3(0.15, 0, 0.03), "angle": 1.08, "height": 0.36, "width": 0.09, "lean": Vector2(-0.04, 0.045)},
-		{"offset": Vector3(0.02, 0, -0.16), "angle": 2.15, "height": 0.27, "width": 0.10, "lean": Vector2(0.03, -0.04)},
-		{"offset": Vector3(-0.07, 0, 0.16), "angle": 3.20, "height": 0.32, "width": 0.09, "lean": Vector2(-0.04, -0.025)},
-		{"offset": Vector3(0.07, 0, 0.07), "angle": 4.25, "height": 0.39, "width": 0.09, "lean": Vector2(0.025, 0.04)},
-		{"offset": Vector3(-0.03, 0, 0.01), "angle": 5.30, "height": 0.29, "width": 0.10, "lean": Vector2(-0.02, 0.035)},
+		{"offset": Vector3(-0.07, 0, -0.03), "angle": 0.10, "height": 0.27, "width": 0.062, "lean": Vector2(0.025, 0.012)},
+		{"offset": Vector3(0.07, 0, 0.02), "angle": 0.92, "height": 0.33, "width": 0.056, "lean": Vector2(-0.018, 0.026)},
+		{"offset": Vector3(0.01, 0, -0.075), "angle": 1.78, "height": 0.25, "width": 0.060, "lean": Vector2(0.018, -0.020)},
+		{"offset": Vector3(-0.035, 0, 0.075), "angle": 2.62, "height": 0.30, "width": 0.055, "lean": Vector2(-0.022, -0.014)},
+		{"offset": Vector3(0.04, 0, 0.035), "angle": 3.48, "height": 0.35, "width": 0.052, "lean": Vector2(0.014, 0.022)},
+		{"offset": Vector3(-0.02, 0, 0.005), "angle": 4.34, "height": 0.28, "width": 0.058, "lean": Vector2(-0.012, 0.020)},
+		{"offset": Vector3(0.025, 0, -0.025), "angle": 5.16, "height": 0.31, "width": 0.050, "lean": Vector2(0.016, -0.012)},
+		{"offset": Vector3(-0.045, 0, 0.025), "angle": 5.92, "height": 0.24, "width": 0.054, "lean": Vector2(-0.010, 0.014)},
 	]
 	for spec_value in blade_specs:
 		var spec := spec_value as Dictionary
@@ -748,6 +859,46 @@ func _build_ruins() -> void:
 				Basis(Vector3.UP, rng.randf() * TAU),
 				Vector3(p.x, gy + 0.02, p.y)))
 	_batch(slab, slab.material, slabs, false, 310.0)
+	_add_authored_ruin_prop(center)
+	_add_authored_pack_prop_set(center)
+
+## One authored prop anchors the procedural ruin circle. The source packs are
+## deliberately loaded only during dressing, never in a frame loop; props stay
+## visual-only until their collision and interaction contract is authored.
+func _add_authored_ruin_prop(center: Vector2) -> void:
+	var realm_id := _visual_realm_id()
+	var path := str(AUTHORED_RUIN_PROPS.get(realm_id, ""))
+	var semantic_id: String = str({
+		"whispergrove": "kenney_nature_tree_detailed",
+		"bramblewood": "kenney_graveyard_altar_stone",
+		"mistfen": "kenney_mini_dungeon_column",
+		"heartwood": "kenney_graveyard_coffin",
+		"moonfen": "kenney_tower_defense_detail_crystal",
+	}.get(realm_id, ""))
+	var game_state := get_node_or_null("/root/GameState")
+	if game_state != null and not str(semantic_id).is_empty():
+		path = ContentRegistry.resolve_asset_path(game_state.get_content_registry(),
+			"prop", str(semantic_id), path)
+	if path.is_empty() or not ResourceLoader.exists(path):
+		return
+	var packed := ResourceLoader.load(path, "PackedScene", ResourceLoader.CACHE_MODE_REUSE) as PackedScene
+	if packed == null:
+		return
+	var prop := packed.instantiate() as Node3D
+	if prop == null:
+		return
+	prop.name = "AuthoredRuinProp"
+	_normalize_authored_prop(prop, 3.6)
+	var gy := _ground_height(center.x, center.y)
+	prop.position = Vector3(center.x, gy, center.y)
+	add_child(prop)
+
+func _add_authored_pack_prop_set(center: Vector2) -> void:
+	var paths: Array = AUTHORED_PACK_PROP_SETS.get(_visual_realm_id(), [])
+	for index in mini(paths.size(), 8):
+		var offset := Vector2(-2.4 + float(index) * 1.6, 1.8 if index % 2 == 0 else -1.4)
+		_add_runtime_pack_prop(str(paths[index]), center + offset,
+			"PackLandmarkProp_%02d" % index)
 
 ## Lit torches marking the road: near spawn, mid-road, arena mouth
 func _build_torches() -> void:

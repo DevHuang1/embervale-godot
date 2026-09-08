@@ -37,6 +37,10 @@ func _run() -> void:
 	if not gs.owns_shop_item("ember_sword"):
 		failures += 1
 		print("FAIL: owns_shop_item false after buy")
+	var ledger: Array[Dictionary] = gs.get_purchase_ledger()
+	if ledger.is_empty() or str(ledger[0].get("id", "")) != "ember_sword":
+		failures += 1
+		print("FAIL: purchase ledger did not record shop ownership")
 	if gs.buy_shop_item("ember_sword").success:
 		failures += 1
 		print("FAIL: double purchase allowed")
@@ -116,6 +120,14 @@ func _run() -> void:
 	if gs.armor_defense() != 3:
 		failures += 1
 		print("FAIL: armor lost across load")
+	var loaded_ledger: Array[Dictionary] = gs.get_purchase_ledger()
+	var loaded_ids: Array[String] = []
+	for purchase in loaded_ledger:
+		loaded_ids.append(str(purchase.get("id", "")))
+	for expected_id in ["ember_sword", "arcane_staff", "warden_plate"]:
+		if not loaded_ids.has(expected_id):
+			failures += 1
+			print("FAIL: purchase ledger lost %s across load" % expected_id)
 
 	dummy.queue_free()
 	gs.delete_save()

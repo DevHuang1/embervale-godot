@@ -337,12 +337,20 @@ func _place_encounter_zones() -> void:
 		zone.name = "EncounterZone_%d" % i
 		host.add_child(zone)
 		zone.global_position = _world.global_position + Vector3(pos.x, 0, pos.y)
+		var pocket: Dictionary = EncounterPocketProfiles.for_realm(_realm, i, tier)
+		if zone.get("pocket_id") != null:
+			zone.set("pocket_id", str(pocket.get("id", "")))
+			zone.set("approach_label", str(pocket.get("approach", "Approach")))
+			zone.set("reveal_label", str(pocket.get("reveal", "Threat revealed")))
+			zone.set("reward_label", str(pocket.get("reward", "Reward")))
+			zone.set("exit_label", str(pocket.get("exit", "Exit sightline")))
 		if zone.has_method("setup"):
 			zone.call("setup", _realm, tier, stage)
 		elif zone.get("realm_id") != null:
 			zone.set("realm_id", _realm)
 			zone.set("tier",     tier)
 			zone.set("stage",    stage)
+
 
 func _tier_weights(stage: int) -> Dictionary:
 	match stage:

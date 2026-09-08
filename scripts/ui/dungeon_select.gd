@@ -2,12 +2,12 @@ extends CanvasLayer
 class_name DungeonSelect
 
 const INSTANCES := [
-	{"id": "embervault", "name": "EMBERVAULT", "realm": "HEARTWOOD DEPTHS", "glyph": "◆", "difficulty": "NORMAL", "power": 1, "reward": "74 GOLD · EPIC CACHE", "desc": "Descend beneath the old ridge and break the hushling seal."},
-	{"id": "moonfen_ruins", "name": "MOONFEN RUINS", "realm": "MOONFEN", "glyph": "☾", "difficulty": "HARD", "power": 3, "reward": "120 GOLD · MOON RELIC", "desc": "A drowned shrine where frost and shadow move together."},
-	{"id": "heartwood_core", "name": "HEARTWOOD CORE", "realm": "HEARTWOOD", "glyph": "✦", "difficulty": "ELITE", "power": 5, "reward": "220 GOLD · LEGENDARY CHEST", "desc": "Face the living ember beneath the ancient forest."}
+	{"id": "embervault", "realm_id": "heartwood", "name": "EMBERVAULT", "realm": "HEARTWOOD DEPTHS", "glyph": "◆", "difficulty": "NORMAL", "power": 1, "reward": "74 GOLD · EPIC CACHE", "desc": "Descend beneath the old ridge and break the hushling seal."},
+	{"id": "moonfen_ruins", "realm_id": "moonfen", "name": "MOONFEN RUINS", "realm": "MOONFEN", "glyph": "☾", "difficulty": "HARD", "power": 3, "reward": "120 GOLD · MOON RELIC", "desc": "A drowned shrine where frost and shadow move together."},
+	{"id": "heartwood_core", "realm_id": "heartwood", "name": "HEARTWOOD CORE", "realm": "HEARTWOOD", "glyph": "✦", "difficulty": "ELITE", "power": 5, "reward": "220 GOLD · LEGENDARY CHEST", "desc": "Face the living ember beneath the ancient forest."}
 ]
 
-@onready var cards: VBoxContainer = $Root/Center/Panel/VBox/Cards
+@onready var cards: VBoxContainer = $Root/Center/Panel/VBox/CardsScroll/Cards
 @onready var close_button: Button = $Root/Center/Panel/VBox/Header/Close
 @onready var title: Label = $Root/Center/Panel/VBox/Header/Title
 @onready var status: Label = $Root/Center/Panel/VBox/Status
@@ -69,7 +69,12 @@ func _build_card(instance: Dictionary) -> Control:
 	UiKit.style_label(name_label, &"MenuTitle", 22)
 	info.add_child(name_label)
 	var realm_label := Label.new()
-	realm_label.text = "%s  ·  RECOMMENDED POWER %d" % [str(instance.realm), int(instance.power)]
+	var unlocked := str(instance.get("id", "")) == "embervault" or str(instance.get("realm_id", "")) in GameState.unlocked_realms
+	var current := str(instance.get("realm_id", "")) == str(GameState.current_realm)
+	var cleared := bool(GameState.quest_reward_claims.get("dungeon_%s_complete" % str(instance.id), false))
+	var realm_state := UiKit.action_state("equipped" if current else ("owned" if unlocked else "locked"),
+		"CURRENT REALM" if current else ("AVAILABLE" if unlocked else "UNLOCK TO ENTER"))
+	realm_label.text = "%s  ·  RECOMMENDED POWER %d  ·  %s%s" % [str(instance.realm), int(instance.power), str(realm_state.get("detail", "")), "  ·  CLEARED" if cleared else ""]
 	UiKit.style_label(realm_label, &"Eyebrow", 14)
 	info.add_child(realm_label)
 	var desc_label := Label.new()
@@ -84,25 +89,57 @@ func _build_card(instance: Dictionary) -> Control:
 	info.add_child(reward)
 	var enter := Button.new()
 	enter.custom_minimum_size = Vector2(190, 58)
-	if str(instance.id) == "embervault":
-		enter.text = "ENTER"
+	if unlocked:
+		enter.text = "ENTER" if not current else "CURRENT REALM"
+		enter.tooltip_text = "Travel to this realm" if not current else "You are already here"
+		enter.disabled = current
 		UiKit.style_primary_button(enter)
-		enter.pressed.connect(_on_enter.bind(str(instance.id)))
+		if not current:
+			enter.pressed.connect(_on_enter.bind(str(instance.id)))
 	else:
-		enter.text = "LOCKED  ·  LV %d" % int(instance.power * 2)
+		var locked_state := UiKit.action_state("locked", "UNLOCK %s" % str(instance.realm))
+		enter.text = "%s  ·  %s" % [locked_state.get("label", "LOCKED"), locked_state.get("detail", "")]
 		enter.disabled = true
+		enter.tooltip_text = "Complete the required progression to unlock this realm"
 		UiKit.style_secondary_button(enter)
 	row.add_child(enter)
 	return panel
 
 func _on_enter(instance_id: String) -> void:
 	if instance_id != "embervault":
+		var target_realm := ""
+		for instance in INSTANCES:
+			if str(instance.get("id", "")) == instance_id:
+				target_realm = str(instance.get("realm_id", ""))
+				break
+		if target_realm.is_empty() or target_realm not in GameState.unlocked_realms:
+			return
+		var realm_scene := Bestiary.biome_scene(target_realm)
+		if realm_scene.is_empty() or not ResourceLoader.exists(realm_scene):
+			status.text = "The %s route is not available yet." % target_realm.to_upper()
+			return
+		GameState.set_current_realm(target_realm)
+		GameState.begin_activity("expedition_%s" % target_realm, str(GameState.route_checkpoint_id))
+		GameState.quest_progress.emit("Entering %s — prepare for its realm hazards." % target_realm.to_upper())
+		_travel_with_fade(realm_scene)
 		return
 	var expansion := get_tree().root.find_child("RealmExpansion", true, false)
 	if expansion != null and expansion.has_method("toggle_dungeon"):
+		GameState.begin_activity("embervault", str(GameState.route_checkpoint_id))
 		close()
 		expansion.toggle_dungeon()
 		GameState.quest_progress.emit("Embervault selected — descend when ready.")
 	else:
 		status.text = "The dungeon entrance is not available in this realm."
 
+func _travel_with_fade(scene_path: String) -> void:
+	close()
+	var fade := ColorRect.new()
+	fade.name = "RealmTransitionFade"
+	fade.color = Color(0.005, 0.01, 0.008, 0.0)
+	fade.mouse_filter = Control.MOUSE_FILTER_STOP
+	fade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	$Root.add_child(fade)
+	var tween := fade.create_tween()
+	tween.tween_property(fade, "color:a", 1.0, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.tween_callback(get_tree().change_scene_to_file.bind(scene_path))

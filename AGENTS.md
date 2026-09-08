@@ -110,7 +110,7 @@ EOF
       attachment, enemy anticipation, boss phases, and damage-event alignment.
 - [ ] Centralize camera ownership; cap cumulative shake and prevent competing
       zoom/impulse systems.
-- [ ] Run real-renderer Low/Medium/High captures for every realm plus light,
+- [x] Run real-renderer Low/Medium/High captures for every realm plus light,
       heavy, elemental, boss, telegraph, and crowded-combat scenarios.
 
 ### P2 — Android performance and production readiness

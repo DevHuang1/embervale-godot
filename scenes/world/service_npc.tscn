@@ -1,0 +1,25 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/service_npc.gd" id="1_script"]
+
+[sub_resource type="SphereShape3D" id="SphereShape_interact"]
+radius = 2.2
+
+[node name="ServiceNpc" type="Node3D"]
+script = ExtResource("1_script")
+
+[node name="InteractArea" type="Area3D" parent="." groups=["interactable"]]
+collision_layer = 0
+collision_mask = 1
+
+[node name="Shape" type="CollisionShape3D" parent="InteractArea"]
+shape = SubResource("SphereShape_interact")
+
+[node name="Prompt" type="Label3D" parent="."]
+position = Vector3(0, 2.25, 0)
+font_size = 32
+outline_size = 8
+outline_modulate = Color(0.02, 0.03, 0.025, 0.9)
+modulate = Color(1, 0.84, 0.45, 1)
+billboard = 1
+no_depth_test = true

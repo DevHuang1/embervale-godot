@@ -2,6 +2,9 @@ extends Node3D
 class_name WorldManager
 
 const MATRIARCH_BOSS_KEY := "res://scripts/entities/boss_hushling_matriarch.gd"
+const THORN_WARDEN_BOSS_KEY := "res://scripts/entities/boss_bramblewood_thornwarden.gd"
+const TRAINING_TARGET_SCENE: PackedScene = preload("res://scenes/entities/combat_training_target.tscn")
+const PROFILE_TELEMETRY := preload("res://scripts/systems/android_profile_telemetry.gd")
 
 ## === Whispergrove World Manager ===
 ## Handles quest progression, spawns, day/night, environment
@@ -40,13 +43,40 @@ var _gate_opened := false
 var _altar: Node3D = null
 var _practice_altar: Node3D = null
 var _post_boss_root: Node3D = null
+var _camp_shortcut_marker: Label3D = null
 
 var _relic_trophy: Node3D = null
 var _realm_expansion: RealmExpansion = null
+var _castle_landmark: CastleLandmark = null
+var _realm_audio_beds: RealmAudioBeds = null
+var golden_route_tracker: GoldenRouteTracker
+var android_profile_telemetry: AndroidProfileTelemetry
+var _route_feedback_events: Dictionary = {}
 
 @onready var relic_pedestal: Node3D = get_node_or_null("RelicPedestal")
 
 func _ready() -> void:
+	_build_camp_shortcut_marker()
+	# Keep legacy quest nodes visible to the minimap even though they predate
+	# the shared world-marker groups used by streamed realms.
+	if quest_board != null:
+		quest_board.add_to_group("interactable")
+		quest_board.add_to_group("task")
+	if shard_spawn != null:
+		shard_spawn.add_to_group("interactable")
+		shard_spawn.add_to_group("task")
+	if beacon_spawn != null:
+		beacon_spawn.add_to_group("interactable")
+		beacon_spawn.add_to_group("event")
+
+	golden_route_tracker = GoldenRouteTracker.new()
+	golden_route_tracker.name = "GoldenRouteTracker"
+	golden_route_tracker.set_process(false)
+	add_child(golden_route_tracker)
+	android_profile_telemetry = PROFILE_TELEMETRY.new()
+	android_profile_telemetry.name = "AndroidProfileTelemetry"
+	add_child(android_profile_telemetry)
+	android_profile_telemetry.record_route_event("onboarding")
 	_init_signals()
 	_init_day_night()
 	_setup_grove()
@@ -54,7 +84,15 @@ func _ready() -> void:
 	_realm_expansion.name = "RealmExpansion"
 	add_child(_realm_expansion)
 	_realm_expansion.setup(self)
+	_build_castle_landmark()
+	call_deferred("_conform_runtime_anchors")
 	audio.start_ambient()
+	_realm_audio_beds = RealmAudioBeds.new()
+	_realm_audio_beds.name = "RealmAudioBeds"
+	add_child(_realm_audio_beds)
+	_realm_audio_beds.setup()
+	call_deferred("_play_realm_audio", Bestiary.realm_id_for_stage(current_grove_state))
+	call_deferred("_prewarm_mobile_skill_fx")
 	
 	# Connect game state signals
 	game_state.stage_changed.connect(_on_stage_changed)
@@ -65,6 +103,141 @@ func _ready() -> void:
 	ScanManager.relic_forged.connect(_spawn_relic_trophy)
 	if ScanManager.last_relic != null:
 		_spawn_relic_trophy(ScanManager.last_relic)
+	_refresh_camp_shortcut_marker()
+	refresh_route_markers()
+
+func route_feedback(message: String, event_id: String = "") -> bool:
+	var key := event_id.strip_edges()
+	if not key.is_empty() and _route_feedback_events.has(key):
+		return false
+	if not key.is_empty():
+		_route_feedback_events[key] = true
+	if message.strip_edges().is_empty():
+		return false
+	game_state.quest_progress.emit(message)
+	if android_profile_telemetry != null:
+		android_profile_telemetry.record_route_event("feedback_" + (key if not key.is_empty() else message))
+	return true
+
+func _prewarm_mobile_skill_fx() -> void:
+	if OS.has_feature("mobile") or OS.get_name() in ["Android", "iOS"]:
+		CombatFx.prewarm_mobile(self)
+
+func refresh_route_markers() -> void:
+	_refresh_camp_shortcut_marker()
+	if android_profile_telemetry != null:
+		android_profile_telemetry.record_route_event("markers_refreshed_%d" % int(game_state.current_stage))
+
+func activate_camp_shortcut(realm: String, shortcut_id: String) -> bool:
+	if realm != "bramblewood" or shortcut_id != "camp_route":
+		return false
+	game_state.set_route_checkpoint_for_shortcut(shortcut_id)
+	_refresh_camp_shortcut_marker()
+	return true
+
+func is_camp_shortcut_active(realm: String, shortcut_id: String) -> bool:
+	return CampProgression.is_shortcut_unlocked(realm, shortcut_id)
+
+func _build_camp_shortcut_marker() -> void:
+	_camp_shortcut_marker = Label3D.new()
+	_camp_shortcut_marker.name = "CampShortcutMarker"
+	_camp_shortcut_marker.text = "LANTERN SHORTCUT\nCAMP ROUTE"
+	_camp_shortcut_marker.font_size = 18
+	_camp_shortcut_marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_camp_shortcut_marker.modulate = Color(1.0, 0.78, 0.25)
+	_camp_shortcut_marker.position = Vector3(-3, 2.0, 13)
+	add_child(_camp_shortcut_marker)
+
+func _refresh_camp_shortcut_marker() -> void:
+	if _camp_shortcut_marker != null:
+		_camp_shortcut_marker.visible = CampProgression.is_shortcut_unlocked("bramblewood", "camp_route")
+
+func toggle_dungeon() -> void:
+	if _realm_expansion != null:
+		_realm_expansion.toggle_dungeon()
+
+func _build_castle_landmark() -> void:
+	if _castle_landmark != null and is_instance_valid(_castle_landmark):
+		return
+	_castle_landmark = preload("res://scripts/world/castle_landmark.gd").new()
+	_castle_landmark.name = "EmbervaultCastle"
+	add_child(_castle_landmark)
+	var terrain := get_node_or_null("Terrain")
+	var anchor := Vector3(80.0, 0.0, 6.0)
+	if terrain != null and terrain.has_method("sample_surface_height"):
+		anchor.y = float(terrain.call("sample_surface_height", anchor))
+	_castle_landmark.setup(_realm_expansion, terrain, anchor)
+
+func start_golden_route_tracker() -> void:
+	if golden_route_tracker == null:
+		return
+	golden_route_tracker.set_process(true)
+	golden_route_tracker.start_route()
+
+func stop_golden_route_tracker() -> void:
+	if golden_route_tracker == null:
+		return
+	golden_route_tracker.stop_route()
+	golden_route_tracker.set_process(false)
+
+func get_android_profile_snapshot() -> Dictionary:
+	if android_profile_telemetry == null:
+		return {}
+	return android_profile_telemetry.latest()
+
+func set_android_profile_diagnostics(enabled: bool) -> void:
+	if android_profile_telemetry != null and android_profile_telemetry.has_method(
+			"set_diagnostics_enabled"):
+		android_profile_telemetry.set_diagnostics_enabled(enabled)
+
+func capture_route_snapshot() -> Dictionary:
+	var camp: Node = get_node_or_null("/root/CampProgression")
+	return {"realm": game_state.current_realm, "stage": int(game_state.current_stage), "checkpoint": game_state.route_checkpoint_id, "camp": camp.build_debug_snapshot() if camp != null else {}, "world_audit": get_runtime_world_audit(), "profile": get_android_profile_snapshot()}
+
+func get_runtime_world_audit() -> Dictionary:
+	var terrain := get_node_or_null("Terrain") as TerrainRelief
+	var streamer := get_node_or_null("WorldStreamer") as WorldChunkStreamer
+	var below_surface: Array[Dictionary] = []
+	if terrain != null:
+		for group_name in ["portal", "reward", "chest", "gathering", "task", "event"]:
+			for candidate in get_tree().get_nodes_in_group(group_name):
+				var anchor := candidate as Node3D
+				if anchor == null or not is_ancestor_of(anchor):
+					continue
+				var surface := terrain.sample_surface_height(anchor.global_position)
+				if anchor.global_position.y < surface - 0.04:
+					below_surface.append({"node": str(anchor.get_path()),
+						"height": anchor.global_position.y, "surface": surface})
+	var weapon_id := str(game_state.equipped_weapon.get("id", ""))
+	var armor_id := str(game_state.equipped_armor.get("id", ""))
+	return {
+		"terrain": terrain.get_material_report(hero.global_position) if terrain != null else {},
+		"streaming": streamer.get_runtime_diagnostics() if streamer != null else {},
+		"weapon_id": weapon_id,
+		"weapon_path": WeaponVisualRegistry.path_for(weapon_id),
+		"armor_id": armor_id,
+		"armor_visual": ArmorVisualRegistry.record_for(armor_id),
+		"visible_authored_rigs": find_children("AuthoredRig", "Node3D", true, false).size(),
+		"objects_below_surface": below_surface,
+		"boss_id": "bramblewood_thornwarden",
+		"boss_active": matriarch != null and is_instance_valid(matriarch),
+		"castle_active": _castle_landmark != null and is_instance_valid(_castle_landmark),
+	}
+
+func save_android_profile_report(path: String = "user://android_profile_report.json") -> bool:
+	if android_profile_telemetry == null:
+		return false
+	return android_profile_telemetry.save_report(path)
+
+func record_golden_route_signal(signal_id: String) -> bool:
+	if golden_route_tracker == null:
+		return false
+	return golden_route_tracker.record_signal(signal_id)
+
+func get_golden_route_report() -> Dictionary:
+	if golden_route_tracker == null:
+		return {"complete": false, "beats": [], "missing_signals": [], "signal_count": 0}
+	return golden_route_tracker.route_report()
 
 func _init_signals() -> void:
 	# Hero signals
@@ -87,6 +260,7 @@ func _setup_grove() -> void:
 	current_grove_state = int(game_state.current_stage)
 	hero.global_position = player_spawn.global_position
 	hushling.global_position = hushling_spawn.global_position
+	_conform_quest_anchors_to_terrain()
 
 	# Killing the starter sprite is what opens Chapter II
 	if hushling != null and hushling.has_signal("died"):
@@ -103,6 +277,45 @@ func _setup_grove() -> void:
 	
 	# Sync world visuals to any restored quest state
 	_update_grove_for_stage()
+	_start_golden_route_if_needed()
+
+## Quest anchors used authored Y=0.5 before terrain relief was introduced.
+## Keep their X/Z gameplay coordinates stable, but lift the complete node
+## (visuals, light, and pickup collision together) onto the live surface.
+func _conform_quest_anchors_to_terrain() -> void:
+	var terrain := get_node_or_null("Terrain")
+	if terrain == null or not terrain.has_method("sample_surface_height"):
+		return
+	for anchor in [shard_spawn, beacon_spawn]:
+		if anchor == null:
+			continue
+		var p: Vector3 = anchor.global_position
+		p.y = float(terrain.call("sample_surface_height", p)) + 0.35
+		anchor.global_position = p
+
+func _conform_runtime_anchors() -> void:
+	var terrain := get_node_or_null("Terrain") as TerrainRelief
+	if terrain == null:
+		return
+	var seen: Dictionary = {}
+	for group_name in ["portal", "reward", "chest", "gathering", "task", "event"]:
+		for candidate in get_tree().get_nodes_in_group(group_name):
+			var anchor := candidate as Node3D
+			if anchor == null or not is_ancestor_of(anchor) or seen.has(anchor):
+				continue
+			seen[anchor] = true
+			terrain.conform_anchor(anchor, float(anchor.get_meta("terrain_offset", 0.08)))
+	_conform_quest_anchors_to_terrain()
+
+func _start_golden_route_if_needed() -> void:
+	if golden_route_tracker == null or golden_route_tracker.active:
+		return
+	# A clean arrival owns the pacing clock. Recovered checkpoints must not
+	# restart or overwrite route timing after defeat, reload, or travel.
+	if current_grove_state == GameState.QuestStage.SEEK_SPRITE \
+			and str(game_state.route_checkpoint_id) == "grove_arrival" \
+			and game_state.get_activity_recovery().is_empty():
+		start_golden_route_tracker()
 
 func _on_starter_hushling_died() -> void:
 	if game_state.current_stage != GameState.QuestStage.SEEK_SPRITE or hushling_defeated:
@@ -116,7 +329,16 @@ func _on_stage_changed(new_stage: int) -> void:
 	_spawn_wave(new_stage)
 	_update_grove_for_stage()
 	_update_quest_board()
+	_play_realm_audio(Bestiary.realm_id_for_stage(new_stage))
+	if android_profile_telemetry != null:
+		android_profile_telemetry.record_route_event("stage_%d" % new_stage)
+	refresh_route_markers()
+	route_feedback(str(game_state.get_quest_instruction(game_state.current_stage)), "stage_objective_%d" % new_stage)
 	# Stage atmosphere re-grades via DayNightCycle's bias layer (per frame)
+
+func _play_realm_audio(realm_id: String) -> void:
+	if _realm_audio_beds != null and is_instance_valid(_realm_audio_beds):
+		_realm_audio_beds.play_realm_ambient(realm_id)
 
 ## === Realms: palette bias on the shared grove ===
 func _apply_realm_theme(stage: int) -> void:
@@ -331,21 +553,24 @@ func _spawn_matriarch(practice: bool = false) -> void:
 	if matriarch != null and is_instance_valid(matriarch):
 		return  # an earlier Matriarch still stands
 	matriarch_spawned = true
-	var scene: PackedScene = load("res://scenes/entities/boss_matriarch.tscn")
+	var scene: PackedScene = load("res://scenes/entities/boss_bramblewood_thornwarden.tscn")
 	if scene == null:
-		push_error("WorldManager: Matriarch scene missing!")
+		push_error("WorldManager: Thorn Warden scene missing!")
 		return
 	matriarch = scene.instantiate()
 	add_child(matriarch)
 	if "is_practice" in matriarch:
 		matriarch.is_practice = practice
 	matriarch.global_position = beacon_spawn.global_position + Vector3(0, 0.1, 6)
+	var terrain := get_node_or_null("Terrain") as TerrainRelief
+	if terrain != null:
+		terrain.conform_anchor(matriarch, 0.12)
 	if matriarch.has_method("set_encounter_origin"):
 		matriarch.set_encounter_origin(matriarch.global_position)
 	if camera_rig:
 		camera_rig.add_shake(0.6)
 		camera_rig.play_boss_intro(matriarch)
-	audio.start_boss_score("matriarch")
+	audio.start_boss_score("thorn_warden")
 	if matriarch.has_signal("phase_changed"):
 		matriarch.phase_changed.connect(_on_matriarch_phase_changed)
 	if matriarch.has_signal("encounter_reset"):
@@ -393,7 +618,8 @@ func _exit_tree() -> void:
 func _open_boss_gate() -> void:
 	if _gate_opened:
 		return
-	if game_state.has_boss_killed(MATRIARCH_BOSS_KEY):
+	if game_state.has_boss_killed(THORN_WARDEN_BOSS_KEY) \
+			or game_state.has_boss_killed(MATRIARCH_BOSS_KEY):
 		_apply_post_matriarch_state(false)
 		_spawn_practice_altar()
 		return
@@ -464,6 +690,10 @@ func _spawn_practice_altar() -> void:
 	mat.emission_energy_multiplier = 0.6
 	pillar.material_override = mat
 	_practice_altar.add_child(pillar)
+	var target := TRAINING_TARGET_SCENE.instantiate()
+	target.name = "CombatTrainingTarget"
+	target.position = Vector3(0.0, 1.0, 1.8)
+	_practice_altar.add_child(target)
 	add_child(_practice_altar)
 	_practice_altar.global_position = relic_pedestal.global_position \
 		if relic_pedestal != null else beacon_spawn.global_position + Vector3(4, 0, 0)
@@ -624,8 +854,14 @@ func _get_nearby_interactable() -> Node:
 	return closest
 
 func _on_player_defeated() -> void:
+	if game_state.has_method("fail_activity"):
+		game_state.fail_activity("Defeated in the active activity.")
 	# Reset to last safe state
-	hero.global_position = player_spawn.global_position
+	var respawn := player_spawn.global_position
+	if game_state.route_respawn_position is Vector2:
+		var saved := game_state.route_respawn_position
+		respawn = Vector3(saved.x, player_spawn.global_position.y, saved.y)
+	hero.global_position = respawn
 	game_state.hp = game_state.max_hp
 	game_state.hp_changed.emit(0, game_state.hp)
 	game_state.combat_state = GameState.CombatState.EXPLORING

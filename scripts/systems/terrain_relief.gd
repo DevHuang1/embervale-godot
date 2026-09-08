@@ -9,13 +9,14 @@ class_name TerrainRelief
 
 ## Keep the default grid below 65,535 vertices. Some mobile/compatibility
 ## drivers otherwise truncate the indexed surface into rectangular strips.
-## 240 subdivisions produce 58,081 vertices.
-@export_range(32, 254, 1) var subdivisions: int = 240
-## Flat-world presentation: hills and ridges are intentionally disabled.
-## Keep the parameters exposed for saved-scene compatibility and future toggles.
-@export var ridge_amplitude: float = 0.0
-@export var roll_amplitude: float = 0.0
-@export var carve_amplitude: float = 0.0
+## 128 subdivisions preserve readable rolling relief while keeping startup and
+## mobile collision generation bounded.
+@export_range(32, 254, 1) var subdivisions: int = 128
+## Authored relief stays gentle around gameplay anchors and rises toward
+## readable landmark ridges in the surrounding traversal space.
+@export var ridge_amplitude: float = 1.15
+@export var roll_amplitude: float = 0.42
+@export var carve_amplitude: float = 0.28
 @export var flatten_radius: float = 7.0
 
 const HALF_EXTENT: float = 300.0
@@ -56,25 +57,27 @@ const REALM_TERRAIN := {
 		"grass_color": Color(0.30, 0.48, 0.20),
 		"grass_dry": Color(0.48, 0.46, 0.20),
 		"dirt_color": Color(0.30, 0.22, 0.13),
+		"dirt_amount": 0.68, "sand_amount": 0.24,
 		"stone_color": Color(0.38, 0.38, 0.35),
 		"crest_color": Color(0.45, 0.44, 0.40),
 "accent_color": Color(0.96, 0.72, 0.29),
 			"accent_strength": 0.35, "realm_tint": Color(0.88, 1.0, 0.72),
 			"realm_tint_strength": 0.16, "moisture_strength": 0.12,
 			"moss_color": Color(0.20, 0.52, 0.22), "moss_strength": 0.34,
-			"terrain_brightness": 1.55, "uv_world_scale": 0.34, "tex_gain": 1.9,
+			"terrain_brightness": 1.18, "uv_world_scale": 0.15, "tex_gain": 1.34,
 	},
 	"whispergrove": {
 		"grass_color": Color(0.32, 0.50, 0.22),
 		"grass_dry": Color(0.50, 0.48, 0.22),
 		"dirt_color": Color(0.31, 0.24, 0.14),
+		"dirt_amount": 0.60, "sand_amount": 0.22,
 		"stone_color": Color(0.40, 0.40, 0.37),
 		"crest_color": Color(0.47, 0.46, 0.42),
 "accent_color": Color(1.00, 0.86, 0.45),
 			"accent_strength": 0.22, "realm_tint": Color(0.76, 0.98, 0.82),
 			"realm_tint_strength": 0.22, "moisture_strength": 0.28,
 			"moss_color": Color(0.28, 0.72, 0.40), "moss_strength": 0.58,
-			"terrain_brightness": 1.52, "uv_world_scale": 0.30, "tex_gain": 1.9,
+			"terrain_brightness": 1.20, "uv_world_scale": 0.14, "tex_gain": 1.32,
 	},
 	"mistfen": {
 		"grass_color": Color(0.18, 0.32, 0.26),
@@ -82,36 +85,38 @@ const REALM_TERRAIN := {
 		"dirt_color": Color(0.16, 0.21, 0.24),
 		"stone_color": Color(0.30, 0.34, 0.36),
 		"crest_color": Color(0.36, 0.41, 0.43),
-		"dirt_amount": 0.6,
+		"dirt_amount": 0.78, "sand_amount": 0.18,
 "accent_color": Color(0.55, 0.85, 1.00),
 			"accent_strength": 0.28, "realm_tint": Color(0.54, 0.78, 0.82),
 			"realm_tint_strength": 0.30, "moisture_strength": 0.86,
 			"moss_color": Color(0.22, 0.62, 0.58), "moss_strength": 0.48,
-			"terrain_brightness": 1.38, "uv_world_scale": 0.33, "tex_gain": 2.0,
+			"terrain_brightness": 1.12, "uv_world_scale": 0.15, "tex_gain": 1.38,
 	},
 	"heartwood": {
 		"grass_color": Color(0.36, 0.28, 0.16),
 		"grass_dry": Color(0.52, 0.36, 0.16),
 		"dirt_color": Color(0.23, 0.15, 0.09),
+		"dirt_amount": 0.82, "sand_amount": 0.28,
 		"stone_color": Color(0.30, 0.26, 0.24),
 		"crest_color": Color(0.38, 0.31, 0.26),
 "accent_color": Color(1.00, 0.45, 0.12),
 			"accent_strength": 0.50, "realm_tint": Color(1.0, 0.62, 0.34),
 			"realm_tint_strength": 0.20, "moisture_strength": 0.08,
 			"moss_color": Color(0.48, 0.20, 0.08), "moss_strength": 0.22,
-			"terrain_brightness": 1.48, "uv_world_scale": 0.31, "tex_gain": 1.8,
+			"terrain_brightness": 1.16, "uv_world_scale": 0.14, "tex_gain": 1.36,
 	},
 	"moonfen": {
 		"grass_color": Color(0.28, 0.22, 0.42),
 		"grass_dry": Color(0.36, 0.28, 0.48),
 		"dirt_color": Color(0.13, 0.10, 0.22),
+		"dirt_amount": 0.66, "sand_amount": 0.24,
 		"stone_color": Color(0.22, 0.20, 0.30),
 		"crest_color": Color(0.28, 0.25, 0.38),
 "accent_color": Color(0.45, 0.72, 1.00),
 			"accent_strength": 0.55, "realm_tint": Color(0.58, 0.46, 1.0),
 			"realm_tint_strength": 0.34, "moisture_strength": 0.42,
 			"moss_color": Color(0.30, 0.22, 0.62), "moss_strength": 0.34,
-			"terrain_brightness": 1.42, "uv_world_scale": 0.32, "tex_gain": 1.9,
+			"terrain_brightness": 1.14, "uv_world_scale": 0.15, "tex_gain": 1.35,
 	},
 }
 
@@ -121,6 +126,7 @@ const REALM_TERRAIN := {
 const POM_BY_LEVEL := [0, 1, 2]
 
 func _ready() -> void:
+	add_to_group("terrain_relief")
 	terrain_mesh.mesh = _build_mesh()
 	terrain_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	var ground := _load_realm_material()
@@ -140,22 +146,39 @@ func _load_realm_material() -> ShaderMaterial:
 	for path in ["res://assets/materials/terrain_%s.tres" % realm,
 			"res://assets/materials/terrain_bramblewood.tres"]:
 		if ResourceLoader.exists(path):
-			var mat := load(path) as ShaderMaterial
+			var source := load(path) as ShaderMaterial
+			var mat := source.duplicate(true) as ShaderMaterial if source != null else null
 			if mat != null:
+				# Keep the UE-style terrain shader as the live path: it owns the
+				# sampled albedo, macro breakup, slope masks, and mobile tier gates.
+				# The experimental layer compositor remains available for tests and
+				# later A/B work, but must not silently flatten the player-facing map.
+				mat.shader = load("res://assets/shaders/terrain_ground.gdshader")
 				return mat
 	var ground := ShaderMaterial.new()
 	ground.shader = load("res://assets/shaders/terrain_ground.gdshader")
 	return ground
 
 func _apply_palette(ground: ShaderMaterial) -> void:
+	# Keep sampler bindings explicit at runtime.  The terrain material can be
+	# replaced by a realm scene, quality reload, or streamed-world setup; relying
+	# only on the .tres sampler state made the shader fall back to white on some
+	# Android/import paths, which flattened grass, sand, and soil into tint-only
+	# colors.
+	_bind_ground_texture_layers(ground)
 	var pal: Dictionary = REALM_TERRAIN.get(_realm_id(),
 		REALM_TERRAIN["bramblewood"])
+	# Sand is intentionally explicit: without this binding the layer shader
+	# receives its default brown and sand reads like dirt on mobile.
+	ground.set_shader_parameter("sand_color",
+		pal.get("sand_color", Color(0.68, 0.54, 0.30)))
 	for key in ["grass_color", "grass_dry", "dirt_color", "stone_color",
 			"crest_color"]:
 		if pal.has(key):
 			ground.set_shader_parameter(key, pal[key])
-	if pal.has("dirt_amount"):
-		ground.set_shader_parameter("dirt_amount", pal["dirt_amount"])
+	for key in ["dirt_amount", "sand_amount"]:
+		if pal.has(key):
+			ground.set_shader_parameter(key, pal[key])
 	for key in ["realm_tint", "realm_tint_strength", "moisture_strength",
 			"moss_color", "moss_strength", "terrain_brightness",
 			"uv_world_scale", "tex_gain"]:
@@ -169,6 +192,34 @@ func _apply_palette(ground: ShaderMaterial) -> void:
 	ground.set_shader_parameter("macro_breakup_strength", lerpf(0.34, 0.58, moisture))
 	ground.set_shader_parameter("micro_grain_strength", lerpf(0.20, 0.34, moisture))
 	ground.set_shader_parameter("puddle_sheen_strength", lerpf(0.10, 0.34, moisture))
+	ground.set_shader_parameter("tex_blend", 1.0)
+	ground.set_shader_parameter("moss_strength", maxf(float(pal.get("moss_strength", 0.0)), 0.42))
+
+func _bind_ground_texture_layers(ground: ShaderMaterial) -> void:
+	var layers := {
+		"grass": "grass",
+		"dirt": "dirt",
+		"sand": "sand",
+		"rock": "rock",
+	}
+	for layer_value in layers:
+		var layer := str(layer_value)
+		var layer_name := str(layers[layer_value])
+		var v2_root := "res://assets/textures/stylized/%s_v2" % layer_name
+		var root := v2_root if ResourceLoader.exists("%s/albedo.png" % v2_root) else "res://assets/textures/stylized/%s" % layer_name
+		ground.set_shader_parameter("%s_tex" % layer, load("%s/albedo.png" % root))
+		ground.set_shader_parameter("%s_norm" % layer, load("%s/normal.png" % root))
+		ground.set_shader_parameter("%s_rough" % layer, load("%s/roughness.png" % root))
+	for layer_name in ["moss", "mud"]:
+		var root := "res://assets/textures/stylized/%s_v2" % layer_name
+		if not ResourceLoader.exists("%s/albedo.png" % root):
+			root = "res://assets/textures/stylized/%s" % layer_name
+		ground.set_shader_parameter("%s_tex" % layer_name,
+			load("%s/albedo.png" % root))
+		ground.set_shader_parameter("%s_norm" % layer_name,
+			load("%s/normal.png" % root))
+		ground.set_shader_parameter("%s_rough" % layer_name,
+			load("%s/roughness.png" % root))
 
 func _on_quality_level(level: int) -> void:
 	var ground := terrain_mesh.material_override as ShaderMaterial
@@ -195,9 +246,6 @@ func _realm_id() -> String:
 	return "bramblewood"
 
 func height_at(x: float, z: float) -> float:
-	# Keep rendered terrain and ConcavePolygonShape3D perfectly flat so no
-	# character, enemy, or camera can climb/fall through an authored hill.
-	return 0.0
 	var p := Vector2(x, z)
 	var r := p.length()
 
@@ -224,6 +272,74 @@ func height_at(x: float, z: float) -> float:
 	h *= _flatten_mask(p)
 
 	return clampf(h, -1.2, 8.0)
+
+func get_surface_profile(world_position: Vector3) -> Dictionary:
+	var p := Vector2(world_position.x, world_position.z)
+	var height := height_at(p.x, p.y)
+	var nearby := height_at(p.x + 0.5, p.y) - height
+	var across := height_at(p.x, p.y + 0.5) - height
+	var slope := clampf(sqrt(nearby * nearby + across * across) * 2.0, 0.0, 1.0)
+	var wet := clampf((0.45 - height) * 0.8 + (1.0 - slope) * 0.18, 0.0, 1.0)
+	return {
+		"height": height,
+		"normal": sample_surface_normal(world_position),
+		"slope": slope,
+		"moisture": wet,
+		"realm": _realm_id(),
+		"material_hint": "rock" if slope > 0.68 else ("mud" if wet > 0.62 else "grass"),
+		"traversable": slope < 0.82,
+	}
+
+func sample_surface_height(world_position: Vector3) -> float:
+	return height_at(world_position.x, world_position.z)
+
+func sample_surface_normal(world_position: Vector3) -> Vector3:
+	var step := 0.5
+	var dx := (height_at(world_position.x + step, world_position.z)
+		- height_at(world_position.x - step, world_position.z)) / (step * 2.0)
+	var dz := (height_at(world_position.x, world_position.z + step)
+		- height_at(world_position.x, world_position.z - step)) / (step * 2.0)
+	return Vector3(-dx, 1.0, -dz).normalized()
+
+func validate_surface_visibility() -> Dictionary:
+	var material := terrain_mesh.material_override as ShaderMaterial
+	var mesh := terrain_mesh.mesh as ArrayMesh
+	var aabb := mesh.get_aabb() if mesh != null else AABB()
+	return {"valid": material != null and mesh != null and not aabb.size.is_zero_approx(),
+		"opaque": material != null and material.shader != null and not material.shader.code.contains("ALPHA"),
+		"depth_draw": "depth_draw_opaque" in str(material.shader.code) if material != null and material.shader != null else false,
+		"cull_fallback": "cull_disabled" in str(material.shader.code) if material != null and material.shader != null else false,
+		"aabb": aabb, "surface_height": sample_surface_height(global_position)}
+
+func conform_anchor(node: Node3D, vertical_offset: float = 0.0) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+	var target := node.global_position if node.is_inside_tree() else node.position
+	target.y = sample_surface_height(target) + vertical_offset
+	if node.is_inside_tree():
+		node.global_position = target
+	else:
+		node.position = target
+	node.set_meta("terrain_surface_height", target.y - vertical_offset)
+	node.set_meta("terrain_vertical_offset", vertical_offset)
+
+func get_material_report(world_position: Vector3) -> Dictionary:
+	var material := terrain_mesh.material_override as ShaderMaterial
+	var textures: Dictionary = {}
+	if material != null:
+		for parameter in ["grass_tex", "dirt_tex", "sand_tex", "mud_tex", "moss_tex", "rock_tex"]:
+			var resource := material.get_shader_parameter(parameter) as Texture2D
+			textures[parameter] = resource.resource_path if resource != null else ""
+	var profile := get_surface_profile(world_position)
+	return {
+		"realm": _realm_id(),
+		"shader": material.shader.resource_path if material != null and material.shader != null else "",
+		"textures": textures,
+		"material_hint": profile.get("material_hint", "grass"),
+		"height": profile.get("height", 0.0),
+		"moisture": profile.get("moisture", 0.0),
+		"uv_world_scale": material.get_shader_parameter("uv_world_scale") if material != null else 0.0,
+	}
 
 ## Long, gentle northern ridge ("The Ashen Rise"). Bell-curve across its
 ## length and width, with fbm-shaping so the crest has natural saddles
@@ -309,7 +425,7 @@ func _build_heightfield_collision() -> void:
 			child.queue_free()
 
 	# Collision does not need visual-grid density on this flat terrain.
-	const GRID := 128
+	const GRID := 64
 	var cell := (HALF_EXTENT * 2.0) / float(GRID)
 	var faces := PackedVector3Array()
 	faces.resize(GRID * GRID * 6)

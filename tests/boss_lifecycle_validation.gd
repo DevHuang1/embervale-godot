@@ -18,6 +18,17 @@ func _ready() -> void:
 	add_child(boss)
 	boss.set_encounter_origin(Vector3(3.0, 0.0, -2.0))
 	await get_tree().process_frame
+	for attack_kind in ["mend", "basic_slam", "ultimate", "root_prison",
+			"thorn_rain", "bramble_storm", "thorn_lattice", "spore_bloom"]:
+		var timing: Dictionary = BossBase.attack_timing(attack_kind)
+		_assert_true(float(timing.get("anticipation", -1.0)) >= 0.0 \
+				and float(timing.get("impact_at", -1.0)) \
+				== float(timing.get("anticipation", -2.0)) \
+				and float(timing.get("active", -1.0)) > 0.0 \
+				and float(timing.get("recovery", -1.0)) > 0.0 \
+				and float(timing.get("total_lock", -1.0)) \
+				>= float(timing.get("impact_at", 0.0)),
+			"%s timing exposes readable anticipation, impact, and recovery" % attack_kind)
 
 	_assert_true(boss._arena_growths.size() == 12,
 		"arena transformation has a fixed twelve-mesh cap")

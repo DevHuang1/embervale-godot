@@ -41,7 +41,11 @@ func _ready() -> void:
 		vis.scale = Vector3(s, s, s)
 
 	_apply_biome_palette()
-	_build_boss_identity()
+	# Procedural realm identity (antlers/crown/spikes) belongs to the
+	# fallback silhouette only: an authored GLB already carries its realm
+	# look, so layer it only when no authored model mounted.
+	if not authored_model_mounted:
+		_build_boss_identity()
 	sfx_profile = "ember_glass" if def_id == "cinderhart_colossus" else (
 		"grave_moss" if def_id == "moonfen_oracle" else sfx_profile)
 	attack_cooldowns["special_1"] = 3.0

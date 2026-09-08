@@ -54,7 +54,10 @@ func _ready() -> void:
 	mend_max_uses = 2
 	super._ready()
 	_setup_attacks()
-	_build_thornwarden_model()
+	# The authored Thorn Regent GLB is the primary live silhouette. Build the
+	# procedural root golem only when that reviewed asset cannot be resolved.
+	if not authored_model_mounted:
+		_build_thornwarden_model()
 	_build_overkill_layer()
 
 func _setup_attacks() -> void:

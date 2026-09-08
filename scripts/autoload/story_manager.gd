@@ -25,17 +25,17 @@ const STORY_DATABASE := {
 	"intro_grove": {
 		"title": "The Whispergrove",
 		"body":  "The old warmth road brought me here. The grove is quiet — too quiet. Something stirs in the bramble.",
-		"realm": "bramblewood", "stage": 0, "icon": "📖"
+		"realm": "bramblewood", "stage": 0, "icon": "quest"
 	},
 	"first_hushling_sighted": {
 		"title": "A Bramble Sprite",
 		"body":  "A flicker of green light in the ferns. The sprite circled once, then vanished. My lantern knows the way.",
-		"realm": "bramblewood", "stage": 0, "icon": "🌿"
+		"realm": "bramblewood", "stage": 0, "icon": "nature"
 	},
 	"hushling_defeated": {
 		"title": "The Sprite Answered",
 		"body":  "The bramble sprite fell. Where it stood, a warm shard — a fragment of the old beacon. The grove exhaled.",
-		"realm": "bramblewood", "stage": 1, "icon": "✨"
+		"realm": "bramblewood", "stage": 1, "icon": "comet"
 	},
 	"shard_collected": {
 		"title": "Ember Shard",
@@ -60,17 +60,17 @@ const STORY_DATABASE := {
 	"mistfen_unlocked": {
 		"title": "The Fen Gate Opens",
 		"body":  "Beyond the Moonfen gate, cold mist rises. Fenlings orbit at the edge of sight. The fen holds its own warmth — or the cold that passes for it.",
-		"realm": "mistfen", "stage": 3, "icon": "🌊"
+		"realm": "mistfen", "stage": 3, "icon": "nature"
 	},
 	"siltcrawler_sighted": {
 		"title": "Something Beneath the Mud",
 		"body":  "The ground moved. Not an earthquake — something alive. Bioluminescent trails below the surface. The Silt Crawler knows I am here.",
-		"realm": "mistfen", "stage": 3, "icon": "🦀"
+		"realm": "mistfen", "stage": 3, "icon": "nature"
 	},
 	"heartwood_unlocked": {
 		"title": "The Heartwood Burns",
 		"body":  "Heat before light. The Heartwood's entrance scorches the mist away. Ember stone crumbles underfoot. Something enormous lives inside.",
-		"realm": "heartwood", "stage": 3, "icon": "🔥"
+		"realm": "heartwood", "stage": 3, "icon": "fire"
 	},
 }
 
@@ -124,7 +124,7 @@ func _add_journal(event_id: String, entry_def: Dictionary) -> void:
 		"body":      str(entry_def.get("body",   "")),
 		"realm":     str(entry_def.get("realm",  "")),
 		"stage":     int(entry_def.get("stage",   0)),
-		"icon":      str(entry_def.get("icon",   "📖")),
+		"icon":      str(entry_def.get("icon",   "quest")),
 		"timestamp": Time.get_unix_time_from_system(),
 	}
 	_journal.append(entry)

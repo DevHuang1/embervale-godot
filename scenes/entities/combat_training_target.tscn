@@ -1,0 +1,42 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/entities/combat_training_target.gd" id="1_script"]
+[ext_resource type="Script" path="res://scripts/ui/enemy_health_bar.gd" id="2_health"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_target"]
+radius = 0.7
+height = 1.4
+radial_segments = 12
+
+[sub_resource type="StandardMaterial3D" id="Material_target"]
+albedo_color = Color(0.34, 0.22, 0.16, 1)
+roughness = 0.9
+
+[sub_resource type="CapsuleShape3D" id="Capsule_target"]
+radius = 0.7
+height = 1.4
+
+[node name="CombatTrainingTarget" type="CharacterBody3D" groups=["enemy"]]
+script = ExtResource("1_script")
+
+[node name="Body" type="MeshInstance3D" parent="."]
+mesh = SubResource("SphereMesh_target")
+material_override = SubResource("Material_target")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("Capsule_target")
+
+[node name="EnemyHealthBar" type="Node3D" parent="."]
+script = ExtResource("2_health")
+height_offset = 1.55
+show_name_when_targeted = true
+
+[node name="PracticeLabel" type="Label3D" parent="."]
+position = Vector3(0, 2.05, 0)
+text = "PRACTICE  ·  NO REWARDS"
+font_size = 24
+outline_size = 6
+outline_modulate = Color(0.03, 0.02, 0.02, 0.9)
+modulate = Color(0.95, 0.76, 0.42, 0.95)
+billboard = 1
+no_depth_test = true

@@ -34,6 +34,12 @@ enum Pattern { ORBIT, FEINT, LUNGE, WINDUP, RECOVER, BRAMBLE_BURST,
 # Hard-tier flag: bursts become a tracking 3-spike thorn volley.
 @export var thorn_volley: bool = false
 @export var archetype: String = "hushling"
+@export var aggro_radius: float = 14.0
+@export var attack_radius: float = 3.2
+@export var pursuit_radius: float = 18.0
+@export var disengage_radius: float = 24.0
+var _player_engaged := false
+var _aggro_check_timer := 0.0
 ## Authored-model drop-in: world-unit height target + replacing the procedural
 ## silhouette with the mounted rig once the shared creature FBX ships.
 @export var authored_rig_height: float = 0.85
@@ -127,6 +133,7 @@ func configure_archetype(profile: String) -> void:
 # Telegraphed counter-strike: after being struck in melee range the sprite
 # winds up visibly before answering. Dodging through the strike is rewarded.
 @export var counter_windup: float = 0.72
+@export var accessibility_telegraph_assist: bool = false
 @export var counter_range: float = 2.3
 @export var counter_cooldown: float = 2.0
 var counter_timer: float = 0.0
@@ -170,6 +177,32 @@ var _guard_active: bool = false
 var _drain_target: Node3D = null
 var _stagger_threshold: float = 30.0
 var _stagger_cooldown: float = 0.0
+var _poise: float = 0.0
+
+const SPECIAL_ATTACK_TIMING := {
+	"charge": {"anticipation": 0.8, "active": 0.6, "recovery": 0.35},
+	"bramble_charge": {"anticipation": 1.4, "active": 0.4, "recovery": 0.55},
+	"counter": {"anticipation": 0.72, "active": 0.2, "recovery": 0.56},
+	"charger": {"radius": 6.0, "anticipation": 0.9, "active": 0.65, "recovery": 0.85},
+	"ambusher": {"radius": 3.0, "anticipation": 0.72, "active": 0.3, "recovery": 0.8},
+	"mire_stalker": {"radius": 5.0, "anticipation": 0.9, "active": 0.45, "recovery": 0.85},
+	"ember_warden": {"radius": 4.5, "anticipation": 0.95, "active": 0.35, "recovery": 0.9},
+	"spore_weaver": {"radius": 5.5, "anticipation": 1.05, "active": 0.5, "recovery": 0.95},
+	"relic_leech": {"radius": 3.0, "anticipation": 0.85, "active": 1.0, "recovery": 0.9},
+	"fenling": {"radius": 5.0, "anticipation": 0.8, "active": 0.35, "recovery": 0.8},
+	"moonfen_fenling": {"radius": 6.5, "anticipation": 1.0, "active": 0.5, "recovery": 0.95},
+	"elite": {"radius": 6.0, "anticipation": 1.1, "active": 0.4, "recovery": 1.0},
+}
+
+static func special_attack_timing(kind: String) -> Dictionary:
+	return (SPECIAL_ATTACK_TIMING.get(kind, {}) as Dictionary).duplicate(true)
+
+func _special_timing() -> Dictionary:
+	var timing := special_attack_timing(archetype)
+	return timing if not timing.is_empty() else special_attack_timing("charger")
+
+func get_poise_ratio() -> float:
+	return clampf(_poise / maxf(_stagger_threshold, 1.0), 0.0, 1.0)
 
 ## Creature detail pass: back thorns, stub root-legs, claw nubs.
 ## Parented under Visual so the squash-hop animator drives them free.
@@ -197,12 +230,17 @@ func _build_creature_details() -> void:
 			_build_default_claws(dark_mat)
 
 func _ready() -> void:
+	var accessibility_config := ConfigFile.new()
+	accessibility_config.load(AudioManager.SETTINGS_PATH)
+	accessibility_telegraph_assist = bool(accessibility_config.get_value(
+		"gameplay", "telegraph_assist", false))
 	hp = max_hp
 	var health_bar := preload("res://scripts/ui/enemy_health_bar.gd").new()
 	health_bar.name = "EnemyHealthBar"
 	add_child(health_bar)
 	elemental_status = preload("res://scripts/systems/elemental_status.gd").new()
 	elemental_status.name = "ElementalStatus"
+	elemental_status.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(elemental_status)
 	collision_layer = 1 << 1  # Enemy layer
 	collision_mask = 1 << 0 | 1 << 5 | 1 << 6  # Player + Environment + Prop
@@ -358,6 +396,8 @@ func _snap_to_ground(delta: float) -> void:
 func _update_timers(delta: float) -> void:
 	if pattern_timer > 0:
 		pattern_timer -= delta
+	if _stagger_cooldown > 0.0:
+		_stagger_cooldown = maxf(0.0, _stagger_cooldown - delta)
 	
 	if lunge_cooldown > 0:
 		lunge_cooldown -= delta
@@ -386,6 +426,20 @@ func _update_pattern(delta: float) -> void:
 	var player = get_tree().get_first_node_in_group("player")
 	if not player:
 		return
+	var distance := global_position.distance_to(player.global_position)
+	if not _player_engaged:
+		_aggro_check_timer = maxf(_aggro_check_timer - delta, 0.0)
+		if _aggro_check_timer <= 0.0:
+			_aggro_check_timer = 0.15
+			_player_engaged = distance <= aggro_radius and _has_player_line_of_sight(player)
+	if _player_engaged and distance > disengage_radius:
+		_player_engaged = false
+		current_pattern = Pattern.ORBIT
+		pattern_timer = 0.4
+	if not _player_engaged:
+		velocity.x = move_toward(velocity.x, 0.0, move_speed * delta * 4.0)
+		velocity.z = move_toward(velocity.z, 0.0, move_speed * delta * 4.0)
+		return
 	
 	if stun_timer > 0:
 		current_pattern = Pattern.RECOVER
@@ -398,7 +452,7 @@ func _update_pattern(delta: float) -> void:
 		match current_pattern:
 			Pattern.ORBIT:
 				# Special skill takes priority when its cooldown is ready.
-				if special_timer <= 0.0 and not _special_active:
+				if special_timer <= 0.0 and not _special_active and dist <= pursuit_radius:
 					_begin_special_telegraph()
 				elif archetype in ["thorn_charger"] and lunge_cooldown <= 0 and dist < orbit_distance + 4.0:
 					_begin_charge()
@@ -412,7 +466,7 @@ func _update_pattern(delta: float) -> void:
 					_begin_drain()
 				elif dist < burst_radius + 2.0 and burst_timer <= 0:
 					_begin_bramble_burst()
-				elif dist < orbit_distance + 2.6 and lunge_cooldown <= 0:
+				elif dist <= attack_radius and lunge_cooldown <= 0:
 					current_pattern = Pattern.LUNGE
 					pattern_timer = 0.45
 					lunge_cooldown = 3.0
@@ -423,7 +477,7 @@ func _update_pattern(delta: float) -> void:
 				else:
 					current_pattern = Pattern.FEINT
 					pattern_timer = 0.35
-				
+
 			Pattern.FEINT, Pattern.LUNGE:
 				current_pattern = Pattern.RECOVER
 				pattern_timer = 0.90
@@ -469,6 +523,21 @@ func _update_pattern(delta: float) -> void:
 				# Micro-spin sells the direction change
 				animator.trigger_spin(orbit_direction)
 
+func _has_player_line_of_sight(player: Node3D) -> bool:
+	var space := get_world_3d().direct_space_state
+	var origin := global_position + Vector3.UP * 1.0
+	var target := player.global_position + Vector3.UP * 1.0
+	var query := PhysicsRayQueryParameters3D.create(origin, target)
+	# Player layer plus environment layer: walls, cliffs, and dungeon doors
+	# must genuinely block aggro instead of being decorative ray targets.
+	query.collision_mask = (1 << 0) | (1 << 5)
+	query.exclude = [self]
+	var hit := space.intersect_ray(query)
+	return hit.is_empty() or hit.get("collider") == player
+
+func is_player_engaged() -> bool:
+	return _player_engaged
+
 func _begin_bramble_burst() -> void:
 	current_pattern = Pattern.BRAMBLE_BURST
 	pattern_timer = 0.72
@@ -486,13 +555,14 @@ func _begin_charge() -> void:
 	if player == null:
 		return
 	current_pattern = Pattern.CHARGE_TELEGRAPH
-	pattern_timer = 0.8
+	var timing := special_attack_timing("charge")
+	pattern_timer = float(timing.get("anticipation", 0.8))
 	_charge_target_pos = player.global_position
 	lunge_cooldown = 3.5
 	_modulate_eyes(Color(1.0, 0.2, 0.1))
 	audio.play_enemy_telegraph()
 	CombatFx.spawn_ground_telegraph(self, global_position, 2.0,
-		Color(1.0, 0.3, 0.1), 0.8)
+		Color(1.0, 0.3, 0.1), pattern_timer)
 
 func _begin_charge_rush() -> void:
 	current_pattern = Pattern.CHARGE_RUSH
@@ -614,11 +684,19 @@ func _resolve_drain() -> void:
 # Triggered when special_timer has elapsed while in ORBIT pattern.
 # =====================================================================
 
+func _telegraph_duration(base_seconds: float) -> float:
+	if not accessibility_telegraph_assist:
+		return base_seconds
+	return clampf(base_seconds * 1.25, base_seconds, 3.0)
+
 ## Begins the special-skill telegraph phase. Each archetype has its own
 ## telegraph VFX, audio cue, and eye-color flash.
 func _begin_special_telegraph() -> void:
+	var timing := _special_timing()
+	var anticipation := _telegraph_duration(float(timing.get("anticipation", 0.9)))
+	var special_radius := float(timing.get("radius", 3.0))
 	current_pattern = Pattern.SPECIAL_TELEGRAPH
-	pattern_timer = 0.9
+	pattern_timer = anticipation
 	_special_active = true
 	special_timer = special_cooldown
 	_modulate_eyes(Color(1.0, 0.9, 0.2))
@@ -630,37 +708,37 @@ func _begin_special_telegraph() -> void:
 	match archetype:
 		"charger", "thorn_charger":
 			CombatFx.spawn_ground_telegraph(self,
-				global_position + Vector3(0, 0.1, 0), 6.0,
-				Color(0.85, 0.45, 0.12, 0.55), 0.9)
+				global_position + Vector3(0, 0.1, 0), special_radius,
+				Color(0.85, 0.45, 0.12, 0.55), anticipation)
 		"ambusher":
 			CombatFx.spawn_telegraph(self,
 				global_position + Vector3(0, 0.3, 0),
 				Color(0.9, 0.7, 0.2), true)
 		"mire_stalker":
 			CombatFx.spawn_ring(self, global_position + Vector3(0, 0.05, 0),
-				5.0, Color(0.3, 0.9, 0.4, 0.35), 0.9)
+			special_radius, Color(0.3, 0.9, 0.4, 0.35), anticipation)
 		"ember_warden":
 			CombatFx.spawn_ring(self, global_position + Vector3(0, 0.2, 0),
-				4.5, Color(1.0, 0.45, 0.08, 0.5), 0.9)
+			special_radius, Color(1.0, 0.45, 0.08, 0.5), anticipation)
 		"spore_weaver":
 			CombatFx.spawn_ring(self, global_position + Vector3(0, 0.1, 0),
-				5.5, Color(0.55, 0.7, 0.3, 0.4), 0.9)
+			special_radius, Color(0.55, 0.7, 0.3, 0.4), anticipation)
 		"relic_leech":
 			CombatFx.spawn_telegraph(self, global_position + Vector3(0, 0.2, 0),
 				Color(0.55, 0.35, 0.95), true)
 		"fenling":
 			CombatFx.spawn_ground_telegraph(self,
-				global_position + Vector3(0, 0.1, 0), 5.0,
-				Color(0.4, 0.8, 1.0, 0.55), 0.9)
+				global_position + Vector3(0, 0.1, 0), special_radius,
+				Color(0.4, 0.8, 1.0, 0.55), anticipation)
 		"moonfen_fenling":
 			CombatFx.spawn_ring(self, global_position + Vector3(0, 0.0, 0),
-				6.5, Color(0.25, 0.6, 0.95, 0.45), 0.9)
+			special_radius, Color(0.25, 0.6, 0.95, 0.45), anticipation)
 		"elite":
 			# Chain lightning arcs outward from the elite.
 			var target := get_tree().get_first_node_in_group("player")
 			if target is Node3D and is_instance_valid(target):
 				var p3d := target as Node3D
-				if global_position.distance_to(p3d.global_position) <= 6.0:
+				if global_position.distance_to(p3d.global_position) <= special_radius:
 					CombatFx.spawn_vibrant_trail(self, global_position + Vector3(0, 0.3, 0),
 						p3d.global_position + Vector3(0, 0.3, 0),
 						Color(1.0, 0.4, 0.1, 0.95), Color(0.5, 0.85, 1.0, 0.85), 6)
@@ -707,7 +785,7 @@ func _resolve_special_active() -> void:
 	# Other archetypes complete instantly on telegraph resolve — they just
 	# need _resolve_special_active to flip back to RECOVER.
 	current_pattern = Pattern.RECOVER
-	pattern_timer = 0.85
+	pattern_timer = float(_special_timing().get("recovery", 0.85))
 	_special_active = false
 	_cloak_active = false
 	_shield_active = false
@@ -1248,15 +1326,17 @@ func take_damage(amount: int, knockback_dir: Vector3, critical: bool = false) ->
 				return
 	
 	hp -= amount
-	FloatingText.spawn_damage_on_entity(self, amount, critical)
+	ImpactDirector.dispatch_damage_event(self, amount, critical, knockback_dir)
 	var health_bar := get_node_or_null("EnemyHealthBar")
 	if health_bar != null and health_bar.has_method("notify_damage"):
 		health_bar.notify_damage()
 	animator.trigger_hit()
 	
-	# Stagger check
-	_stagger_cooldown -= 0.0
-	if amount >= _stagger_threshold and _stagger_cooldown <= 0:
+	# Poise accumulates across light hits; heavy attacks still break the same
+	# threshold in one blow. A break consumes the meter and starts the existing
+	# recovery lockout, making the loop readable and bounded.
+	_poise = minf(_stagger_threshold, _poise + float(amount))
+	if _poise >= _stagger_threshold and _stagger_cooldown <= 0.0:
 		_apply_stagger()
 	
 	# Visual feedback
@@ -1313,6 +1393,7 @@ func take_damage(amount: int, knockback_dir: Vector3, critical: bool = false) ->
 		die()
 
 func _apply_stagger() -> void:
+	_poise = 0.0
 	_stagger_cooldown = 4.0
 	current_pattern = Pattern.RECOVER
 	pattern_timer = 0.8
@@ -1327,7 +1408,8 @@ func _apply_stagger() -> void:
 ## perfect-dodge reward; leave the ring or stay airborne to whiff it.
 func _begin_counter_windup() -> void:
 	current_pattern = Pattern.WINDUP
-	pattern_timer = counter_windup
+	var windup := _telegraph_duration(counter_windup)
+	pattern_timer = windup
 	counter_timer = counter_cooldown
 	lunge_hit = false
 	burst_active = false
@@ -1340,7 +1422,7 @@ func _begin_counter_windup() -> void:
 	CombatFx.spawn_telegraph(self, global_position + Vector3(0, 0.35, 0),
 		Color(1.0, 0.32, 0.18), true)
 	CombatFx.spawn_ground_telegraph(self, global_position, counter_range,
-		Color(1.0, 0.45, 0.18), counter_windup)
+		Color(1.0, 0.45, 0.18), windup)
 
 func _resolve_counter_strike() -> void:
 	current_pattern = Pattern.RECOVER
@@ -1397,7 +1479,7 @@ func die() -> void:
 	if thorn_volley and randf() < 0.05:
 		CombatFx.spawn_burst(self, global_position + Vector3(0, 0.6, 0),
 			Color(0.55, 0.85, 1.0, 0.95), 18, 4.5, 0.7, 0.14)
-		game_state.add_diamonds(1, "💎 +1 diamond — a rare glint settles in your palm.")
+		game_state.add_diamonds(1, "+1 DIAMOND — a rare glint settles in your palm.")
 
 ## Hand the bramble husk to the pooled tumble-corpse system: a killing
 ## shove away from the hero plus spin; the husk bounces, settles, sinks.
@@ -1461,7 +1543,9 @@ func is_dead() -> bool:
 
 func apply_elemental_status(element: String, intensity: int = 1) -> void:
 	if elemental_status != null and elemental_status.has_method("apply"):
-		elemental_status.apply(element, intensity)
+		var applications: int = maxi(1, intensity)
+		for _index in applications:
+			elemental_status.apply(element, 4.0)
 
 func get_elemental_status_snapshot() -> Dictionary:
 	if elemental_status != null and elemental_status.has_method("status_snapshot"):
@@ -1710,4 +1794,3 @@ func _eye_scale_for_pattern() -> float:
 			return 0.85
 		_:
 			return 1.0
-

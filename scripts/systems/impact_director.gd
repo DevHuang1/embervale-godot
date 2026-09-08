@@ -127,6 +127,18 @@ static func apply_strike(context: Node, style: String, surface: String,
 	if element in ELEMENTS:
 		apply_element(context, element, hit_pos)
 
+## Target-side half of a damage event. Attackers still own contact timing and
+## damage calculation; receivers use this helper so numbers and camera
+## response cannot silently diverge between bosses and ordinary enemies.
+static func dispatch_damage_event(target: Node3D, amount: int, critical: bool,
+		knockback_dir: Vector3 = Vector3.ZERO) -> void:
+	if target == null or not is_instance_valid(target) or amount <= 0:
+		return
+	FloatingText.spawn_damage_on_entity(target, amount, critical)
+	var tier := "elite_hit" if critical or amount >= 24 else "light"
+	apply_feedback(target, tier, target.global_position + Vector3.UP * 0.85,
+		knockback_dir, 1.0 if critical else 0.72)
+
 
 ## Dispatch a named feedback tier through CameraRig. This is the native
 ## translation of the C# reference contract; existing VFX/audio remain below it.
@@ -150,7 +162,8 @@ static func apply_feedback(context: Node, tier: String, hit_pos: Vector3 = Vecto
 		var screen_fx := context.get_tree().get_first_node_in_group("screen_fx")
 		var profile: Dictionary = FEEDBACK_TIERS.get(tier, FEEDBACK_TIERS["light"])
 		if screen_fx != null and screen_fx.has_method("punch_chroma") \
-			and float(profile.chroma) > 0.0:
+			and float(profile.chroma) > 0.0 \
+			and not (OS.has_feature("mobile") or OS.get_name() in ["Android", "iOS"]):
 			screen_fx.punch_chroma(float(profile.chroma))
 
 

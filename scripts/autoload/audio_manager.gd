@@ -10,6 +10,10 @@ extends Node
 @export var sfx_volume: float = 0.8
 @export var music_volume: float = 0.6
 
+signal music_state_changed(state: String)
+const MUSIC_STATES := ["exploration", "danger", "elite", "boss", "victory", "defeat", "menu"]
+var music_state: String = "exploration"
+
 var players: Dictionary = {}
 var music_player: AudioStreamPlayer = null
 var ambient_playing: bool = false
@@ -43,14 +47,34 @@ var _boss_score_fading := false
 const SYNTH_SR := 44100
 var cue_config: AudioCueConfig = null
 var _cue_streams: Dictionary = {}   # cue name -> Array[AudioStreamWAV]
+const MOBILE_COMBAT_CUES: Array[String] = [
+	"skill_charge", "skill_whirl_spin", "skill_dash_zip", "skill_hurl",
+	"comet_fall", "heal_bloom_cue", "explosion", "slash_impact",
+	"elem_fire", "elem_frost", "elem_shock", "elem_nature"]
 
 const SETTINGS_PATH := "user://embervale_settings.cfg"
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keep music/UI sounds alive behind frozen-world interfaces
+	_ensure_standard_buses()
 	_load_settings()
 	_apply_volumes()
 	_load_cue_config()
+	if _is_mobile_runtime():
+		# These procedural cues otherwise synthesize their PCM buffers inside the
+		# skill button callback, producing a deterministic first-cast hitch.
+		_prewarm_mobile_combat_cues()
+
+func _ensure_standard_buses() -> void:
+	## Keep audio routing deterministic for imported scenes, tests, and fresh
+	## projects whose bus layout has not been authored yet.
+	for bus_name in ["SFX", "Music"]:
+		if AudioServer.get_bus_index(bus_name) >= 0:
+			continue
+		var index := AudioServer.bus_count
+		AudioServer.add_bus(index)
+		AudioServer.set_bus_name(index, bus_name)
+		AudioServer.set_bus_send(index, "Master")
 
 func _process(delta: float) -> void:
 	_update_boss_score(delta)
@@ -71,6 +95,14 @@ func _process(delta: float) -> void:
 ## Called every frame by WorldState: crossfades the tense bed in with combat
 ## intensity; `night` muffles the bed's highs (dread reads better muffled).
 func update_combat_beds(intensity: float, night: float = 0.0) -> void:
+	if boss_score_active:
+		set_music_state("boss")
+	elif intensity >= 0.7:
+		set_music_state("elite")
+	elif intensity > 0.02:
+		set_music_state("danger")
+	else:
+		set_music_state("exploration")
 	_bed_target_db = lerpf(-52.0, -8.0, pow(clampf(intensity, 0.0, 1.0), 1.4))
 	if boss_score_active:
 		_bed_target_db = minf(_bed_target_db, -24.0)
@@ -98,6 +130,13 @@ func update_combat_beds(intensity: float, night: float = 0.0) -> void:
 		var lp := AudioServer.get_bus_effect(idx, 0) as AudioEffectLowPassFilter
 		if lp != null:
 			lp.cutoff_hz = lerpf(15000.0, 4200.0, clampf(night, 0.0, 1.0))
+
+func set_music_state(state: String) -> void:
+	var normalized := state.strip_edges().to_lower()
+	if normalized not in MUSIC_STATES or normalized == music_state:
+		return
+	music_state = normalized
+	music_state_changed.emit(music_state)
 
 ## Dedicated bus so the bed filter never touches Music/SFX settings.
 func _ensure_bed_bus_name() -> String:
@@ -160,6 +199,7 @@ func start_boss_score(_boss_id: String = "matriarch") -> void:
 		player.play(0.0)
 	boss_score_active = true
 	_boss_score_fading = false
+	set_music_state("boss")
 	set_boss_score_phase(0)
 
 func set_boss_score_phase(phase: int) -> void:
@@ -180,6 +220,7 @@ func finish_boss_score(victory: bool = true) -> void:
 	if not _boss_score_players.is_empty():
 		_boss_score_targets = [-60.0, -60.0, -60.0]
 		_boss_score_fading = true
+	set_music_state("victory" if victory else "defeat")
 	if victory:
 		play_boss_victory_stinger()
 
@@ -191,6 +232,8 @@ func stop_boss_score_immediate() -> void:
 	boss_score_active = false
 	_boss_score_fading = false
 	boss_score_phase = -1
+	if music_state == "boss":
+		set_music_state("exploration")
 
 func _update_boss_score(delta: float) -> void:
 	if _boss_score_players.is_empty():
@@ -275,6 +318,10 @@ func _load_settings() -> void:
 
 func save_settings() -> void:
 	var cfg := ConfigFile.new()
+	# Preserve gameplay/accessibility keys written by SettingsMenu. Rebuilding
+	# this file from audio values alone silently erased camera, motion, and
+	# recovery-assist preferences whenever audio settings were saved.
+	cfg.load(SETTINGS_PATH)
 	cfg.set_value("audio", "master", master_volume)
 	cfg.set_value("audio", "sfx", sfx_volume)
 	cfg.set_value("audio", "music", music_volume)
@@ -424,6 +471,10 @@ func play_fx(variants: Array, volume_db: float = -6.0) -> void:
 	var name := str(variants[randi() % variants.size()])
 	var path := _sfx_local_path(name)
 	if path == "":
+		# Procedural cues are the safe mobile fallback. Never start the lazy ZIP
+		# download from an attack or skill callback on a touch device.
+		if _is_mobile_runtime():
+			return
 		_fetch_sfx(name)
 		return
 	var player := play_sfx(path, volume_db) if path.begins_with("res://") \
@@ -725,6 +776,12 @@ func _render_fen_bed(b: PackedFloat32Array, duration: float) -> void:
 ## the same name always yields the same set), then plays with config rules.
 
 func play_cue(cue_name: String) -> void:
+	if _is_mobile_runtime() and _is_mobile_combat_cue(cue_name) \
+			and not _cue_streams.has(cue_name):
+		# Never synthesize a combat WAV on the gameplay frame. The startup
+		# prewarm covers the shipped skill set; unknown/modded cues are skipped
+		# safely on mobile instead of stalling the world.
+		return
 	var streams := _get_cue_streams(cue_name)
 	if streams.is_empty():
 		return
@@ -825,6 +882,17 @@ func _get_cue_streams(cue_name: String) -> Array:
 		arr.append(_to_wav(_render_cue(cue_name, v)))
 	_cue_streams[cue_name] = arr
 	return arr
+
+func _prewarm_mobile_combat_cues() -> void:
+	for cue_name in MOBILE_COMBAT_CUES:
+		_get_cue_streams(cue_name)
+
+func _is_mobile_combat_cue(cue_name: String) -> bool:
+	return cue_name in MOBILE_COMBAT_CUES or cue_name.begins_with("skill_") \
+		or cue_name.begins_with("elem_")
+
+func _is_mobile_runtime() -> bool:
+	return OS.has_feature("mobile") or OS.get_name() in ["Android", "iOS"]
 
 func _cue_rng(cue_name: String, variant: int) -> RandomNumberGenerator:
 	var r := RandomNumberGenerator.new()

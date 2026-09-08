@@ -33,6 +33,24 @@ tooltip_text = "Close (Esc)"
 text = "✕  CLOSE"
 theme_override_font_sizes/font_size = 19
 
+[node name="CameraView" type="PanelContainer" parent="Root/VBox"]
+custom_minimum_size = Vector2(0, 170)
+layout_mode = 2
+
+[node name="CameraFeed" type="TextureRect" parent="Root/VBox/CameraView"]
+layout_mode = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 6
+
+[node name="CameraStatus" type="Label" parent="Root/VBox/CameraView"]
+layout_mode = 2
+mouse_filter = 2
+text = "CAMERA PREVIEW · OFFLINE FALLBACK AVAILABLE"
+horizontal_alignment = 1
+vertical_alignment = 2
+theme_override_font_sizes/font_size = 15
+
 [node name="Pipeline" type="PanelContainer" parent="Root/VBox"]
 layout_mode = 2
 size_flags_vertical = 2
@@ -46,10 +64,16 @@ layout_mode = 2
 theme_type_variation = &"Eyebrow"
 text = "FORGING PIPELINE"
 
+[node name="PrivacyNotice" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
+layout_mode = 2
+theme_type_variation = &"Caption"
+text = "PRIVACY · Camera frames are processed locally and are not uploaded. The game result is generated from the detected class, not a stored photo."
+autowrap_mode = 2
+
 [node name="Step1" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
 layout_mode = 2
 theme_type_variation = &"Caption"
-text = "1 — divine the object's essence on-device"
+text = "1 — process the camera frame locally"
 
 [node name="Step2" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
 layout_mode = 2
@@ -189,3 +213,9 @@ custom_minimum_size = Vector2(0, 80)
 layout_mode = 2
 theme_override_font_sizes/font_size = 24
 text = "BEGIN DIVINATION"
+
+[node name="ScanCount" type="Label" parent="Root/VBox"]
+layout_mode = 2
+theme_type_variation = &"Caption"
+text = "SCANS AVAILABLE: 5"
+horizontal_alignment = 1

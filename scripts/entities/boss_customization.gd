@@ -17,6 +17,7 @@ var idol_mesh    : MeshInstance3D = null
 ## Color palette override (Color with alpha 0 = no override)
 var body_tint    : Color = Color(0, 0, 0, 0)
 var eye_glow     : Color = Color(0, 0, 0, 0)
+var palette      : Array[Color] = []
 
 ## Realm skill slot override (empty dict = use default thorn rain)
 ## Must match the skill dict shape from GameState.WEAPON_DEFS[*].skills[*]
@@ -24,11 +25,16 @@ var skill        : Dictionary = {}
 
 ## SFX preset id — AudioManager.play_profile_cue(sfx_profile, "cast")
 var sfx_profile  : String = "vanilla"
+var sfx_preset    : String:
+	get:
+		return sfx_profile
+	set(value):
+		sfx_profile = value
 
 ## Convenience constructor from a scan payload Dictionary
 static func from_payload(payload: Dictionary) -> BossCustomization:
 	var bc := BossCustomization.new()
-	bc.sfx_profile = str(payload.get("sfx_profile", "vanilla"))
+	bc.sfx_profile = str(payload.get("sfx_profile", payload.get("sfx_preset", "vanilla")))
 	if payload.has("skill") and payload["skill"] is Dictionary:
 		bc.skill = payload["skill"]
 	if payload.has("body_tint"):
@@ -39,9 +45,21 @@ static func from_payload(payload: Dictionary) -> BossCustomization:
 		var e = payload["eye_glow"]
 		if e is Color:
 			bc.eye_glow = e
+	if payload.has("palette") and payload.palette is Array:
+		for raw_color in payload.palette:
+			var parsed := Color.from_string(str(raw_color), Color(0, 0, 0, 0))
+			if parsed.a > 0.0:
+				bc.palette.append(parsed)
 	return bc
+
+func to_payload() -> Dictionary:
+	return {
+		"skill": skill.duplicate(true),
+		"sfx_preset": sfx_profile,
+		"palette": palette.map(func(color: Color) -> String: return color.to_html(true)),
+	}
 
 func is_empty() -> bool:
 	return idol_mesh == null and body_tint.a < 0.01 \
-		and eye_glow.a < 0.01 and skill.is_empty() \
+		and eye_glow.a < 0.01 and palette.is_empty() and skill.is_empty() \
 		and sfx_profile == "vanilla"

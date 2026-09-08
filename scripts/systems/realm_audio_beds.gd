@@ -40,7 +40,7 @@ var _next_realm : String = ""
 
 func setup() -> void:
 	_player = AudioStreamPlayer.new()
-	_player.bus = "Master"
+	_player.bus = "Music" if AudioServer.get_bus_index("Music") >= 0 else "Master"
 	_player.volume_db = -24.0
 	add_child(_player)
 	# Pre-render beds in deferred so _ready() doesn't block the main thread

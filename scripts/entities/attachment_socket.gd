@@ -26,11 +26,14 @@ func attach(item: Node3D) -> void:
 		return
 	if attached != null and is_instance_valid(attached):
 		detach()
-	var world_xform := item.global_transform if item.is_inside_tree() else item.transform
+	# Hand props are authored around a local handle pivot. Preserve that local
+	# transform when mounting; treating it as a world transform leaves a newly
+	# created weapon near the scene origin, visibly detached from the hand.
+	var local_xform := item.transform
 	if item.get_parent() != null:
 		item.get_parent().remove_child(item)
 	add_child(item)
-	item.global_transform = world_xform
+	item.transform = local_xform
 	attached = item
 
 func detach() -> Node3D:

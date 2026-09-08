@@ -2,32 +2,15 @@ extends CanvasLayer
 class_name DiamondShop
 
 ## === The Glintmonger's Case — Diamond Cosmetics ===
-## 💎 buys looks and voice ONLY. Every item here is a sidegrade:
+## Diamonds buy looks and voice ONLY. Every item here is a sidegrade:
 ## prettier SFX, trail colors, body auras. No stat lines exist on this shelf.
+## Catalog lives in DiamondCatalog (pure data) so store safety audits can
+## compile it headlessly; the shop reads the same single source of truth.
 
-const ITEMS := [
-	{"id": "sfx_starlight", "kind": "sfx", "price": 6,
-		"name": "Starlight Strikes", "desc": "Bright crystalline combat voice.",
-		"value": "ember_glass"},
-	{"id": "sfx_shadowstep", "kind": "sfx", "price": 6,
-		"name": "Shadow Step", "desc": "Deep moss-dark combat voice.",
-		"value": "grave_moss"},
-	{"id": "sfx_emberbloom", "kind": "sfx", "price": 6,
-		"name": "Ember Bloom", "desc": "Resinous, hollow-grove voice.",
-		"value": "hollow_resin"},
-	{"id": "trail_aurora", "kind": "trail", "price": 4,
-		"name": "Aurora Trail", "desc": "Teal-green blade ribbons.",
-		"value": "73f2d9"},
-	{"id": "trail_bloodmoon", "kind": "trail", "price": 4,
-		"name": "Bloodmoon Trail", "desc": "Crimson blade ribbons.",
-		"value": "ff4d47"},
-	{"id": "aura_lostlantern", "kind": "aura", "price": 8,
-		"name": "Lantern of the Lost", "desc": "Violet soul-shine aura.",
-		"value": "8a63ff55"},
-	{"id": "aura_crownlight", "kind": "aura", "price": 8,
-		"name": "Crown of Light", "desc": "Warm halo-gold aura.",
-		"value": "ffd27a55"},
-]
+const ITEMS := preload("res://scripts/systems/diamond_catalog.gd").ITEMS
+const PURCHASE_STATES: Array[String] = ["unavailable", "pending", "failed",
+	"cancelled", "offline", "restoring", "confirmed"]
+var scan_purchase_state: String = "unavailable"
 
 @onready var game_state: GameState = GameState
 @onready var audio: AudioManager = AudioManager
@@ -54,6 +37,15 @@ func open() -> void:
 	_refresh()
 	audio.play_ui_blip()
 
+func set_scan_purchase_state(state: String) -> bool:
+	var normalized := state.strip_edges().to_lower()
+	if normalized not in PURCHASE_STATES:
+		return false
+	scan_purchase_state = normalized
+	if visible:
+		_refresh()
+	return true
+
 var _freeze_was_visible := false
 
 ## Freeze/resume the world whenever this interface toggles, whichever
@@ -75,7 +67,7 @@ func close() -> void:
 	audio.play_ui_cancel()
 
 func _refresh() -> void:
-	diamonds_label.text = "💎 %d" % game_state.diamonds
+	diamonds_label.text = "DIAMONDS  %d" % game_state.diamonds
 	for child in items_vbox.get_children():
 		child.queue_free()
 	for item in ITEMS:
@@ -90,12 +82,14 @@ func _build_row(item: Dictionary) -> Control:
 
 	var glyph := Label.new()
 	match str(item.kind):
+		"scan_pack":
+			glyph.text = "SCAN"
 		"sfx":
-			glyph.text = "🔊"
+			glyph.text = "SFX"
 		"trail":
-			glyph.text = "🗡"
+			glyph.text = "TRAIL"
 		_:
-			glyph.text = "✨"
+			glyph.text = "AURA"
 	UiKit.style_label(glyph, "", 22)
 	hbox.add_child(glyph)
 
@@ -109,21 +103,46 @@ func _build_row(item: Dictionary) -> Control:
 	info.add_child(name_l)
 	var desc := Label.new()
 	desc.text = str(item.desc)
+	if str(item.kind) == "scan_pack":
+		desc.text += "\n5 SCANS · $%.2f · BALANCE %d/%d · %s · %s" % [
+			float(item.price), game_state.scans_remaining, game_state.MAX_SCANS,
+			str(item.get("duplicate_behavior", "")), str(item.get("restore_path", ""))]
 	UiKit.style_label(desc, &"Caption", 11)
 	info.add_child(desc)
 
 	var btn := Button.new()
 	btn.custom_minimum_size = Vector2(160, 0)
-	if game_state.active_cosmetic_id_for(str(item.kind)) == str(item.id):
-		btn.text = "WORN"
+	if str(item.kind) == "scan_pack":
+		var purchase_copy := {
+			"unavailable": ["UNAVAILABLE", "Purchase integration is not connected"],
+			"pending": ["PROCESSING", "Waiting for store confirmation; no scans granted yet."],
+			"failed": ["RETRY", "Purchase failed; no charge or scans were applied."],
+			"cancelled": ["TRY AGAIN", "Purchase cancelled; no scans were granted."],
+			"offline": ["OFFLINE", "Reconnect before starting a purchase."],
+			"restoring": ["RESTORING", "Checking provider ownership; no duplicate grant."],
+			"confirmed": ["CONFIRMED", "Provider confirmed; grant through the entitlement handler."]
+		}
+		var copy: Array = purchase_copy.get(scan_purchase_state, purchase_copy["unavailable"])
+		btn.text = str(copy[0])
+		btn.disabled = scan_purchase_state not in ["failed", "cancelled"]
+		btn.tooltip_text = str(copy[1])
+		UiKit.style_secondary_button(btn)
+	elif game_state.active_cosmetic_id_for(str(item.kind)) == str(item.id):
+		var worn := UiKit.action_state("equipped", "Cosmetic is currently active")
+		btn.text = str(worn.get("label", "EQUIPPED"))
 		btn.disabled = true
+		btn.tooltip_text = str(worn.get("detail", "Cosmetic is currently active"))
 		UiKit.style_secondary_button(btn)
 	elif game_state.owns_cosmetic(str(item.id)):
-		btn.text = "EQUIP"
+		var owned := UiKit.action_state("owned", "Apply this cosmetic")
+		btn.text = str(owned.get("label", "OWNED / EQUIP"))
+		btn.tooltip_text = str(owned.get("detail", "Apply this cosmetic"))
 		UiKit.style_button(btn)
 		btn.pressed.connect(_on_equip.bind(item))
 	else:
-		btn.text = "💎 %d" % int(item.price)
+		var available := UiKit.action_state("available", "Cosmetic only · %d diamonds" % int(item.price))
+		btn.text = "BUY  ·  %d DIAMONDS" % int(item.price)
+		btn.tooltip_text = "%s · %s" % [str(available.get("label", "AVAILABLE")), str(available.get("detail", ""))]
 		UiKit.style_primary_button(btn)
 		btn.pressed.connect(_on_buy.bind(item))
 	hbox.add_child(btn)

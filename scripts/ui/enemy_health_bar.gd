@@ -11,6 +11,11 @@ class_name EnemyHealthBar
 var _background: MeshInstance3D
 var _fill: MeshInstance3D
 var _fill_material: StandardMaterial3D
+var _damage_trail: MeshInstance3D
+var _damage_trail_material: StandardMaterial3D
+var _trail_tween: Tween
+var _poise_fill: MeshInstance3D
+var _poise_material: StandardMaterial3D
 var _lock_frame: MeshInstance3D
 var _lock_material: StandardMaterial3D
 var _name_label: Label3D
@@ -19,6 +24,9 @@ var _last_ratio := -1.0
 var _source: Node
 var _base_scale := 1.0
 var _lock_was := false
+var _manual_values := false
+var _manual_hp := 0
+var _manual_max_hp := 1
 
 func _ready() -> void:
 	_source = get_parent()
@@ -62,6 +70,32 @@ func _build_bar() -> void:
 	_fill.position = Vector3(-(bar_width - 0.06) * 0.5, 0.0, -0.006)
 	_fill.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	plate.add_child(_fill)
+
+	var trail_mesh := QuadMesh.new()
+	trail_mesh.size = Vector2(bar_width - 0.06, bar_height - 0.035)
+	_damage_trail_material = _make_material(Color(1.0, 0.68, 0.16, 0.9))
+	trail_mesh.material = _damage_trail_material
+	_damage_trail = MeshInstance3D.new()
+	_damage_trail.name = "DamageTrail"
+	_damage_trail.mesh = trail_mesh
+	_damage_trail.position = Vector3(-(bar_width - 0.06) * 0.5, 0.0, -0.004)
+	_damage_trail.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_damage_trail.visible = false
+	plate.add_child(_damage_trail)
+
+	# Optional amber poise strip. Only enemies that expose get_poise_ratio()
+	# receive it, keeping ordinary health plates uncluttered.
+	var poise_mesh := QuadMesh.new()
+	poise_mesh.size = Vector2(bar_width - 0.12, 0.045)
+	_poise_material = _make_material(Color(1.0, 0.68, 0.16, 1.0))
+	poise_mesh.material = _poise_material
+	_poise_fill = MeshInstance3D.new()
+	_poise_fill.name = "PoiseFill"
+	_poise_fill.mesh = poise_mesh
+	_poise_fill.position = Vector3(-(bar_width - 0.12) * 0.5, -0.105, -0.006)
+	_poise_fill.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_poise_fill.visible = false
+	plate.add_child(_poise_fill)
 
 	# Lantern sigil: real annular geometry rather than a translucent QuadMesh.
 	# Only the ring owns pixels, so compatibility renderers cannot expose a
@@ -131,11 +165,33 @@ func _make_lock_sigil_mesh() -> ArrayMesh:
 
 ## Immediate damage hook used by enemy and boss damage handlers. The normal
 ## process refresh remains as a safety net for regeneration and scripted damage.
-func notify_damage() -> void:
+func set_values(current_hp: int, maximum_hp: int, _current_mana: int = 0,
+		_maximum_mana: int = 0) -> void:
+	_manual_hp = maxi(0, current_hp)
+	_manual_max_hp = maxi(1, maximum_hp)
+	_manual_values = _source == null or not ("hp" in _source and "max_hp" in _source)
+	if _fill != null:
+		_refresh(true)
+
+func notify_damage(_amount: int = 0, resulting_hp: int = -1) -> void:
 	if _fill == null or _fill_material == null:
+		return
+	if _manual_values and resulting_hp >= 0:
+		_manual_hp = clampi(resulting_hp, 0, _manual_max_hp)
+	if resulting_hp >= 0 and _source != null and int(_source.get("hp")) != resulting_hp:
 		return
 	_last_ratio = -1.0
 	_refresh(true)
+	var current_ratio := _current_ratio()
+	if _damage_trail != null:
+		_damage_trail.visible = current_ratio > 0.001
+		_damage_trail.scale = Vector3(maxf(_damage_trail.scale.x, current_ratio), 1.0, 1.0)
+		if _trail_tween != null and _trail_tween.is_valid():
+			_trail_tween.kill()
+		_trail_tween = create_tween()
+		_trail_tween.tween_interval(0.10)
+		_trail_tween.tween_property(_damage_trail, "scale:x", current_ratio, 0.22) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	var original := _fill_material.albedo_color
 	var flash := create_tween()
 	_fill_material.albedo_color = Color(1.0, 0.92, 0.62)
@@ -143,17 +199,28 @@ func notify_damage() -> void:
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 func _refresh(force: bool) -> void:
-	var max_hp := maxi(1, int(_source.get("max_hp")))
-	var hp := clampi(int(_source.get("hp")), 0, max_hp)
+	var max_hp := _manual_max_hp if _manual_values else maxi(1, int(_source.get("max_hp")))
+	var hp := _manual_hp if _manual_values else clampi(int(_source.get("hp")), 0, max_hp)
+	hp = clampi(hp, 0, max_hp)
 	var ratio := clampf(float(hp) / float(max_hp), 0.0, 1.0)
+	var defeated := bool(_source.get("is_defeated")) or hp <= 0
 	if force or not is_equal_approx(ratio, _last_ratio):
 		_last_ratio = ratio
+		var fill_width := bar_width - 0.06
+		# Scale from a fixed left edge so each hit removes exactly the amount
+		# represented by hp/max_hp instead of moving both ends of the bar.
 		_fill.scale = Vector3(maxf(ratio, 0.001), 1.0, 1.0)
+		_fill.position.x = -fill_width * 0.5 + fill_width * ratio * 0.5
 		var healthy := Color(0.18, 0.92, 0.34)
 		var danger := Color(0.96, 0.16, 0.10)
 		_fill_material.albedo_color = danger.lerp(healthy, smoothstep(0.0, 0.72, ratio))
 		_hp_label.text = "%d / %d" % [hp, max_hp]
-	var defeated := bool(_source.get("is_defeated")) or hp <= 0
+	if _poise_fill != null and _poise_material != null:
+		var has_poise := _source.has_method("get_poise_ratio")
+		_poise_fill.visible = has_poise and not defeated
+		if has_poise:
+			var poise_ratio := clampf(float(_source.call("get_poise_ratio")), 0.0, 1.0)
+			_poise_fill.scale = Vector3(maxf(poise_ratio, 0.001), 1.0, 1.0)
 	visible = not defeated
 	var is_locked := false
 	if show_name_when_targeted:
@@ -174,6 +241,14 @@ func _refresh(force: bool) -> void:
 		var pulse := 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.006)
 		_lock_material.albedo_color = Color(1.0, 0.74, 0.30,
 			0.16 + 0.16 * pulse)
+
+func _current_ratio() -> float:
+	if _manual_values:
+		return clampf(float(_manual_hp) / float(maxi(1, _manual_max_hp)), 0.0, 1.0)
+	if not is_instance_valid(_source):
+		return 0.0
+	var maximum := maxi(1, int(_source.get("max_hp")))
+	return clampf(float(int(_source.get("hp"))) / float(maximum), 0.0, 1.0)
 
 func _clean_name(value: String) -> String:
 	var parts := value.split("@", false)

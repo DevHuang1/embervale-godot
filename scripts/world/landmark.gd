@@ -15,6 +15,8 @@ var _interact_area: Area3D
 var _label: Label3D
 
 func _ready() -> void:
+	add_to_group("interactable")
+	add_to_group("structure")
 	_build_visual()
 	_build_interact()
 	_check_discovery()
@@ -74,6 +76,9 @@ func _on_hero_exit(body: Node3D) -> void:
 func _discover() -> void:
 	_discovered = true
 	GameState.discovered_landmarks[landmark_id] = true
+	var camp := get_node_or_null("/root/CampProgression")
+	if camp != null:
+		camp.record_objective(realm, "discover")
 	GameState.save_game()
 	discovered.emit(landmark_id)
 	FloatingText.spawn_on_entity(get_tree().get_first_node_in_group("player"),

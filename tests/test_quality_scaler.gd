@@ -42,6 +42,12 @@ func _run() -> void:
 	if not is_equal_approx(scaler.grass_density_scale, 1.0):
 		failures += 1
 		print("FAIL: HIGH should use the full grass-carpet density")
+	if not scaler.budget_is_bounded():
+		failures += 1
+		print("FAIL: HIGH presentation budget exceeds the production cap")
+	if not scaler.budget_is_bounded() or scaler.budget_report().get("level", -1) != QualityScaler.Level.HIGH:
+		failures += 1
+		print("FAIL: HIGH budget report is missing or exceeds the production cap")
 
 	# --- Contact shadows are opt-in via the contact_shadow group ---
 	var stage := Node3D.new()
@@ -85,6 +91,17 @@ func _run() -> void:
 	if not is_equal_approx(scaler.grass_density_scale, 0.65):
 		failures += 1
 		print("FAIL: LOW should retain a reduced grass carpet")
+	if not scaler.budget_is_bounded():
+		failures += 1
+		print("FAIL: LOW presentation budget exceeds the production cap")
+
+	# --- Medium retains an explicit bounded middle tier ---
+	scaler.set_mode(QualityScaler.Mode.AUTO)
+	scaler._apply_level(QualityScaler.Level.MEDIUM)
+	if not scaler.budget_is_bounded() or scaler.vfx_pool_limit != 16 \
+		or scaler.vfx_trail_limit != 9 or scaler.transient_light_budget != 0:
+		failures += 1
+		print("FAIL: MEDIUM presentation budget is not bounded or deterministic")
 
 	# --- Auto degrades one step per sustained low reading ---
 	scaler.set_mode(QualityScaler.Mode.AUTO)

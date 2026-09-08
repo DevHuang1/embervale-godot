@@ -30,6 +30,7 @@ func setup(new_realm_id: String, new_seed: int, new_radius: float) -> void:
 	_build_tree_variety()
 	_build_rock_fields()
 	_build_deadwood_and_small_props()
+	_build_distant_landmark_silhouettes()
 
 static func pond_centers(for_realm: String) -> Array:
 	return (PONDS.get(for_realm, []) as Array).duplicate()
@@ -189,6 +190,36 @@ func _build_deadwood_and_small_props() -> void:
 				Vector3.ONE * rng.randf_range(0.7, 1.25))
 		logs.append(Transform3D(basis, Vector3(point.x, _ground(point) + 0.16, point.y)))
 	_batch("FallenDeadwood", log_mesh, _surface_material("wood", _bark_tint().lightened(0.08)), logs, true, radius + 8.0)
+
+func _build_distant_landmark_silhouettes() -> void:
+	var profile := RealmLayoutData.profile(realm_id)
+	var route: Array = profile.get("route", [])
+	if route.size() < 2:
+		return
+	var parent := Node3D.new()
+	parent.name = "DistantLandmarkSilhouettes"
+	parent.set_meta("visual_only", true)
+	add_child(parent)
+	var material := StandardMaterial3D.new()
+	material.albedo_color = _canopy_tint().darkened(0.30)
+	material.roughness = 1.0
+	for index in mini(3, route.size() - 1):
+		var anchor := route[route.size() - 1 - index] as Vector3
+		var silhouette := MeshInstance3D.new()
+		silhouette.name = "VistaSilhouette_%d" % index
+		var mesh := CylinderMesh.new()
+		mesh.bottom_radius = 2.5 - index * 0.3
+		mesh.top_radius = 0.25
+		mesh.height = 7.0 + index * 1.4
+		mesh.radial_segments = 6
+		silhouette.mesh = mesh
+		silhouette.material_override = material
+		silhouette.position = Vector3(anchor.x, _ground(Vector2(anchor.x, anchor.z)) + mesh.height * 0.5,
+		anchor.z) + Vector3(9.0 + index * 4.0, 0.0, -8.0 + index * 5.0)
+		silhouette.visibility_range_begin = 38.0
+		silhouette.visibility_range_end = radius + 34.0
+		silhouette.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		parent.add_child(silhouette)
 
 func _batch(batch_name: String, mesh: Mesh, material: Material, transforms: Array[Transform3D],
 		shadows: bool, visible_to: float) -> void:

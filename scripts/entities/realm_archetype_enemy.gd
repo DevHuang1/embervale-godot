@@ -1,6 +1,8 @@
 extends Hushling
 class_name RealmArchetypeEnemy
 
+const ENEMY_VISUALS := preload("res://scripts/systems/enemy_visual_registry.gd")
+
 ## Scene-backed versions of the reusable realm combat profiles. Keeping one
 ## behavior implementation avoids five near-identical AI scripts while each
 ## scene still has an explicit identity, stats, silhouette accent and spawn id.
@@ -19,6 +21,9 @@ func _ready() -> void:
 	var health_bar := get_node_or_null("EnemyHealthBar")
 	if health_bar != null and "display_name" in health_bar:
 		health_bar.set("display_name", display_name)
+
+func _rig_profile() -> String:
+	return ENEMY_VISUALS.profile_for(archetype)
 
 func _build_identity_silhouette() -> void:
 	if visual == null:

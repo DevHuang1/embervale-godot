@@ -1,6 +1,9 @@
 extends Area3D
 class_name EncounterZone
 
+const CONTENT_REGISTRY := preload("res://scripts/systems/content_registry.gd")
+const ECOLOGY := preload("res://scripts/systems/ecology_tactics_catalog.gd")
+
 ## === EncounterZone — Dynamic Enemy Encounter Trigger ===
 ## Placed by ProceduralWorldGenerator.
 ## When the hero enters the zone, spawns a pack of enemies via Bestiary.
@@ -13,18 +16,30 @@ class_name EncounterZone
 
 signal pack_cleared
 signal pack_spawned(enemies: Array)
+signal ecology_choice_changed(choice_id: String, choice_text: String)
 
 @export_enum("normal", "hard", "elite") var tier   : String = "normal"
 @export var realm_id  : String = "bramblewood"
 @export var stage     : int    = 0
 @export var zone_radius : float = 5.5
+## Authored-pocket metadata. Dressing systems can use this to place readable
+## approach/reveal/reward/exit markers without changing encounter mechanics.
+@export var pocket_id: String = ""
+@export var approach_label: String = "Approach"
+@export var reveal_label: String = "Threat revealed"
+@export var reward_label: String = "Reward"
+@export var exit_label: String = "Exit sightline"
 
 var _active  : bool = true
 var _enemies : Array[Node3D] = []
 var _decal   : MeshInstance3D = null
 var _decal_mat : StandardMaterial3D = null
+var _reward_marker: Label3D = null
 var _t       : float = 0.0
 var _spawned : bool  = false
+var ecology_rule: Dictionary = {}
+var ecology_choice_id: String = ""
+var ecology_modifiers: Dictionary = {}
 
 func _ready() -> void:
 	collision_layer = 0
@@ -37,8 +52,51 @@ func setup(p_realm: String, p_tier: String, p_stage: int) -> void:
 	realm_id = p_realm
 	tier     = p_tier
 	stage    = p_stage
+	ecology_rule = ECOLOGY.rule_for(realm_id)
+	ecology_choice_id = ""
+	ecology_modifiers = {}
+	if not ecology_rule.is_empty():
+		reveal_label = "Threat revealed · %s" % str(ecology_rule.get("trigger", ""))
 	if _decal_mat:
 		_decal_mat.emission = _tier_color()
+
+func ecology_choices() -> Array[Dictionary]:
+	if ecology_rule.is_empty():
+		return []
+	return [{"id": "primary", "label": str(ecology_rule.get("choice", "")),
+		"consequence": str(ecology_rule.get("consequence", ""))},
+		{"id": "defer", "label": "Wait and read the arena",
+		"consequence": "Keep the default encounter pressure."}]
+
+func choose_ecology_tactic(choice_id: String) -> bool:
+	if _spawned or ecology_rule.is_empty() or not ["primary", "defer"].has(choice_id):
+		return false
+	ecology_choice_id = choice_id
+	var choices := ecology_choices()
+	var selected: Dictionary = choices[0 if choice_id == "primary" else 1]
+	ecology_modifiers = ecology_rule.get("primary_modifiers", {}).duplicate(true) \
+		if choice_id == "primary" else {}
+	if _decal_mat != null:
+		_decal_mat.emission = _tier_color().lightened(0.18 if choice_id == "primary" else 0.0)
+	ecology_choice_changed.emit(choice_id, str(selected.get("label", "")))
+	return true
+
+func pocket_contract() -> Dictionary:
+	## Stable authoring contract for realm dressing and QA tooling. The zone's
+	## trigger, enemy count, damage, and reward behavior remain unchanged.
+	return {
+		"id": pocket_id if not pocket_id.is_empty() else name.to_snake_case(),
+		"realm": realm_id,
+		"tier": tier,
+		"approach": approach_label,
+		"reveal": reveal_label,
+		"combat": "Readable combat space",
+		"ecology": ecology_rule.duplicate(true),
+		"ecology_choice": ecology_choice_id,
+		"ecology_modifiers": ecology_modifiers.duplicate(true),
+		"reward": reward_label,
+		"exit": exit_label,
+	}
 
 # ─── Collision ────────────────────────────────────────────────────────────────
 
@@ -76,6 +134,18 @@ func _build_visual() -> void:
 	light.position.y   = 0.5
 	add_child(light)
 
+	_reward_marker = Label3D.new()
+	_reward_marker.name = "RewardMarker"
+	_reward_marker.text = "REWARD"
+	_reward_marker.font_size = 32
+	_reward_marker.outline_size = 8
+	_reward_marker.modulate = Color(1.0, 0.86, 0.42, 0.0)
+	_reward_marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_reward_marker.no_depth_test = true
+	_reward_marker.position = Vector3(0.0, 1.8, 0.0)
+	_reward_marker.visible = false
+	add_child(_reward_marker)
+
 func _tier_color() -> Color:
 	match tier:
 		"elite": return Color(1.00, 0.22, 0.08)
@@ -89,7 +159,21 @@ func _on_body_entered(body: Node3D) -> void:
 	if not body.is_in_group("player"): return
 	_spawned = true
 	_flash_activate()
+	_play_pocket_reveal()
 	call_deferred("_spawn_pack")
+
+func _play_pocket_reveal() -> void:
+	## A short authored reveal gives the pocket a readable arrival beat without
+	## pausing gameplay or taking ownership of movement/input.
+	var scene := get_tree().current_scene
+	if scene != null and scene.has_method("record_golden_route_signal"):
+		scene.call("record_golden_route_signal", "encounter_pocket")
+		if tier == "elite":
+			scene.call("record_golden_route_signal", "bounded_telegraphs")
+	var camera := scene.get_node_or_null("CameraRig") if scene != null else null
+	if camera != null and camera.has_method("play_focus_moment"):
+		camera.call("play_focus_moment", self, Vector3(0.0, 4.2, 6.8),
+			Vector3(0.0, 0.35, 0.0), 1.1 if tier == "normal" else 1.35)
 
 func _flash_activate() -> void:
 	if _decal_mat == null: return
@@ -143,12 +227,16 @@ func _spawn_pack() -> void:
 		ws.call("set_combat_intensity", 0.6 if tier == "normal" else 0.85)
 
 func _scene_for_kind(kind: String) -> String:
+	var fallback := "res://scenes/entities/hushling.tscn"
 	match kind:
-		"spitter":         return "res://scenes/entities/spitter.tscn"
+		"spitter":         fallback = "res://scenes/entities/spitter.tscn"
 		"fenling",\
-		"moonfen_fenling": return "res://scenes/entities/moonfen_fenling.tscn"
-		"relic_leech":     return "res://scenes/entities/relic_leech.tscn"
-		_:                 return "res://scenes/entities/hushling.tscn"
+		"moonfen_fenling": fallback = "res://scenes/entities/moonfen_fenling.tscn"
+		"relic_leech":     fallback = "res://scenes/entities/relic_leech.tscn"
+	var gs := get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("get_content_registry"):
+		return CONTENT_REGISTRY.resolve_asset_path(gs.get_content_registry(), "enemy", kind, fallback)
+	return fallback
 
 func _on_enemy_died(enemy: Node3D) -> void:
 	_enemies.erase(enemy)
@@ -160,6 +248,10 @@ func _on_enemy_died(enemy: Node3D) -> void:
 
 func _on_pack_cleared() -> void:
 	pack_cleared.emit()
+	if tier == "elite":
+		var gs := get_node_or_null("/root/GameState")
+		if gs != null and gs.has_method("update_objective"):
+			gs.call("update_objective", "kill", "chapter3_elite", 1)
 	# Grant rewards
 	var rm := get_node_or_null("/root/RewardManager")
 	if rm:
@@ -173,6 +265,23 @@ func _on_pack_cleared() -> void:
 	var ws := get_node_or_null("/root/WorldState")
 	if ws and ws.has_method("set_combat_intensity"):
 		ws.call("set_combat_intensity", 0.0)
+	_reveal_reward_marker()
+
+func _reveal_reward_marker() -> void:
+	if _reward_marker == null or not is_instance_valid(_reward_marker):
+		return
+	var scene := get_tree().current_scene
+	if scene != null and scene.has_method("record_golden_route_signal"):
+		scene.call("record_golden_route_signal", "valuable_drop" if tier == "elite" else "reward_reveal")
+	_reward_marker.text = str(reward_label).to_upper()
+	_reward_marker.visible = true
+	_reward_marker.modulate = Color(1.0, 0.86, 0.42, 0.0)
+	var tw := create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(_reward_marker, "modulate:a", 1.0, 0.18)
+	tw.tween_interval(4.0)
+	tw.tween_property(_reward_marker, "modulate:a", 0.0, 0.55)
+	tw.tween_callback(_reward_marker.queue_free)
 
 # ─── Process ──────────────────────────────────────────────────────────────────
 

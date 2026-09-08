@@ -40,6 +40,10 @@ signal interact_pressed
 @export var dodge_speed_mult: float = 1.9
 @export var dodge_cooldown_time: float = 1.20
 @export var dodge_iframes: float = 0.34
+## Optional accessibility assist: a small, capped dodge grace increase. It
+## changes recovery pressure only; damage, rewards, and achievements stay
+## unchanged.
+var accessibility_recovery_assist: bool = false
 @export_range(0.0, 1.0) var dodge_chance: float = 0.85
 @export_range(0.0, 1.0) var dodge_chance_per_level: float = 0.025
 @export var dodge_mastery_level: int = 1
@@ -103,14 +107,27 @@ var _was_on_floor := true
 
 # Skill input buffering per weapon slot (0.25s window)
 const SKILL_BUFFER_MS := 250
+const SKILL_INPUT_DEBOUNCE_MS := 90
 ## Hold the attack button this long on release for a heavy charged strike
 const HEAVY_HOLD_MSEC := 380 # fallback for legacy/custom weapon definitions
 const GEAR_SHADER := preload("res://assets/shaders/entity_body.gdshader")
 const GEAR_GRAIN := preload("res://assets/textures/generated/detail_grain.png")
 const GEAR_NORMAL := preload("res://assets/textures/generated/detail_normal.png")
 const GEAR_ORM := preload("res://assets/textures/generated/hero_orm.png")
+const WEAPON_VISUALS := preload("res://scripts/systems/weapon_visual_registry.gd")
+const ARMOR_VISUALS := preload("res://scripts/systems/armor_visual_registry.gd")
 var _attack_hold_msec := 0
 var _skill_buffer_until := [0, 0, 0]
+## Retained owner references for delayed skill work and direct projectile FX.
+## SceneTreeTimer is one-shot and cannot be cancelled, so scene teardown
+## clears these references and invalidates the owning node's continuations.
+var _skill_timers: Array[SceneTreeTimer] = []
+var _transient_fx_nodes: Array[Node] = []
+var _transient_fx_tweens: Array[Tween] = []
+var _skill_cancel_generation: int = 0
+var _last_skill_press_msec: int = -10000
+var _last_skill_press_slot: int = -1
+var _skill_activation_count: int = 0
 
 # Weapon visuals
 var hand_socket_l: AttachmentSocket = null
@@ -141,6 +158,7 @@ var _turn_roll := 0.0
 
 # Hard landing
 var _fall_speed_cached := 0.0
+var landing_fx_mode: String = "full"
 
 # Foot grounding raycast alternation (2 rays max every other physics frame)
 var _ik_toggle := false
@@ -172,6 +190,11 @@ var _lantern_tip_shown := false
 var _lantern_was_lit := false
 
 func _ready() -> void:
+	_load_landing_fx_mode()
+	var accessibility_config := ConfigFile.new()
+	accessibility_config.load(AudioManager.SETTINGS_PATH)
+	accessibility_recovery_assist = bool(accessibility_config.get_value(
+		"gameplay", "recovery_assist", false))
 	target_position = global_position
 	
 	# Setup collision
@@ -244,9 +267,10 @@ func _ready() -> void:
 	InputManager.tap_foe.connect(_on_foe_tap)
 
 	# Combo finisher feedback (slash kits only; casts never combo)
-	animator.attack_impact.connect(_on_attack_impact)
-	animator.attack_impact.connect(_on_animator_impact)
-	animator.anim_event.connect(_on_anim_event)
+	if animator != null:
+		animator.attack_impact.connect(_on_attack_impact)
+		animator.attack_impact.connect(_on_animator_impact)
+		animator.anim_event.connect(_on_anim_event)
 
 	# Authored-model drop-in (silent no-op until assets/models/hero.glb ships)
 	if CharacterRigLoader.try_if_wire(self, "hero"):
@@ -256,6 +280,12 @@ func _ready() -> void:
 		var bridge := _anim_bridge()
 		if bridge != null:
 			bridge.state_provider = _authored_anim_state
+			# The bridge fires cue_impact at the authored clip's real contact
+			# frame, which BUMPS _authored_impact_serial so
+			# _wait_for_animator_impact resolves immediately. Without this
+			# connection the serial never moves and every melee strike waits the
+			# full 1.25s timeout before its damage lands.
+			bridge.cue_impact.connect(_on_authored_impact)
 	# Mount the hand/back tools on the knight's own bones so the mace/sword/
 	# staff ride his real fists (and sway on the walk) instead of floating on
 	# the hidden ghost body's arms. No-op unless the rig is present.
@@ -285,7 +315,63 @@ func _ready() -> void:
 		print("[hero] rig mounted=", get_node_or_null("Visual/Rig/AuthoredRig") != null,
 			" | r hand sock->", pr, " | l hand sock->", pl)
 
+func _exit_tree() -> void:
+	cancel_active_skill_effects()
+
+func cancel_active_skill_effects() -> void:
+	_skill_cancel_generation += 1
+	_skill_timers.clear()
+	for tween in _transient_fx_tweens:
+		if is_instance_valid(tween) and tween.is_valid():
+			tween.kill()
+	_transient_fx_tweens.clear()
+	for node in _transient_fx_nodes:
+		if is_instance_valid(node):
+			node.queue_free()
+	_transient_fx_nodes.clear()
+	CombatFx.cancel_context_effects(self)
+	var guard := get_node_or_null("/root/TimeScaleGuard")
+	if guard != null and guard.has_method("cancel_owner_leases"):
+		guard.call("cancel_owner_leases", "skill:")
+
+func _wait_skill_delay(seconds: float) -> bool:
+	var generation := _skill_cancel_generation
+	if not is_inside_tree():
+		return false
+	var timer := get_tree().create_timer(maxf(seconds, 0.0), false)
+	_skill_timers.append(timer)
+	await timer.timeout
+	_skill_timers.erase(timer)
+	return is_inside_tree() and generation == _skill_cancel_generation
+
+func skill_performance_report() -> Dictionary:
+	var live_nodes := 0
+	for node in _transient_fx_nodes:
+		if is_instance_valid(node):
+			live_nodes += 1
+	return {"pending_timers": _skill_timers.size(),
+		"transient_nodes": live_nodes,
+		"transient_tweens": _transient_fx_tweens.size(),
+		"skill_activation_count": _skill_activation_count,
+		"last_skill_press_slot": _last_skill_press_slot}
+
+func _skill_generation_valid(generation: int) -> bool:
+	return is_inside_tree() and generation == _skill_cancel_generation
+
+func _wait_for_skill_impact(mobile_delay: float, animation_timeout: float) -> bool:
+	# The authored animator is the desktop timing source, but its signal is not
+	# guaranteed on every imported Android rig. Falling back to a bounded
+	# skill-owned delay prevents a 0.30-0.35s timeout from feeling like global
+	# slow motion while preserving the declared mobile wind-up.
+	if _is_mobile_runtime():
+		return await _wait_skill_delay(mobile_delay)
+	return await _wait_for_animator_impact(animation_timeout)
+
 func _physics_process(delta: float) -> void:
+	# Last-line mobile guard: no skill, impact, or external feedback path may
+	# leave the simulation running below real speed for even one full frame.
+	if _is_mobile_runtime() and not is_equal_approx(Engine.time_scale, 1.0):
+		Engine.time_scale = 1.0
 	_update_swing_trail()
 	_handle_movement(delta)
 	_update_timers(delta)
@@ -402,7 +488,8 @@ func _handle_movement(delta: float) -> void:
 		_dir_hold = 0.0
 	var ramp_target := clampf((_dir_hold - GAIT_HOLD_TIME) / 0.35, 0.0, 1.0)
 	_gait_ramp = lerpf(_gait_ramp, ramp_target, minf(delta * 5.0, 1.0))
-	animator.set_gait_ramp(_gait_ramp)
+	if animator != null:
+		animator.set_gait_ramp(_gait_ramp)
 	
 	var target_velocity = direction * move_speed \
 		* (1.0 + (GAIT_SPEED_MULT - 1.0) * _gait_ramp) \
@@ -421,7 +508,8 @@ func _handle_movement(delta: float) -> void:
 	_slide_and_post()
 
 func _post_move() -> void:
-	animator.set_air_target(not is_on_floor())
+	if animator != null:
+		animator.set_air_target(not is_on_floor())
 	if is_on_floor() and not _was_on_floor and velocity.y <= 0.0:
 		_on_landed()
 	_was_on_floor = is_on_floor()
@@ -429,17 +517,42 @@ func _post_move() -> void:
 func _on_landed() -> void:
 	# Hard landings squash deeper and kick up more dust
 	var hard := clampf((_fall_speed_cached - 6.0) / 7.0, 0.0, 1.0)
-	animator.notify_land(hard)
-	CombatFx.spawn_burst(self, global_position + Vector3(0, 0.08, 0),
-		Color(0.42, 0.52, 0.34, 0.6), 8 + int(14.0 * hard), 2.4 + hard,
-		0.32 + 0.12 * hard, 0.13 + 0.10 * hard)
-	CombatFx.impact(self, 0.10 + 0.16 * hard, 0.0, 1.0, 0.0)
-	audio.play_footstep(1.0 + hard * 0.6)
+	var fx_scale := _landing_fx_scale()
+	if fx_scale > 0.0:
+		animator.notify_land(hard * fx_scale)
+		CombatFx.spawn_burst(self, global_position + Vector3(0, 0.08, 0),
+			Color(0.42, 0.52, 0.34, 0.6), 4 + int((14.0 * hard) * fx_scale),
+			2.4 + hard, 0.32 + 0.12 * hard, 0.13 + 0.10 * hard)
+		CombatFx.impact(self, (0.10 + 0.16 * hard) * fx_scale, 0.0, 1.0, 0.0)
+		audio.play_footstep(1.0 + hard * 0.6 * fx_scale)
 	# Hard impacts bounce physical pebbles off the ground
-	if hard > 0.25:
+	if hard > 0.25 and fx_scale >= 0.75:
 		ImpactDirector.spawn_impact_debris(self,
 			global_position + Vector3(0, 0.1, 0), "rock",
-			1 + int(2.0 * hard))
+			1 + int(2.0 * hard * fx_scale))
+
+func set_landing_fx_mode(mode: String) -> void:
+	landing_fx_mode = mode.to_lower() if mode.to_lower() in ["full", "reduced", "off"] else "full"
+	var config := ConfigFile.new()
+	config.load(AudioManager.SETTINGS_PATH)
+	config.set_value("accessibility", "landing_fx", landing_fx_mode)
+	config.save(AudioManager.SETTINGS_PATH)
+
+func get_landing_fx_mode() -> String:
+	return landing_fx_mode
+
+func _load_landing_fx_mode() -> void:
+	var config := ConfigFile.new()
+	var default_mode := "reduced" if _is_mobile_runtime() else "full"
+	if config.load(AudioManager.SETTINGS_PATH) == OK:
+		default_mode = str(config.get_value("accessibility", "landing_fx", default_mode)).to_lower()
+	landing_fx_mode = default_mode if default_mode in ["full", "reduced", "off"] else "full"
+
+func _landing_fx_scale() -> float:
+	match landing_fx_mode:
+		"reduced": return 0.45
+		"off": return 0.0
+		_: return 1.0
 
 ## Destructible props shatter under strikes and skill slams.
 func _damage_props_near(pos: Vector3, radius: float = 2.2) -> void:
@@ -507,13 +620,20 @@ func _try_dodge(screen_dir: Vector2) -> void:
 	# by the percentage check at attack resolution time (see notify_enemy_strike).
 	# Still give base iframes so the roll feels responsive even against
 	# undodgeable attacks — they just ignore the evasion chance.
-	invulnerable_timer = maxf(invulnerable_timer, dodge_iframes)
+	invulnerable_timer = maxf(invulnerable_timer, effective_dodge_iframes())
 	audio.play_dash()
 	CombatFx.impact(self, 0.12, 0.0, 1.0, 0.0)
 	CombatFx.spawn_burst(self, global_position + Vector3(0, 0.15, 0),
 		Color(0.42, 0.52, 0.34, 0.6), 14, 3.2, 0.4, 0.16)
 	has_move_target = false
 	game_state.check_onboarding_trigger("dodge")
+
+func effective_dodge_iframes() -> float:
+	return recovery_assist_iframes(dodge_iframes,
+		accessibility_recovery_assist)
+
+static func recovery_assist_iframes(base_iframes: float, enabled: bool) -> float:
+	return clampf(base_iframes + (0.10 if enabled else 0.0), 0.0, 0.44)
 
 
 func _is_attack_dodgeable(ability_tag: String) -> bool:
@@ -546,6 +666,31 @@ func _nearest_enemy(max_dist: float) -> Node3D:
 ## nearest enemy; HUD must behave identically or mobile skills refuse to cast).
 func nearest_enemy(max_dist: float) -> Node3D:
 	return _nearest_enemy(max_dist)
+
+## Switch to the next nearby living foe without disturbing movement input.
+func cycle_target(max_dist: float = 18.0) -> Node3D:
+	var candidates: Array[Node3D] = []
+	for enemy in get_tree().get_nodes_in_group("enemy"):
+		if enemy is Node3D and is_instance_valid(enemy) \
+				and not (enemy.has_method("is_dead") and enemy.is_dead()) \
+				and global_position.distance_to(enemy.global_position) <= max_dist:
+			candidates.append(enemy as Node3D)
+	if candidates.is_empty():
+		return null
+	candidates.sort_custom(func(a: Node3D, b: Node3D) -> bool:
+		return global_position.distance_squared_to(a.global_position) < global_position.distance_squared_to(b.global_position))
+	var current := game_state.enemy_target as Node3D
+	var next_index := 0
+	if current != null and candidates.has(current):
+		next_index = (candidates.find(current) + 1) % candidates.size()
+	var next_target := candidates[next_index]
+	if not game_state.engage_enemy(next_target):
+		# engage_enemy intentionally rejects COMBAT state; switching targets
+		# preserves the active combat session while refreshing the lock marker.
+		game_state.enemy_target = next_target
+		game_state.enemy_selected = true
+		game_state.mark_locked.emit(next_target)
+	return next_target
 
 func _on_dodge_pressed(screen_dir: Vector2) -> void:
 	_try_dodge(screen_dir)
@@ -591,7 +736,8 @@ func _update_timers(delta: float) -> void:
 	
 	# Recover visual roll after a dodge ends
 	if dodge_timer <= 0.0:
-		visual.rotation.x = lerpf(visual.rotation.x, _slope_pitch, minf(delta * 10.0, 1.0))
+		if visual != null:
+			visual.rotation.x = lerpf(visual.rotation.x, _slope_pitch, minf(delta * 10.0, 1.0))
 
 ## Ember trail that streams off the striking hand while a swing plays —
 ## reads the animator state each physics frame, no per-swing wiring.
@@ -1027,9 +1173,12 @@ func _apply_lantern_state() -> void:
 	if active and world.day_night != null:
 		active = not world.day_night.time_of_day > 0.5
 	lantern_is_active = active
-	lantern_light.visible = active
-	lantern_mesh.visible = active
-	lantern_particles.emitting = active
+	if lantern_light != null:
+		lantern_light.visible = active
+	if lantern_mesh != null:
+		lantern_mesh.visible = active
+	if lantern_particles != null:
+		lantern_particles.emitting = active
 	# Clarity: the flame is purely atmospheric (wakes as night settles in).
 	# It does NOT gate combat — marking a foe does. Show this once.
 	if active and not _lantern_was_lit and not _lantern_tip_shown:
@@ -1042,7 +1191,7 @@ func _show_lantern_tip() -> void:
 		return
 	FloatingText.spawn_on_entity(self,
 		"The lantern wakes at dusk — tap a foe to mark & strike",
-		Color(1.0, 0.85, 0.55), 2.0)
+		Color(1.0, 0.85, 0.55))
 
 func _movement_fx_setup() -> void:
 	movement_fx = GPUParticles3D.new()
@@ -1159,7 +1308,7 @@ func _update_movement_audio(delta: float) -> void:
 		if lantern_audio_timer <= 0.0:
 			lantern_audio_timer = 2.8
 			# Swinging lantern creaks; a settled one just hums
-			if animator.pendulum_speed() > 1.3:
+			if animator != null and animator.pendulum_speed() > 1.3:
 				audio.play_lantern_creak()
 			else:
 				audio.play_lantern_hum(speed_ratio)
@@ -1400,6 +1549,8 @@ func _perform_auto_strike(enemy: Node3D) -> void:
 	# Apply damage
 	if enemy.has_method("take_damage"):
 		enemy.take_damage(damage, global_position.direction_to(enemy.global_position), crit_mult > 1.0)
+		if game_state.has_method("record_activity"):
+			game_state.record_activity("HIT %d%s" % [damage, " · CRIT" if crit_mult > 1.0 else ""])
 		_apply_elemental_status(enemy)
 		if crit_mult <= 1.0:
 			FloatingText.spawn_damage_on_entity(enemy, damage, false,
@@ -1447,17 +1598,21 @@ func _fire_magic_bolt(from_pos: Vector3, to_pos: Vector3) -> void:
 	orb.material_override = mat
 	orb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(orb)
+	_transient_fx_nodes.append(orb)
 	orb.global_position = from_pos
 	var flight := create_tween()
+	_transient_fx_tweens.append(flight)
 	flight.tween_property(orb, "global_position", to_pos, 0.24) \
 			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	await flight.finished
+	_transient_fx_tweens.erase(flight)
 	if is_instance_valid(orb):
 		CombatFx.spawn_burst(self, orb.global_position,
 			Color(0.72, 0.62, 1.0, 0.9), 10, 3.0, 0.24, 0.12)
 		CombatFx.spawn_ring(self, orb.global_position, 0.42,
 			Color(0.62, 0.82, 1.0, 0.7), 0.22)
 		orb.queue_free()
+	_transient_fx_nodes.erase(orb)
 
 func _on_animator_impact() -> void:
 	_anim_impact_serial += 1
@@ -1566,6 +1721,8 @@ func _update_foot_grounding() -> void:
 func _update_visuals(delta: float) -> void:
 	# Animator drives limb cycle, bob and pendulum
 	var speed_ratio = clampf(velocity.length() / max(move_speed, 0.01), 0.0, 1.0)
+	if animator == null:
+		return
 	animator.set_move_ratio(speed_ratio)
 	_pulse_aura_with_magic()
 	
@@ -1795,6 +1952,12 @@ func _on_attack_released() -> void:
 
 # === Weapon skill kits (slot 0..2 of the equipped weapon) ===
 func _on_skill_slot_pressed(slot: int) -> void:
+	var now_msec := Time.get_ticks_msec()
+	if slot == _last_skill_press_slot \
+			and now_msec - _last_skill_press_msec < SKILL_INPUT_DEBOUNCE_MS:
+		return
+	_last_skill_press_slot = slot
+	_last_skill_press_msec = now_msec
 	# Targeted rites mark their own foe: if nothing is engaged yet, snap
 	# onto the nearest enemy so Q/E/R always cast when something is close.
 	var sk := game_state.get_skill(slot)
@@ -1809,6 +1972,7 @@ func _on_skill_slot_pressed(slot: int) -> void:
 func _use_skill_slot(slot: int) -> void:
 	var result := game_state.use_skill(slot)
 	if result.success:
+		_skill_activation_count += 1
 		_execute_skill(slot, result.skill)
 		return
 	# Surface WHY the rite refused: cooldowns buffer a retry, missing
@@ -1878,13 +2042,18 @@ func _begin_skill_cast(sk: Dictionary, target: Node3D) -> void:
 			Color(tint.r, tint.g, tint.b, 0.82), 0.4)
 
 func _execute_skill(slot: int, sk: Dictionary) -> void:
+	var execution_generation := _skill_cancel_generation
 	var enemy = game_state.enemy_target
 	_begin_skill_cast(sk, enemy)
 	match str(sk.get("type", "")):
 		"strike":
 			animator.attack_style = weapon_style()
 			animator.trigger_attack()
-			await _wait_for_animator_impact(0.30)
+			if not await _wait_for_skill_impact(
+				float(SKILL_WINDUP.get("strike", 0.10)), 0.30):
+				return
+			if not _skill_generation_valid(execution_generation):
+				return
 			if enemy == null or not is_instance_valid(enemy):
 				return
 			audio.play_slash()
@@ -1908,7 +2077,8 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 			var skill_tint := _skill_tint("whirl")
 			# One short readable wind-up; petals, damage, sound and screen
 			# feedback all resolve together right after it.
-			await get_tree().create_timer(0.12, false).timeout
+			if not await _wait_skill_delay(0.12):
+				return
 			for i in 5:
 				var ang := TAU * i / 5.0
 				CombatFx.spawn_slash(self,
@@ -1955,7 +2125,11 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 						0.18 + 0.2 * k) + Vector3(0, 0.45, 0)
 					CombatFx.spawn_stretched_burst(self, trail_pos,
 						Color(dash_tint.r, dash_tint.g, dash_tint.b, 0.55), 4, 3.0, 0.3)
-			await _wait_for_animator_impact(0.35)
+			if not await _wait_for_skill_impact(
+				float(SKILL_WINDUP.get("dash_strike", 0.10)), 0.35):
+				return
+			if not _skill_generation_valid(execution_generation):
+				return
 			if enemy == null or not is_instance_valid(enemy):
 				return
 			audio.play_slash()
@@ -1982,12 +2156,13 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 			if enemy != null and is_instance_valid(enemy):
 				to_pos = enemy.global_position + Vector3(0, 0.6, 0)
 			# Launch the burning bolt as soon as the charge orb pops.
-			await get_tree().create_timer(
-				float(SKILL_WINDUP.get("explosion", 0.16)), false).timeout
+			if not await _wait_skill_delay(float(SKILL_WINDUP.get("explosion", 0.16))):
+				return
 			audio.play_skill_release("explosion")
 			CombatFx.spawn_bolt(self, from_pos, to_pos,
 				Color(0.98, 0.60, 0.20), 0.26, 0.34)
-			await get_tree().create_timer(0.12, false).timeout
+			if not await _wait_skill_delay(0.12):
+				return
 			audio.play_explosion()
 			var color := Color(0.96, 0.62, 0.22)
 			CombatFx.spawn_explosion(self, to_pos, color,
@@ -2019,12 +2194,13 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 			CombatFx.spawn_pillar(self, ground_pos, 9.0,
 				Color(0.72, 0.60, 1.0, 0.35), 0.6, 1.4)
 			# Release the meteor the instant the charge orb pops.
-			await get_tree().create_timer(
-				float(SKILL_WINDUP.get("comet", 0.26)), false).timeout
+			if not await _wait_skill_delay(float(SKILL_WINDUP.get("comet", 0.26))):
+				return
 			audio.play_skill_release("comet")
 			CombatFx.spawn_bolt(self, ground_pos + Vector3(0, 15.0, -2.0),
 				ground_pos, Color(0.72, 0.60, 1.0), 0.30, 0.55)
-			await get_tree().create_timer(0.30, false).timeout
+			if not await _wait_skill_delay(0.30):
+				return
 			audio.play_explosion()
 			CombatFx.spawn_explosion(self, ground_pos, Color(0.72, 0.60, 1.0),
 				float(sk.get("radius", 4.0)))
@@ -2048,8 +2224,8 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 		"heal_bloom":
 			animator.attack_style = "magic"
 			animator.trigger_attack("buff")
-			await get_tree().create_timer(
-				float(SKILL_WINDUP.get("heal_bloom", 0.26)), false).timeout
+			if not await _wait_skill_delay(float(SKILL_WINDUP.get("heal_bloom", 0.26))):
+				return
 			audio.play_heal()
 			var restored: int = game_state.heal(int(sk.get("heal", 14)))
 			FloatingText.spawn_on_entity(self, "+%d" % restored,
@@ -2071,8 +2247,8 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 			# a committed spin with a shockwave carrying the payload.
 			animator.attack_style = "magic"
 			animator.trigger_attack("spin")
-			await get_tree().create_timer(
-				float(SKILL_WINDUP.get("aoe", 0.16)), false).timeout
+			if not await _wait_skill_delay(float(SKILL_WINDUP.get("aoe", 0.16))):
+				return
 			audio.play_skill_release("aoe")
 			audio.play_explosion()
 			var slam_radius := float(sk.get("radius", 13.0)) * 0.35
@@ -2095,7 +2271,7 @@ func _execute_skill(slot: int, sk: Dictionary) -> void:
 					_deal_skill_damage(foe, float(sk.get("dmg_mult", 1.5)), true)
 			_damage_props_near(global_position, slam_radius)
 			var ws := get_node_or_null("/root/WorldState")
-			if ws != null and ws.has_method("gust"):
+			if ws != null and ws.has_method("gust") and not _is_mobile_runtime():
 				ws.gust(Vector2.ZERO, 0.8)   # ground pound surges the canopy
 			CombatFx.impact(self, 0.24, 0.06, 0.10, 0.55)
 		_:
@@ -2111,6 +2287,8 @@ func _deal_skill_damage(enemy: Node3D, dmg_mult: float, silent_text: bool = fals
 		damage = int(round(damage * crit))
 	if enemy.has_method("take_damage"):
 		enemy.take_damage(damage, global_position.direction_to(enemy.global_position), crit > 1.0)
+		if game_state.has_method("record_activity"):
+			game_state.record_activity("SKILL HIT %d%s" % [damage, " · CRIT" if crit > 1.0 else ""])
 		_apply_elemental_status(enemy)
 		if not silent_text or crit > 1.0:
 			FloatingText.spawn_damage_on_entity(enemy, damage, crit > 1.0)
@@ -2124,6 +2302,8 @@ func _apply_elemental_status(enemy: Node3D) -> void:
 	var element := _equipped_element()
 	if not element.is_empty():
 		enemy.apply_elemental_status(element, 1)
+		if game_state.has_method("record_activity"):
+			game_state.record_activity("STATUS · %s" % element.to_upper())
 
 func _on_interact_pressed() -> void:
 	interact_pressed.emit()
@@ -2197,18 +2377,32 @@ func _trigger_perfect_dodge(_source: Node3D) -> void:
 		Color(0.6, 0.9, 1.0, 0.7), 0.5)
 	CombatFx.impact(self, 0.18, 0.04, 0.4, 0.3)
 	audio.play_dash()
-	# Brief slow-mo breath — the restore timer runs in real time so it
-	# survives its own time_scale change.
-	Engine.time_scale = PERFECT_DODGE_SLOWMO_SCALE
-	var t := get_tree().create_timer(PERFECT_DODGE_SLOWMO_REALTIME, true, false, true)
-	t.timeout.connect(func() -> void: Engine.time_scale = 1.0)
+	if _is_mobile_runtime():
+		# Keep the counter-window reward and presentation, but never slow the
+		# entire mobile simulation during a repeated dodge/attack exchange.
+		return
+	# Brief slow-mo breath as a wall-clock lease so the world always returns
+	# to full speed, even if this hero or its scene dies mid-effect.
+	var guard := get_node_or_null("/root/TimeScaleGuard")
+	if guard != null and guard.has_method("slow_motion"):
+		guard.call("slow_motion", "hero_perfect_dodge",
+			PERFECT_DODGE_SLOWMO_SCALE, PERFECT_DODGE_SLOWMO_REALTIME)
+	else:
+		# Never create an unowned global slowdown if the safety autoload is
+		# unavailable during a scene/test bootstrap.
+		Engine.time_scale = 1.0
+
+func _is_mobile_runtime() -> bool:
+	return OS.has_feature("mobile") or OS.get_name() in ["Android", "iOS"]
 
 func take_damage(amount: int, knockback_dir: Vector3) -> bool:
 	if invulnerable_timer > 0:
 		return false
 	
 	var died = game_state.take_damage(amount)
-	FloatingText.spawn_on_entity(self, str(amount), Color(1, 0.42, 0.32))
+	if game_state.has_method("record_activity"):
+		game_state.record_activity("HERO HIT -%d" % amount)
+	ImpactDirector.dispatch_damage_event(self, amount, false, knockback_dir)
 	
 	# Visual
 	hit_flash_timer = 0.2
@@ -2219,9 +2413,6 @@ func take_damage(amount: int, knockback_dir: Vector3) -> bool:
 	# Knockback
 	velocity += knockback_dir * 8.0
 	
-	# Camera shake
-	if world and world.camera_rig:
-		world.camera_rig.add_shake(0.35)
 	audio.play_hurt()
 	
 	if died:
@@ -2339,6 +2530,13 @@ func _refresh_hand_weapon() -> void:
 			_mount_hand_weapon(hand_socket_r, _build_slab_hammer_visual(), "slab_hammer")
 			_drive_socket = hand_socket_r
 			_has_hand_weapon = true
+		"matriarch_scepter", "thorn_mace", "iron_axe", "grove_spear", "hunter_bow", "round_shield":
+			hand_socket_l.detach()
+			hand_socket_r.detach()
+			var generic_socket := hand_socket_l if str(current_weapon.get("id", "")) in ["iron_axe", "grove_spear", "hunter_bow", "round_shield"] else hand_socket_r
+			_mount_hand_weapon(generic_socket, _build_registry_weapon_visual(str(current_weapon.get("id", ""))), str(current_weapon.get("id", "")))
+			_drive_socket = generic_socket
+			_has_hand_weapon = true
 		_:
 			hand_socket_l.detach()
 			hand_socket_r.detach()
@@ -2368,13 +2566,34 @@ func _mount_hand_weapon(socket: AttachmentSocket, prop: Node3D, weapon_id: Strin
 		"arcane_staff": [Vector3(0.018, -0.10, -0.005), Vector3(0.0, 0.0, 8.0)],
 		"pocket_blade": [Vector3(0.0, -0.018, 0.006), Vector3(0.0, 0.0, -5.0)],
 		"snip_twins": [Vector3(0.0, -0.025, 0.012), Vector3(0.0, 0.0, 7.0)],
-		"soda_cannon": [Vector3(0.02, -0.08, 0.02), Vector3(3.0, 0.0, 10.0)],
 		"slab_hammer": [Vector3(0.025, -0.045, 0.02), Vector3(0.0, 0.0, 9.0)],
+		"matriarch_scepter": [Vector3(0.018, -0.10, -0.005), Vector3(0.0, 0.0, 8.0)],
+		"thorn_mace": [Vector3(0.0, -0.02, 0.0), Vector3(0.0, 0.0, -4.0)],
+		"iron_axe": [Vector3(0.0, -0.03, 0.0), Vector3(0.0, 0.0, -8.0)],
+		"grove_spear": [Vector3(0.0, -0.10, 0.0), Vector3(0.0, 0.0, 4.0)],
+		"hunter_bow": [Vector3(0.0, -0.04, 0.02), Vector3(0.0, 90.0, 0.0)],
+		"round_shield": [Vector3(0.0, -0.02, 0.02), Vector3(90.0, 0.0, 0.0)],
+		"soda_cannon": [Vector3(0.02, -0.08, 0.02), Vector3(3.0, 0.0, 10.0)],
 		"relic": [Vector3(0.0, -0.02, 0.01), Vector3.ZERO],
 	}.get(weapon_id, [Vector3.ZERO, Vector3.ZERO])
 	prop.position += profile[0] as Vector3
 	prop.rotation_degrees += profile[1] as Vector3
 	socket.attach(prop)
+
+func _build_registry_weapon_visual(weapon_id: String) -> Node3D:
+	var mounted := _mount_weapon_model(weapon_id)
+	if mounted != null:
+		_apply_upgrade_presentation(mounted)
+		return mounted
+	var fallback := Node3D.new()
+	fallback.name = "%sVisual" % weapon_id.capitalize()
+	var mesh := MeshInstance3D.new()
+	var blade := BoxMesh.new()
+	blade.size = Vector3(0.08, 0.72, 0.08)
+	mesh.mesh = blade
+	mesh.material_override = _gear_material(Color(0.34, 0.48, 0.38), 0.55, 0.5)
+	fallback.add_child(mesh)
+	return fallback
 
 func _gear_material(color: Color, roughness: float, metallic: float,
 		emission: Color = Color.BLACK, emission_energy: float = 0.0) -> ShaderMaterial:
@@ -2437,6 +2656,11 @@ func _weapon_reach() -> float:
 ## The starter Mug Mace as a real held prop: ale-wet wooden haft wrapped
 ## in leather, a dented steel head and a bottom-heavy pommel counterweight.
 func _build_mug_mace_visual() -> Node3D:
+	var mounted := _mount_weapon_model("mug_mace")
+	if mounted != null:
+		mounted.rotation_degrees = Vector3(-84, 0, 0)
+		_apply_upgrade_presentation(mounted)
+		return mounted
 	var rig := Node3D.new()
 	rig.name = "MugMaceVisual"
 	rig.rotation_degrees = Vector3(-84, 0, 0)
@@ -2523,17 +2747,8 @@ func _build_relic_hand_visual() -> Node3D:
 ## CC0 weapon models dropped into assets/models/weapons override the
 ## procedural props when present (same silent-fallback pattern as rigs).
 func _mount_weapon_model(weapon_id: String) -> Node3D:
-	var path := ""
-	match weapon_id:
-		"ember_sword":
-			path = "res://assets/models/weapons/ember_sword.glb"
-		"arcane_staff":
-			path = "res://assets/models/weapons/arcane_staff.glb"
-		"mug_mace":
-			path = "res://assets/models/weapons/mug_mace.glb"
-		_:
-			return null
-	if not ResourceLoader.exists(path):
+	var path: String = WEAPON_VISUALS.path_for(weapon_id)
+	if path.is_empty():
 		return null
 	var ps := load(path) as PackedScene
 	if ps == null:
@@ -2544,22 +2759,35 @@ func _mount_weapon_model(weapon_id: String) -> Node3D:
 	var holder := Node3D.new()
 	holder.name = "WeaponModel"
 	holder.add_child(model)
+	# Quaternius FBX files are authored in centimetre-like source units while
+	# Embervale's hand sockets are metre-scaled. Normalize that asset family at
+	# the registry boundary so every caller receives a hand-sized visual.
+	var source_scale := 0.012 if path.contains("/quaternius/") else 1.0
 	match weapon_id:
 		"ember_sword":
 			model.rotation_degrees = Vector3(90, 0, 0)
-			holder.scale = Vector3.ONE * 0.95
+			holder.scale = Vector3.ONE * 0.95 * source_scale
 		"arcane_staff":
 			model.position = Vector3(0, 0.4, 0)
-			holder.scale = Vector3.ONE * 1.0
-		"mug_mace":
+			holder.scale = Vector3.ONE * source_scale
+		"mug_mace", "slab_hammer":
 			model.rotation_degrees = Vector3(90, 0, 0)
-			holder.scale = Vector3.ONE * 0.9
+			holder.scale = Vector3.ONE * 0.9 * source_scale
+		"pocket_blade", "snip_twins":
+			model.rotation_degrees = Vector3(90, 0, 0)
+			holder.scale = Vector3.ONE * 0.7 * source_scale
+		_:
+			holder.scale = Vector3.ONE * source_scale
+	holder.set_meta("weapon_id", weapon_id)
+	holder.set_meta("resolved_asset_path", path)
+	holder.set_meta("source_scale", source_scale)
 	return holder
 
 func _build_sword_visual() -> Node3D:
 	var mounted := _mount_weapon_model("ember_sword")
 	if mounted != null:
 		mounted.rotation_degrees = Vector3(-84, 0, 0)
+		_apply_upgrade_presentation(mounted)
 		return mounted
 	var rig := Node3D.new()
 	rig.name = "SwordVisual"
@@ -2572,6 +2800,7 @@ func _build_sword_visual() -> Node3D:
 	blade.mesh = box
 	blade.position = Vector3(0, 0.44, 0)
 	var steel := _gear_material(Color(0.58, 0.62, 0.70), 0.24, 0.90)
+	_apply_upgrade_material(steel)
 	blade.material_override = steel
 	rig.add_child(blade)
 	
@@ -2620,6 +2849,45 @@ func _build_sword_visual() -> Node3D:
 	ember.material_override = ember_mat
 	rig.add_child(ember)
 	return rig
+
+func _upgrade_level() -> int:
+	return maxi(0, int(current_weapon.get("upgrade_level", 0)))
+
+func _apply_upgrade_presentation(holder: Node3D) -> void:
+	var level := _upgrade_level()
+	if level <= 0:
+		return
+	var scale_boost := 1.0 + minf(float(level) * 0.025, 0.10)
+	holder.scale *= Vector3.ONE * scale_boost
+	var accent := MeshInstance3D.new()
+	accent.name = "UpgradeAccent"
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.035
+	ring.outer_radius = 0.055
+	ring.rings = 8
+	ring.ring_segments = 6
+	accent.mesh = ring
+	accent.position = Vector3(0, 0.22, 0)
+	accent.material_override = _upgrade_material(level)
+	holder.add_child(accent)
+
+func _apply_upgrade_material(material: Material) -> void:
+	var level := _upgrade_level()
+	if level <= 0 or not material is StandardMaterial3D:
+		return
+	var standard := material as StandardMaterial3D
+	standard.emission_enabled = true
+	standard.emission = Color(1.0, 0.38, 0.08)
+	standard.emission_energy_multiplier = minf(0.18 + level * 0.08, 0.42)
+
+func _upgrade_material(level: int) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(1.0, 0.42, 0.10)
+	material.emission_enabled = true
+	material.emission = Color(1.0, 0.20, 0.04)
+	material.emission_energy_multiplier = minf(0.35 + level * 0.10, 0.65)
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	return material
 
 func _build_staff_visual() -> Node3D:
 	var mounted := _mount_weapon_model("arcane_staff")
@@ -2890,8 +3158,9 @@ func _snap_hand_socket(sock: AttachmentSocket, grip_offset: Vector3) -> void:
 		return
 	var bone_basis := bone.global_transform.basis.orthonormalized()
 	var grip_pos: Vector3 = bone.global_position + (bone_basis * grip_offset)
-	sock.global_transform = Transform3D(
-		sock.global_transform.basis.orthonormalized(), grip_pos)
+	# Match the palm anchor orientation as well as its origin. Retaining the
+	# procedural arm socket basis makes authored weapons orbit beside the hand.
+	sock.global_transform = Transform3D(bone_basis, grip_pos)
 
 # === Armor visuals & stats ===
 func _capture_body_shader_defaults() -> void:
@@ -2949,6 +3218,9 @@ func _refresh_armor_gear() -> void:
 		_armor_gear_root.queue_free()
 	_armor_gear_root = Node3D.new()
 	_armor_gear_root.name = "ArmorGear"
+	var armor_id := str(game_state.equipped_armor.get("id", ""))
+	_armor_gear_root.set_meta("armor_id", armor_id)
+	_armor_gear_root.set_meta("visual_record", ARMOR_VISUALS.record_for(armor_id))
 	visual.add_child(_armor_gear_root)
 	if cloak_node != null and is_instance_valid(cloak_node) \
 			and _cloak_base_mat != null:

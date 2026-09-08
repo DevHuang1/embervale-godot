@@ -37,6 +37,7 @@ grow_vertical = 0
 script = ExtResource("2_joystick")
 
 [node name="DodgeButton" type="Control" parent="Root"]
+groups = [&"combat_action_controls"]
 custom_minimum_size = Vector2(100, 100)
 layout_mode = 1
 anchors_preset = 3
@@ -68,6 +69,7 @@ theme_override_font_sizes = {"font_size": 13}
 theme_override_colors = {"font_color": Color(0.88, 0.94, 0.86, 1)}
 
 [node name="JumpButton" type="Control" parent="Root"]
+groups = [&"combat_action_controls"]
 custom_minimum_size = Vector2(100, 100)
 layout_mode = 1
 anchors_preset = 3
@@ -166,7 +168,7 @@ anchors_preset = 0
 offset_left = 20.0
 offset_top = 342.0
 offset_right = 340.0
-offset_bottom = 486.0
+offset_bottom = 536.0
 theme_override_constants = {"panel_inset": 14}
 
 [node name="QuestLedgerVBox" type="VBoxContainer" parent="Root/QuestLedger"]
@@ -190,6 +192,24 @@ autowrap_mode = 2
 theme_override_font_sizes = {"font_size": 17}
 theme_override_colors = {"font_color": Color(0.3, 0.27, 0.2, 1)}
 
+[node name="ObjectiveLabel" type="Label" parent="Root/QuestLedger/QuestLedgerVBox"]
+text = "No side objectives active."
+autowrap_mode = 2
+theme_override_font_sizes = {"font_size": 14}
+theme_override_colors = {"font_color": Color(0.36, 0.32, 0.24, 1)}
+
+[node name="CheckpointLabel" type="Label" parent="Root/QuestLedger/QuestLedgerVBox"]
+text = "CHECKPOINT  ·  GROVE ARRIVAL"
+autowrap_mode = 2
+theme_override_font_sizes = {"font_size": 11}
+theme_override_colors = {"font_color": Color(0.66, 0.48, 0.2, 1)}
+
+[node name="LessonButton" type="Button" parent="Root/QuestLedger/QuestLedgerVBox"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+text = "OPEN CHAPTER LESSON"
+theme_override_font_sizes/font_size = 13
+
 [node name="MetaRow" type="VBoxContainer" parent="Root"]
 layout_mode = 1
 anchors_preset = 1
@@ -206,13 +226,13 @@ alignment = 2
 theme_override_constants/separation = 12
 
 [node name="GoldLabel" type="Label" parent="Root/MetaRow/TopRow"]
-text = "🪙 30"
+text = "GOLD  30"
 tooltip_text = "Gold — buy gear at the trader"
 theme_override_font_sizes = {"font_size": 16}
 theme_override_colors = {"font_color": Color(1, 0.84, 0.45, 1)}
 
 [node name="DiamondLabel" type="Label" parent="Root/MetaRow/TopRow"]
-text = "💎 0"
+text = "DIAMONDS  0"
 tooltip_text = "Diamonds — cosmetic treasures only"
 theme_override_font_sizes = {"font_size": 16}
 theme_override_colors = {"font_color": Color(0.55, 0.85, 1, 1)}
@@ -285,7 +305,7 @@ anchor_right = 0.5
 offset_left = -215.0
 offset_top = 170.0
 offset_right = 215.0
-offset_bottom = 290.0
+offset_bottom = 324.0
 grow_horizontal = 2
 theme_override_constants = {"panel_inset": 14}
 
@@ -303,18 +323,37 @@ custom_minimum_size = Vector2(0, 22)
 layout_mode = 2
 size_flags_vertical = 4
 min_value = 0.0
-max_value = 28.0
-value = 28.0
+max_value = 1.0
+value = 1.0
 show_percentage = false
 script = ExtResource("7_ember")
 accent = Color(0.78, 0.26, 0.2, 1)
 border_color = Color(0.42, 0.3, 0.14, 1)
 
 [node name="CombatStatus" type="Label" parent="Root/CombatCard/CombatVBox"]
-text = "Target locked — Elian closes in"
+text = "LOCKED  ·  THREAT  ·  THE HUSHLING\nHP 28 / 28"
 horizontal_alignment = 1
 theme_override_font_sizes = {"font_size": 17}
 theme_override_colors = {"font_color": Color(0.62, 0.72, 0.52, 1)}
+
+[node name="TargetDirectionLabel" type="Label" parent="Root/CombatCard/CombatVBox"]
+text = "TARGET IN VIEW"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 13
+theme_override_colors = {"font_color": Color(0.55, 0.86, 0.62, 1)}
+
+[node name="EnemyScanButton" type="Button" parent="Root/CombatCard/CombatVBox"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "ANALYZE FOE"
+theme_override_font_sizes/font_size = 14
+
+[node name="TargetSwitchButton" type="Button" parent="Root/CombatCard/CombatVBox"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "NEXT TARGET"
+tooltip_text = "Switch the locked target to the next nearby enemy"
+theme_override_font_sizes/font_size = 14
 
 [node name="BossHealthBar" type="PanelContainer" parent="Root"]
 visible = false
@@ -433,6 +472,7 @@ grow_vertical = 0
 mouse_filter = 2
 
 [node name="AttackButton" type="Control" parent="Root/SkillBar"]
+groups = [&"combat_action_controls"]
 custom_minimum_size = Vector2(168, 168)
 layout_mode = 1
 anchors_preset = 3
@@ -459,11 +499,13 @@ grow_horizontal = 2
 grow_vertical = 2
 text = "STRIKE"
 horizontal_alignment = 1
-vertical_alignment = 1
+vertical_alignment = 2
+offset_bottom = -8.0
 theme_override_font_sizes = {"font_size": 10}
 theme_override_colors = {"font_color": Color(1, 0.92, 0.72, 1)}
 
 [node name="Skill0Button" type="Control" parent="Root/SkillBar"]
+groups = [&"combat_action_controls"]
 custom_minimum_size = Vector2(96, 96)
 layout_mode = 1
 anchors_preset = 3
@@ -489,7 +531,7 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_font_sizes = {"font_size": 40}
+theme_override_font_sizes = {"font_size": 34}
 theme_override_colors = {"font_color": Color(1, 0.95, 0.82, 1)}
 
 [node name="Skill0Cooldown" type="Label" parent="Root/SkillBar/Skill0Button"]
@@ -506,6 +548,7 @@ theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1), "font_shadow_
 theme_override_constants = {"shadow_offset_x": 1, "shadow_offset_y": 2}
 
 [node name="Skill1Button" type="Control" parent="Root/SkillBar"]
+groups = [&"combat_action_controls"]
 custom_minimum_size = Vector2(96, 96)
 layout_mode = 1
 anchors_preset = 3
@@ -531,7 +574,7 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_font_sizes = {"font_size": 40}
+theme_override_font_sizes = {"font_size": 34}
 theme_override_colors = {"font_color": Color(1, 0.95, 0.82, 1)}
 
 [node name="Skill1Cooldown" type="Label" parent="Root/SkillBar/Skill1Button"]
@@ -548,6 +591,7 @@ theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1), "font_shadow_
 theme_override_constants = {"shadow_offset_x": 1, "shadow_offset_y": 2}
 
 [node name="Skill2Button" type="Control" parent="Root/SkillBar"]
+groups = [&"combat_action_controls"]
 custom_minimum_size = Vector2(96, 96)
 layout_mode = 1
 anchors_preset = 3
@@ -573,7 +617,7 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_font_sizes = {"font_size": 40}
+theme_override_font_sizes = {"font_size": 34}
 theme_override_colors = {"font_color": Color(1, 0.95, 0.82, 1)}
 
 [node name="Skill2Cooldown" type="Label" parent="Root/SkillBar/Skill2Button"]

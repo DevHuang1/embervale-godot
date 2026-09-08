@@ -39,13 +39,17 @@ signal settings_requested
 var _has_save : bool = false
 
 func _ready() -> void:
-	# Check for existing save
-	var slm := get_node_or_null("/root/SaveLoadManager")
-	_has_save = slm.call("has_save") if slm and slm.has_method("has_save") else false
-
-	# Enable continue only if save exists
-	if continue_button:
-		continue_button.disabled = not _has_save
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	UiKit.apply_parchment($Root/HeroCard)
+	UiKit.apply_parchment(confirm_card)
+	UiKit.style_primary_button(cta_button)
+	UiKit.style_primary_button(confirm_yes)
+	UiKit.style_secondary_button(confirm_no)
+	UiKit.style_secondary_button(continue_button)
+	UiKit.style_secondary_button(settings_button)
+	UiKit.style_danger_button(quit_button)
+	$Root/VersionChip.add_theme_color_override("font_color", UiKit.SAGE_BRIGHT)
+	_check_continue_availability()
 
 	# Button connections
 	if cta_button:      cta_button.pressed.connect(_on_cta_pressed)
@@ -60,6 +64,15 @@ func _ready() -> void:
 	var tw := create_tween()
 	tw.tween_property($Root, "modulate:a", 1.0, 0.65).set_trans(Tween.TRANS_QUAD)
 
+func _check_continue_availability() -> void:
+	_has_save = GameState.has_save()
+	continue_button.disabled = not _has_save
+	var state := UiKit.action_state("available" if _has_save else "unavailable",
+		"Resume the last checkpoint" if _has_save else "Start a new tale to create a save")
+	continue_button.text = "CONTINUE" if _has_save else "NO SAVED TALE"
+	continue_button.tooltip_text = "%s · %s" % [str(state.get("label", "")),
+		str(state.get("detail", ""))]
+
 # ─── Button handlers ──────────────────────────────────────────────────────────
 
 func _on_cta_pressed() -> void:
@@ -72,9 +85,7 @@ func _on_cta_pressed() -> void:
 
 func _on_confirm_yes() -> void:
 	# Delete save and start fresh
-	var slm := get_node_or_null("/root/SaveLoadManager")
-	if slm and slm.has_method("delete_save"):
-		slm.call("delete_save")
+	GameState.delete_save()
 	_start_new_game()
 
 func _on_confirm_no() -> void:
@@ -84,12 +95,7 @@ func _on_confirm_no() -> void:
 func _on_continue() -> void:
 	game_start_requested.emit()
 	load_game_requested.emit()
-	var slm := get_node_or_null("/root/SaveLoadManager")
-	if slm and slm.has_method("load_save"):
-		var gs := get_node_or_null("/root/GameState")
-		if gs and slm.has_method("bind"):
-			slm.call("bind", gs)
-		slm.call("load_save")
+	GameState.load_game()
 	_fade_to_game()
 
 func _on_settings() -> void:
@@ -101,6 +107,7 @@ func _on_quit() -> void:
 # ─── Internal ─────────────────────────────────────────────────────────────────
 
 func _start_new_game() -> void:
+	GameState.reset()
 	game_start_requested.emit()
 	_fade_to_game()
 

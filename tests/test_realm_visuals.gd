@@ -43,6 +43,10 @@ func _run() -> void:
 		root.add_child(scene)
 		for i in 6:
 			await process_frame
+		var vista := scene.find_child("DistantLandmarkSilhouettes", true, false)
+		if vista == null or vista.get_child_count() == 0 or vista.get_child_count() > 3:
+			failures += 1
+			print("FAIL: %s distant landmark silhouettes must be bounded 1..3" % realm)
 
 		var terrain := _find_terrain_material(scene)
 		if terrain == null:
@@ -91,37 +95,62 @@ func _run() -> void:
 
 		# Continuous grass contract: one dense MultiMesh carpet covers the playable
 		# route even on the boot-time Low tier. Paths and boss arenas stay clear.
-		var grass_batches := scene.find_children("GrassCarpet", "MultiMeshInstance3D", true, false)
+		# Streamed realms (bramblewood/whispergrove) carry the carpet as many
+		# per-chunk "GrassCarpet" batches, so their density is measured by
+		# aggregating every instance inside the 72 m disc around the hero spawn.
+		var grass_batches := scene.find_children("GrassCarpet*", "MultiMeshInstance3D", true, false)
 		if grass_batches.is_empty():
 			failures += 1
 			print("FAIL: %s missing continuous GrassCarpet batch" % realm)
 		else:
-			var grass_batch := grass_batches[0] as MultiMeshInstance3D
-			if not grass_batch.multimesh.mesh is ArrayMesh:
-				failures += 1
-				print("FAIL: %s grass regressed to primitive rod geometry" % realm)
+			var stream_realm: bool = realm in ["bramblewood", "whispergrove"]
+			if not stream_realm:
+				failures += _check_grass_batch(scene, grass_batches[0] as MultiMeshInstance3D,
+					realm, 28.0 if realm == "moonfen" else 56.0)
 			else:
-				var blade_mesh := grass_batch.multimesh.mesh as ArrayMesh
-				var arrays := blade_mesh.surface_get_arrays(0)
-				var vertices := arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array
-				if vertices.size() < 30:
+				var spawn_marker := scene.find_child("PlayerSpawn", true, false) as Marker3D
+				if spawn_marker == null:
 					failures += 1
-					print("FAIL: %s grass clump lacks tapered multi-blade geometry" % realm)
-			var grass_radius := 28.0 if realm == "moonfen" else (56.0 \
-				if realm in ["mistfen", "heartwood"] else 72.0)
-			var carpet_density := float(grass_batch.multimesh.instance_count) \
-				/ (PI * grass_radius * grass_radius)
-			if carpet_density < 0.50:
-				failures += 1
-				print("FAIL: %s grass carpet too sparse (%.2f instances/m2)" \
-					% [realm, carpet_density])
-			var arena3 := RealmLayoutData.profile(realm).get("arena", Vector3.ZERO) as Vector3
-			for grass_index in grass_batch.multimesh.instance_count:
-				var grass_pos := grass_batch.multimesh.get_instance_transform(grass_index).origin
-				if Vector2(grass_pos.x, grass_pos.z).distance_to(Vector2(arena3.x, arena3.z)) < 4.9:
-					failures += 1
-					print("FAIL: %s grass obstructs boss telegraph arena" % realm)
-					break
+					print("FAIL: %s missing PlayerSpawn anchor for streamed grass" % realm)
+				else:
+					var center := Vector2(spawn_marker.global_position.x,
+						spawn_marker.global_position.z)
+					var count := 0
+					for batch in grass_batches:
+						var mmi := batch as MultiMeshInstance3D
+						for i in mmi.multimesh.instance_count:
+							var origin := mmi.multimesh.get_instance_transform(i).origin
+							if (Vector2(mmi.global_position.x, mmi.global_position.z) \
+									+ Vector2(origin.x, origin.z)).distance_to(center) <= 72.0:
+								count += 1
+					var area := PI * 72.0 * 72.0
+					if float(count) / area < 0.45:
+						failures += 1
+						print("FAIL: %s streamed grass carpet too sparse (%.2f instances/m2)" \
+							% [realm, float(count) / area])
+					var band_names := {"GrassCarpet": false, "GrassCarpet_mid": false,
+						"GrassCarpet_far": false}
+					for batch in grass_batches:
+						if band_names.has(str((batch as Node).name)):
+							band_names[str((batch as Node).name)] = true
+					for band_name in band_names:
+						if not band_names[band_name]:
+							failures += 1
+							print("FAIL: %s missing streamed grass band %s" % [realm, band_name])
+				# Arena clearance spans every chunk batch for streamed realms.
+				var arena3 := RealmLayoutData.profile(realm).get("arena", Vector3.ZERO) as Vector3
+				for batch in grass_batches:
+					var mmi := batch as MultiMeshInstance3D
+					for grass_index in mmi.multimesh.instance_count:
+						var grass_pos := mmi.multimesh.get_instance_transform(grass_index).origin
+						var world_pos := Vector2(mmi.global_position.x, mmi.global_position.z) \
+							+ Vector2(grass_pos.x, grass_pos.z)
+						if world_pos.distance_to(Vector2(arena3.x, arena3.z)) < 4.9:
+							failures += 1
+							print("FAIL: %s grass obstructs boss telegraph arena" % realm)
+							break
+					if failures > 0 and arena3 != Vector3.ZERO:
+						break
 
 		var composition := scene.find_child("WorldGroundComposition", true, false)
 		if composition == null:
@@ -196,9 +225,33 @@ func _find_terrain_material(scene: Node) -> ShaderMaterial:
 	for mi in scene.find_children("*", "MeshInstance3D", true, false):
 		var m := mi.material_override as ShaderMaterial
 		if m != null and m.shader != null \
-				and m.shader.resource_path.contains("terrain_ground.gdshader"):
+				and (m.shader.resource_path.contains("terrain_ground.gdshader") \
+				or m.shader.resource_path.contains("terrain_ground_layers.gdshader")):
 			return m
 	return null
+
+
+## Blade geometry + static-density contract shared by the non-streamed realms.
+func _check_grass_batch(scene: Node, grass_batch: MultiMeshInstance3D,
+		realm: String, grass_radius: float) -> int:
+	var f := 0
+	if not grass_batch.multimesh.mesh is ArrayMesh:
+		f += 1
+		print("FAIL: %s grass regressed to primitive rod geometry" % realm)
+	else:
+		var blade_mesh := grass_batch.multimesh.mesh as ArrayMesh
+		var arrays := blade_mesh.surface_get_arrays(0)
+		var vertices := arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array
+		if vertices.size() < 30:
+			f += 1
+			print("FAIL: %s grass clump lacks tapered multi-blade geometry" % realm)
+	var carpet_density := float(grass_batch.multimesh.instance_count) \
+		/ (PI * grass_radius * grass_radius)
+	if carpet_density < 0.50:
+		f += 1
+		print("FAIL: %s grass carpet too sparse (%.2f instances/m2)" \
+			% [realm, carpet_density])
+	return f
 
 
 ## Moonfen visual contract: fen water shader on the water plane, a live

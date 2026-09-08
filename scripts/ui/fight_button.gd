@@ -15,6 +15,12 @@ signal fight_released
 enum Shape { AXE, CIRCLE, SLASH }
 
 @export var shape: Shape = Shape.CIRCLE
+@export_range(1.0, 1.5, 0.05) var accessibility_touch_scale: float = 1.0:
+	set(value):
+		accessibility_touch_scale = clampf(value, 1.0, 1.5)
+		if _base_minimum_size != Vector2.ZERO:
+			custom_minimum_size = _base_minimum_size * accessibility_touch_scale
+		queue_redraw()
 @export var accent := Color(0.96, 0.72, 0.29):
 	set(value):
 		if accent.is_equal_approx(value):
@@ -36,9 +42,15 @@ const TT_DIM := Color(0.76, 0.70, 0.60)
 
 var active_pointer := -1
 var mouse_active := false
+var _base_minimum_size := Vector2.ZERO
 # Human-readable info fed by the HUD so the custom tooltip can explain what
 # a skill does, its effect, its cooldown, and whether it needs a target.
 var tooltip_data: Dictionary = {}
+var semantic_action: Dictionary = {}
+var skill_kind := "":
+	set(value):
+		skill_kind = value
+		queue_redraw()
 var dimmed := false:
 	set(value):
 		if dimmed == value:
@@ -58,8 +70,21 @@ var _lock_target := 0.0
 func set_lock_glow(on: bool) -> void:
 	_lock_target = 1.0 if on else 0.0
 
+## Shared action-state adapter for custom touch controls. Combat callers use
+## this instead of inventing a second disabled/tooltip vocabulary.
+func set_action_state(state: String, detail: String = "") -> void:
+	semantic_action = UiKit.action_state(state, detail)
+	dimmed = bool(semantic_action.get("disabled", false))
+	tooltip_data["state_label"] = str(semantic_action.get("label", ""))
+	tooltip_data["state_detail"] = str(semantic_action.get("detail", ""))
+	tooltip_text = "%s%s" % [str(semantic_action.get("label", "")),
+		(" · " + detail) if not detail.is_empty() else ""]
+	queue_redraw()
+
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	_base_minimum_size = custom_minimum_size
+	custom_minimum_size = _base_minimum_size * accessibility_touch_scale
 	queue_redraw()
 
 ## Cooldown ring: ratio = remaining/total; 0 means ready.
@@ -157,6 +182,8 @@ func _draw() -> void:
 			var fill := accent
 			fill.a = 0.05 if dimmed else 0.12
 			draw_circle(center, r * 0.80, fill)
+			if not skill_kind.is_empty():
+				_draw_skill_icon(center, r * 0.58)
 	var rim := accent.lightened(0.35) if _pressed else accent
 	draw_arc(center, r, 0.0, TAU, 64,
 		Color(rim.r, rim.g, rim.b, 0.55 if dimmed else 0.9), 3.0, true)
@@ -206,6 +233,65 @@ func _draw() -> void:
 		draw_arc(center, r * (1.04 + 0.12 * (1.0 - _ready_flash)),
 			0.0, TAU, 64, flash_col, 4.0 + 3.0 * _ready_flash, true)
 
+func _draw_skill_icon(c: Vector2, r: float) -> void:
+	var ink := accent.lightened(0.34)
+	if dimmed:
+		ink = ink.darkened(0.42)
+	var dark := BACKING.lightened(0.08)
+	match skill_kind:
+		"bleed":
+			# Three descending cuts plus a falling droplet: readable as a
+			# damage-over-time rite without relying on a language glyph.
+			for i in 3:
+				var yy := -0.48 + float(i) * 0.38
+				draw_line(c + Vector2(-0.62, yy) * r, c + Vector2(0.18, yy - 0.22) * r,
+					ink, maxf(3.0, r * 0.09), true)
+			draw_circle(c + Vector2(0.48, 0.38) * r, r * 0.16, Color(0.82, 0.16, 0.18))
+			draw_colored_polygon(PackedVector2Array([
+			c + Vector2(0.48, 0.62) * r,
+			c + Vector2(0.34, 0.36) * r,
+			c + Vector2(0.62, 0.36) * r]), Color(0.82, 0.16, 0.18))
+		"strike":
+			var blade := PackedVector2Array([
+				c + Vector2(-0.12, 0.70) * r, c + Vector2(0.12, 0.70) * r,
+				c + Vector2(0.20, -0.48) * r, c + Vector2(0.0, -0.88) * r,
+				c + Vector2(-0.20, -0.48) * r])
+			draw_colored_polygon(blade, STEEL)
+			draw_line(c + Vector2(-0.48, 0.42) * r, c + Vector2(0.48, 0.42) * r, ink, 4.0, true)
+		"whirl":
+			draw_arc(c, r * 0.68, -0.35, TAU - 0.72, 30, ink, 7.0, true)
+			var tip := PackedVector2Array([c + Vector2(0.66, -0.30) * r,
+				c + Vector2(0.30, -0.37) * r, c + Vector2(0.55, -0.02) * r])
+			draw_colored_polygon(tip, ink)
+		"dash_strike":
+			for y in [-0.34, 0.0, 0.34]:
+				draw_line(c + Vector2(-0.72, y) * r, c + Vector2(0.15, y) * r, ink, 4.0, true)
+			var arrow := PackedVector2Array([c + Vector2(0.05, -0.68) * r,
+				c + Vector2(0.78, 0.0) * r, c + Vector2(0.05, 0.68) * r])
+			draw_colored_polygon(arrow, ink)
+		"heal_bloom":
+			draw_rect(Rect2(c + Vector2(-0.18, -0.72) * r, Vector2(0.36, 1.44) * r), ink, true)
+			draw_rect(Rect2(c + Vector2(-0.72, -0.18) * r, Vector2(1.44, 0.36) * r), ink, true)
+		"comet":
+			draw_circle(c + Vector2(0.28, 0.24) * r, r * 0.34, ink)
+			draw_line(c + Vector2(-0.70, -0.70) * r, c + Vector2(0.05, 0.05) * r, ink, 8.0, true)
+			draw_line(c + Vector2(-0.68, -0.35) * r, c + Vector2(-0.02, 0.18) * r, ink, 4.0, true)
+		"explosion":
+			var burst := PackedVector2Array()
+			for i in 16:
+				var rr := r * (0.82 if i % 2 == 0 else 0.38)
+				var a := TAU * float(i) / 16.0
+				burst.append(c + Vector2(cos(a), sin(a)) * rr)
+			draw_colored_polygon(burst, ink)
+		"aoe", "heavy_aoe":
+			draw_circle(c, r * 0.30, ink)
+			draw_arc(c, r * 0.68, 0.0, TAU, 32, ink, 5.0, true)
+			draw_circle(c, r * 0.11, dark)
+		_:
+			draw_colored_polygon(PackedVector2Array([
+				c + Vector2(0, -0.78) * r, c + Vector2(0.68, 0) * r,
+				c + Vector2(0, 0.78) * r, c + Vector2(-0.68, 0) * r]), ink)
+
 ## Diagonal sword slash: a broad angled blade with an ember edge, a small
 ## cross-guard and pommel — reads as "strike" at a thumb-glance.
 func _draw_slash(c: Vector2, r: float) -> void:
@@ -235,47 +321,41 @@ func _draw_slash(c: Vector2, r: float) -> void:
 
 ## Stylized double-bit axe head: two beveled steel fans meeting over a
 ## wrapped wooden haft, gold edge glints and a center rivet.
+## A clean greatsword icon — tapered steel blade with a fuller highlight,
+## brass crossguard, wrapped grip and pommel. Replaces the old double-axe
+## polygon, which read as an ambiguous white bowtie at thumb size.
 func _draw_axe_head(c: Vector2, r: float) -> void:
 	var s := r * 0.92
-	var half := PackedVector2Array([
-		Vector2(-0.14, -0.50), Vector2(-0.52, -0.84), Vector2(-0.90, -0.62),
-		Vector2(-1.00, -0.12), Vector2(-0.86, 0.34), Vector2(-0.54, 0.70),
-		Vector2(-0.28, 0.50), Vector2(-0.14, 0.18)])
-	for side in [-1.0, 1.0]:
-		var blade := PackedVector2Array()
-		for p in half:
-			blade.append(c + Vector2(p.x * side, p.y) * s)
-		draw_colored_polygon(blade, STEEL.darkened(0.35) if dimmed else STEEL)
-		# Inner bevel: a slightly smaller fan reads as a ground edge face
-		var bevel := PackedVector2Array()
-		for p in half:
-			bevel.append(c + (Vector2(p.x * side, p.y) * s).lerp(
-				c + Vector2(0, 0.06) * s, 0.22))
-		draw_colored_polygon(bevel,
-			STEEL.darkened(0.15) if dimmed else STEEL.lightened(0.12))
-		var edge := PackedVector2Array()
-		for p in [half[1], half[2], half[3], half[4], half[5]]:
-			edge.append(c + Vector2(p.x * side, p.y) * s)
-		var glint := accent
-		glint.a = 0.35 if dimmed else 0.85
-		draw_polyline(edge, glint, maxf(2.0, s * 0.05), true)
-	# Haft with leather wrap bands
-	var haft := PackedVector2Array([
-		c + Vector2(-0.11, -0.58) * s, c + Vector2(0.11, -0.58) * s,
-		c + Vector2(0.15, 0.98) * s, c + Vector2(-0.15, 0.98) * s])
-	draw_colored_polygon(haft, WOOD.darkened(0.3) if dimmed else WOOD)
-	for i in 4:
-		var yy := -0.30 + i * 0.22
-		var band := PackedVector2Array([
-			c + Vector2(-0.13, yy) * s, c + Vector2(0.13, yy) * s,
-			c + Vector2(0.15, yy + 0.07) * s, c + Vector2(-0.15, yy + 0.07) * s])
-		draw_colored_polygon(band,
-			Color(0.16, 0.11, 0.06, 0.9 if not dimmed else 0.5))
-	# Center rivet pins the head to the haft
-	var rivet_r := maxf(3.0, s * 0.09)
-	draw_circle(c + Vector2(0, -0.44) * s, rivet_r, STEEL.lightened(0.35))
-	draw_circle(c + Vector2(-rivet_r * 0.25, -0.44 * s - rivet_r * 0.25),
-		rivet_r * 0.6, STEEL.lightened(0.55))
+	var steel := STEEL.darkened(0.35) if dimmed else STEEL
+	var steel_hi := STEEL.darkened(0.15) if dimmed else STEEL.lightened(0.25)
+	var brass := Color(0.72, 0.55, 0.24).darkened(0.3) if dimmed \
+		else Color(0.72, 0.55, 0.24)
+	var wood := WOOD.darkened(0.3) if dimmed else WOOD
+	# Blade: pointed pentagon, tip up
+	var blade := PackedVector2Array([
+		c + Vector2(0.0, -0.60) * s,
+		c + Vector2(0.12, -0.42) * s, c + Vector2(0.11, -0.02) * s,
+		c + Vector2(-0.11, -0.02) * s, c + Vector2(-0.12, -0.42) * s])
+	draw_colored_polygon(blade, steel)
+	# Fuller highlight down the middle of the blade
+	draw_line(c + Vector2(0, -0.40) * s, c + Vector2(0, -0.06) * s,
+		steel_hi, maxf(2.0, s * 0.06), true)
+	# Crossguard
+	var guard := PackedVector2Array([
+		c + Vector2(-0.30, 0.00) * s, c + Vector2(0.30, 0.00) * s,
+		c + Vector2(0.26, 0.12) * s, c + Vector2(-0.26, 0.12) * s])
+	draw_colored_polygon(guard, brass)
+	# Grip with wrap bands
+	var grip := PackedVector2Array([
+		c + Vector2(-0.07, 0.12) * s, c + Vector2(0.07, 0.12) * s,
+		c + Vector2(0.08, 0.42) * s, c + Vector2(-0.08, 0.42) * s])
+	draw_colored_polygon(grip, wood)
+	for i in 2:
+		var yy := 0.20 + i * 0.12
+		draw_line(c + Vector2(-0.08, yy) * s, c + Vector2(0.08, yy) * s,
+			Color(0.16, 0.11, 0.06, 0.9), maxf(2.0, s * 0.05), true)
+	# Pommel
+	draw_circle(c + Vector2(0, 0.48) * s, maxf(3.0, s * 0.09), steel_hi)
 
 ## Build a rich, readable explanation panel for a skill. Called by Godot
 ## whenever the hover tooltip is needed; content comes from tooltip_data,
@@ -316,6 +396,21 @@ func _make_custom_tooltip(_for_text: String) -> Control:
 	meta.add_theme_font_size_override("font_size", 14)
 	meta.add_theme_color_override("font_color", TT_ACCENT)
 	vbox.add_child(meta)
+	var state_label := str(d.get("state_label", ""))
+	if not state_label.is_empty():
+		var state := Label.new()
+		state.text = state_label
+		state.add_theme_font_size_override("font_size", 13)
+		state.add_theme_color_override("font_color", TT_ACCENT)
+		vbox.add_child(state)
+	var state_detail := str(d.get("state_detail", ""))
+	if not state_detail.is_empty():
+		var state_note := Label.new()
+		state_note.text = state_detail
+		state_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		state_note.add_theme_font_size_override("font_size", 13)
+		state_note.add_theme_color_override("font_color", TT_DIM)
+		vbox.add_child(state_note)
 
 	var desc := str(d.get("desc", ""))
 	if desc != "":
@@ -345,4 +440,3 @@ func _make_custom_tooltip(_for_text: String) -> Control:
 		vbox.add_child(tl)
 
 	return panel
-

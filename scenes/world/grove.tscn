@@ -1,4 +1,4 @@
-[gd_scene load_steps=39 format=3]
+[gd_scene load_steps=40 format=3]
 
 [ext_resource type="Script" path="res://scripts/systems/biome_manager.gd" id="1_wm"]
 [ext_resource type="Environment" path="res://assets/environments/embervale_env.tres" id="2_env"]
@@ -16,6 +16,10 @@
 [ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/normal.jpg" id="stone_normal"]
 [ext_resource type="Texture2D" path="res://assets/textures/pbr/rock/roughness.jpg" id="stone_rough"]
 [ext_resource type="PackedScene" path="res://scenes/ui/shop_menu.tscn" id="13_shop"]
+[ext_resource type="PackedScene" path="res://scenes/ui/settings_menu.tscn" id="14_sett"]
+[ext_resource type="Script" path="res://scripts/systems/world_chunk_streamer.gd" id="15_stream"]
+[ext_resource type="PackedScene" path="res://scenes/world/service_npc.tscn" id="16_npc"]
+[ext_resource type="PackedScene" path="res://scenes/ui/camp_menu.tscn" id="17_camp"]
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_pedestal"]
 top_radius = 0.34
@@ -174,7 +178,7 @@ material_override = ExtResource("3_ter")
 [node name="SunLight" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.707, 0, -0.707, 0, 1, 0, 0.707, 0, 0.707, 30, 60, 20)
 light_color = Color(1.0, 0.93, 0.78, 1)
-light_energy = 1.55
+light_energy = 1.20
 light_angular_distance = 0.45
 shadow_enabled = true
 directional_shadow_max_distance = 260.0
@@ -412,3 +416,28 @@ visible = false
 visible = false
 
 [node name="ShopMenu" parent="." instance=ExtResource("13_shop")]
+
+[node name="CampMenu" parent="." instance=ExtResource("17_camp")]
+
+[node name="Merchant" parent="." instance=ExtResource("16_npc")]
+position = Vector3(-12, 0.5, 13)
+display_name = "Ember Trader"
+service_kind = "shop"
+model_profile = "merchant"
+
+[node name="Craftsman" parent="." instance=ExtResource("16_npc")]
+position = Vector3(-7.5, 0.5, 13)
+display_name = "Grove Smith"
+service_kind = "forge"
+model_profile = "craftsman"
+
+[node name="Campkeeper" parent="." instance=ExtResource("16_npc")]
+position = Vector3(-3.0, 0.5, 13)
+display_name = "Lantern Keeper"
+service_kind = "camp"
+model_profile = "merchant"
+
+[node name="SettingsMenu" parent="." instance=ExtResource("14_sett")]
+
+[node name="WorldStreamer" type="Node3D" parent="."]
+script = ExtResource("15_stream")

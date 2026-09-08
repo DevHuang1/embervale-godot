@@ -12,6 +12,9 @@ const VIEW_FIRST_PERSON := "first_person"
 const VIEW_THIRD_PERSON := "third_person"
 const VIEW_TOP_DOWN := "top_down"
 
+const HITSTOP_LEASE := "camera_hitstop"
+const KILLCAM_LEASE := "camera_killcam"
+
 @export var distance: float = 17.5
 @export var min_distance: float = 11.0
 @export var max_distance: float = 28.0
@@ -27,7 +30,10 @@ const VIEW_TOP_DOWN := "top_down"
 
 # Framing & focus
 @export var fov: float = 40.0
-@export var dof_enabled: bool = true
+## Keep combat readability deterministic: depth-of-field blurs world-space
+## damage numbers and health plates at different distances from the focus
+## plane. Atmospheric fog already supplies depth separation on mobile.
+@export var dof_enabled: bool = false
 @export var dof_far_offset: float = 7.0
 @export var dof_far_transition: float = 7.0
 @export var dof_blur_amount: float = 0.07
@@ -54,6 +60,8 @@ const VIEW_TOP_DOWN := "top_down"
 # device (mouse motion on desktop, a one-finger drag elsewhere). The orbit
 # modes keep their wide arc; first person stays near level with this band.
 @export var first_person_look_sensitivity: float = 0.004
+@export var first_person_invert_y: bool = false
+@export var first_person_smoothing: float = 0.0
 @export var first_person_pitch_min: float = -0.65
 @export var first_person_pitch_max: float = 0.10
 
@@ -69,7 +77,6 @@ var _shake_phase: float = 0.0
 var _shake_priority: int = 0
 var _shake_decay_rate: float = 8.0
 var _hit_stop_until_msec: int = 0
-var _hit_stop_restore_scale: float = 1.0
 var target_angle_h: float = 0.0  # Horizontal (yaw)
 var target_angle_v: float = -0.95  # Vertical (pitch, ~-54 deg top-down)
 var cam_attributes: CameraAttributesPractical = null
@@ -92,6 +99,7 @@ var _cine_focus := Vector3.ZERO
 var _cine_anchor := Vector3.ZERO
 var _restore_distance: float = 17.5
 var _boss_combat := false
+var _ts_guard: Node = null
 
 # Drag-release orbital inertia
 @export var inertia_strength: float = 1.15
@@ -99,6 +107,11 @@ var _boss_combat := false
 var _drag_ang_vel := Vector2.ZERO  # (yaw, pitch) rad/s
 
 func _ready() -> void:
+	# Hit-stop recovery is wall-clock driven. This node must continue polling
+	# while gameplay is slowed, otherwise a heavy kill/spell impact can leave
+	# the whole game running at the temporary Engine.time_scale indefinitely.
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	_ts_guard = get_tree().root.get_node_or_null("/root/TimeScaleGuard")
 	# Find hero
 	target = get_parent().get_node_or_null("Hero")
 	if not target:
@@ -112,6 +125,7 @@ func _ready() -> void:
 	# through set_camera_mode(), while the persisted player choice uses the
 	# explicit first/third-person interface.
 	view_mode = _load_view_mode()
+	feedback_mode = _load_feedback_mode()
 	set_view_mode(view_mode, true, false)
 	
 	# Snap to default framing on first frame
@@ -134,6 +148,13 @@ func _physics_process(delta: float) -> void:
 		return
 	
 	if _cinematic:
+		var cancel_pressed := InputMap.has_action("ui_cancel") \
+			and Input.is_action_just_pressed("ui_cancel")
+		var attack_pressed := InputMap.has_action("attack") \
+			and Input.is_action_just_pressed("attack")
+		if cancel_pressed or attack_pressed:
+			cancel_cinematic()
+			return
 		_update_cinematic(delta)
 		_apply_shake(delta)
 		return
@@ -142,6 +163,12 @@ func _physics_process(delta: float) -> void:
 	_apply_idle_drift(delta)
 	_update_camera_position(delta)
 	_apply_shake(delta)
+
+func _process(_delta: float) -> void:
+	# Unlike physics, idle processing remains responsive while time_scale is
+	# reduced. Keep this separate from movement/camera simulation so recovery
+	# cannot depend on the slowed gameplay clock.
+	_poll_hit_stop()
 
 func _is_user_rotating() -> bool:
 	return _drag_rotate or _touch_pos.size() >= 2
@@ -180,6 +207,13 @@ func _update_camera_position(delta: float) -> void:
 	
 	# Smooth follow
 	global_position = global_position.lerp(target_pos, follow_speed * delta)
+	if view_mode == VIEW_FIRST_PERSON:
+		# Keep the near camera above the authoritative relief surface. This is a
+		# presentation guard only; collision and hero movement remain unchanged.
+		var terrain := get_tree().get_first_node_in_group("terrain_relief")
+		if terrain != null and terrain.has_method("sample_surface_height"):
+			var floor_y := float(terrain.call("sample_surface_height", global_position))
+			global_position.y = maxf(global_position.y, floor_y + 0.65)
 	
 	# Smooth lerp distance, pitch, and FOV toward mode targets
 	var lerp_rate := mode_lerp_speed * delta
@@ -277,24 +311,17 @@ func add_shake(intensity: float) -> void:
 	request_feedback(tier, Vector3.ZERO, intensity / maxf(base, 0.001))
 
 func _apply_hit_stop(profile: Dictionary, quality: float, weight: float) -> void:
-	var seconds := float(profile.hitstop) * clampf(weight, 0.5, 1.25)
-	if quality <= 0.0 or seconds <= 0.001:
-		return
-	if _hit_stop_until_msec == 0 and Engine.time_scale < 0.99:
-		return
-	var now := Time.get_ticks_msec()
-	if _hit_stop_until_msec <= now:
-		_hit_stop_restore_scale = Engine.time_scale
-	_hit_stop_until_msec = maxi(_hit_stop_until_msec,
-		now + int(seconds * 1000.0))
-	Engine.time_scale = minf(Engine.time_scale, float(profile.time_scale))
+	# Global hit-stop is disabled. Keeping this method as a no-op preserves the
+	# feedback contract while guaranteeing skills cannot slow the simulation.
+	_hit_stop_until_msec = 0
 
 func _poll_hit_stop() -> void:
 	if _hit_stop_until_msec == 0:
 		return
 	if Time.get_ticks_msec() >= _hit_stop_until_msec:
-		Engine.time_scale = _hit_stop_restore_scale
 		_hit_stop_until_msec = 0
+		if _ts_guard != null and _ts_guard.has_method("cancel"):
+			_ts_guard.call("cancel", HITSTOP_LEASE)
 
 func _clamp_vector(value: Vector3, cap: float) -> Vector3:
 	var length := value.length()
@@ -324,9 +351,39 @@ func play_boss_intro(boss: Node3D) -> void:
 	_cine_anchor = boss.global_position + Vector3(-6.0, 7.5, 8.0)
 	set_distance(13.0)
 
+## Short, skippable framing beat for arrivals, rewards, landmarks, and unlocks.
+## The focus and anchor are world-space offsets so callers can keep the shot
+## authored around a node without taking control away from the player.
+func play_focus_moment(focus: Node3D, anchor_offset: Vector3 = Vector3(0.0, 4.5, 7.0),
+		focus_offset: Vector3 = Vector3(0.0, 1.2, 0.0), duration: float = 1.8) -> void:
+	if _cinematic or focus == null or not is_instance_valid(focus):
+		return
+	_cinematic = true
+	_cine_t = 0.0
+	_cine_dur = clampf(duration, 0.6, 4.0)
+	_restore_distance = _target_distance
+	_cine_focus = focus.global_position + focus_offset
+	_cine_anchor = focus.global_position + anchor_offset
+	set_distance(clampf(_target_distance * 0.72, _target_min_dist, _target_max_dist))
+
+## Restore player control immediately. This is safe for both ordinary focus
+## moments and kill-cams, including interruption before their timer expires.
+func cancel_cinematic() -> void:
+	if not _cinematic:
+		return
+	_cinematic = false
+	_cine_t = 0.0
+	if _ts_guard != null and _ts_guard.has_method("cancel"):
+		_ts_guard.call("cancel", KILLCAM_LEASE)
+	_target_distance = _restore_distance
+	_apply_view_targets(view_mode)
+	if camera:
+		camera.position = camera_base_position
+
 # === Kill-cam slow-mo ===
 func play_kill_cam(focus: Node3D) -> void:
-	if _cinematic or focus == null or not is_instance_valid(focus):
+	if _cinematic or focus == null or not is_instance_valid(focus) \
+			or OS.has_feature("mobile") or OS.get_name() in ["Android", "iOS"]:
 		return
 	_cinematic = true
 	_cine_t = 0.0
@@ -335,11 +392,10 @@ func play_kill_cam(focus: Node3D) -> void:
 	_cine_focus = focus.global_position + Vector3(0, 1.8, 0)
 	_cine_anchor = focus.global_position + Vector3(0, 4.5, 6.5)
 	set_distance(9.0)
-	Engine.time_scale = 0.25
-	var timer := get_tree().create_timer(0.9, true, false, true)
-	timer.timeout.connect(func():
-		if Engine.time_scale < 0.99:
-			Engine.time_scale = 1.0)
+	# Kill-cam slow-mo as a wall-clock lease: the watchdog guarantees the
+	# world returns to full speed even if the rig is freed mid-camera.
+	if _ts_guard != null and _ts_guard.has_method("slow_motion"):
+		_ts_guard.call("slow_motion", KILLCAM_LEASE, 0.25, 0.9)
 
 func _update_cinematic(delta: float) -> void:
 	_cine_t += delta
@@ -351,7 +407,7 @@ func _update_cinematic(delta: float) -> void:
 	target_angle_v = clampf(asin(clampf(dir.y, -1.0, 1.0)), -1.35, -0.18)
 	
 	if _cine_t >= _cine_dur:
-		_cinematic = false
+		cancel_cinematic()
 		target_angle_h = 0.0
 		target_angle_v = _target_angle_v
 		distance = _target_distance
@@ -394,6 +450,10 @@ func set_view_mode(new_mode: String, instant: bool = false,
 	if new_mode not in [VIEW_FIRST_PERSON, VIEW_THIRD_PERSON, VIEW_TOP_DOWN]:
 		new_mode = VIEW_THIRD_PERSON
 	view_mode = new_mode
+	_touch_pos.clear()
+	_touch_prev.clear()
+	_drag_ang_vel = Vector2.ZERO
+	InputManager.world_gesture_active = false
 	third_person = view_mode == VIEW_THIRD_PERSON
 	_apply_view_targets(view_mode)
 	if instant:
@@ -407,6 +467,8 @@ func set_view_mode(new_mode: String, instant: bool = false,
 	_set_target_first_person_visibility(view_mode == VIEW_FIRST_PERSON)
 	# Route one-finger drags to the rig (free-look) instead of drag steering.
 	InputManager.first_person_active = view_mode == VIEW_FIRST_PERSON
+	if view_mode != VIEW_FIRST_PERSON:
+		InputManager.end_first_person_look(-1)
 	if persist:
 		_save_view_mode()
 	view_mode_changed.emit(view_mode)
@@ -441,7 +503,10 @@ func _set_target_first_person_visibility(first_person: bool) -> void:
 		return
 	var target_visual := target.get_node_or_null("Visual") as Node3D
 	if target_visual != null:
-		target_visual.visible = not first_person
+		# Keep the authored hero visible across camera modes. Hiding the whole
+		# visual tree made the player appear deleted on mobile and also removed
+		# the first-person hand/weapon feedback.
+		target_visual.visible = true
 
 func _load_view_mode() -> String:
 	var config := ConfigFile.new()
@@ -449,6 +514,13 @@ func _load_view_mode() -> String:
 		return VIEW_THIRD_PERSON
 	var stored := str(config.get_value("gameplay", "camera_view", VIEW_THIRD_PERSON))
 	return stored if stored in [VIEW_FIRST_PERSON, VIEW_THIRD_PERSON] else VIEW_THIRD_PERSON
+
+func _load_feedback_mode() -> String:
+	var config := ConfigFile.new()
+	if config.load(settings_path) != OK:
+		return feedback_mode
+	var stored := str(config.get_value("gameplay", "motion_feedback", feedback_mode))
+	return stored if stored in ["full", "mobile", "reduced", "off"] else feedback_mode
 
 func _save_view_mode() -> void:
 	var config := ConfigFile.new()
@@ -502,15 +574,27 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 				set_distance(distance + wheel_zoom_step)
 
 func _handle_screen_touch(event: InputEventScreenTouch) -> void:
+	if InputManager != null and InputManager.has_method("is_joystick_pointer_owned") \
+			and InputManager.is_joystick_pointer_owned(event.index):
+		return
 	if event.pressed:
+		if view_mode == VIEW_FIRST_PERSON and _touch_pos.is_empty():
+			InputManager.begin_first_person_look(event.index)
 		_touch_pos[event.index] = event.position
 		_touch_prev[event.index] = event.position
 	else:
+		if view_mode == VIEW_FIRST_PERSON:
+			InputManager.end_first_person_look(event.index)
 		_touch_pos.erase(event.index)
 		_touch_prev.erase(event.index)
 	InputManager.world_gesture_active = _touch_pos.size() >= 2
+	if _touch_pos.size() < 2:
+		_drag_ang_vel = Vector2.ZERO
 
 func _handle_screen_drag(event: InputEventScreenDrag) -> void:
+	if InputManager != null and InputManager.has_method("is_joystick_pointer_owned") \
+			and InputManager.is_joystick_pointer_owned(event.index):
+		return
 	# First-person free-look: a single finger turns the view left/right.
 	# Movement keeps its own inputs (tap-to-move and the on-screen joystick),
 	# so the drag never steers in first person.
@@ -550,11 +634,24 @@ func _handle_screen_drag(event: InputEventScreenDrag) -> void:
 
 func _apply_first_person_look(relative: Vector2) -> void:
 	target_angle_h -= relative.x * first_person_look_sensitivity
-	target_angle_v = _clamp_pitch(target_angle_v - relative.y * first_person_look_sensitivity)
+	var pitch_delta := relative.y * first_person_look_sensitivity
+	if first_person_invert_y:
+		pitch_delta = -pitch_delta
+	target_angle_v = _clamp_pitch(target_angle_v - pitch_delta)
 	# Tell the mode lerp our hand-picked pitch is the target so nothing eases
 	# the head back to the authored first-person pitch mid-look.
 	_target_angle_v = target_angle_v
 	_drag_ang_vel = Vector2.ZERO
+
+func set_first_person_look_sensitivity(value: float) -> void:
+	first_person_look_sensitivity = clampf(value, 0.001, 0.02)
+
+func set_first_person_invert_y(enabled: bool) -> void:
+	first_person_invert_y = enabled
+
+func get_first_person_look_settings() -> Dictionary:
+	return {"sensitivity": first_person_look_sensitivity,
+		"invert_y": first_person_invert_y, "smoothing": first_person_smoothing}
 
 ## Pitch clamp for the current view: orbit modes use the whole [-1.35,-0.18]
 ## arc, while first person keeps the head near level so fights stay readable.
@@ -575,5 +672,6 @@ func reset_shake() -> void:
 	if camera:
 		camera.position = camera_base_position
 	if _hit_stop_until_msec != 0:
-		Engine.time_scale = _hit_stop_restore_scale
-	_hit_stop_until_msec = 0
+		_hit_stop_until_msec = 0
+		if _ts_guard != null and _ts_guard.has_method("cancel"):
+			_ts_guard.call("cancel", HITSTOP_LEASE)

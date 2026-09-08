@@ -63,6 +63,15 @@ func _process(delta: float) -> void:
 ## Apply an element to this entity. Returns the reaction name if one triggered.
 func apply(element: String, duration: float, attacker: Node3D = null) -> String:
 	var reaction := ""
+	var incoming_frost: bool = element == "frost" or element == "ice"
+	var incoming_fire: bool = element == "fire"
+	var had_frost: bool = has_status("frost") or has_status("ice")
+	if incoming_frost and has_status("fire"):
+		clear("fire")
+	if incoming_fire and had_frost:
+		clear("frost")
+		clear("ice")
+		_show_reaction_label("MELT")
 
 	# Check for reaction before overwriting
 	if _reaction_cooldown <= 0.0:
@@ -74,8 +83,14 @@ func apply(element: String, duration: float, attacker: Node3D = null) -> String:
 		_active[element]["stacks"]    = mini(_active[element]["stacks"] + 1, 3)
 	else:
 		_active[element] = { "time_left": duration, "stacks": 1, "attacker": attacker }
+		if element in ["fire", "poison", "plasma_armor_pierce"]:
+			_dot_timers[element] = DOT_INTERVAL
 		status_applied.emit(element, duration)
 		_apply_shader_overlay(element)
+	if reaction == "steam" and element == "fire":
+		clear("frost")
+		clear("ice")
+	_trim_active_elements(element)
 
 	return reaction
 
@@ -92,13 +107,54 @@ func clear_all() -> void:
 	_active.clear()
 
 func has_status(element: String) -> bool:
-	return _active.has(element) and _active[element]["time_left"] > 0.0
+	if _active.has(element) and _active[element]["time_left"] > 0.0:
+		return true
+	for alias in _aliases_for(element):
+		if _active.has(alias) and _active[alias]["time_left"] > 0.0:
+			return true
+	return false
+
+func _aliases_for(element: String) -> Array[String]:
+	match element:
+		"ice": return ["frost"]
+		"frost": return ["ice"]
+		"lightning": return ["shock", "thunder"]
+		"shock", "thunder": return ["lightning", "shock", "thunder"]
+	return []
+
+func _trim_active_elements(incoming: String) -> void:
+	var elemental: Array[String] = []
+	for key in _active.keys():
+		if not str(key).contains("_"):
+			elemental.append(str(key))
+	while elemental.size() > 2:
+		var removed: String = elemental[0]
+		if removed == incoming and elemental.size() > 1:
+			removed = elemental[1]
+		_active.erase(removed)
+		status_expired.emit(removed)
+		_clear_shader_overlay(removed)
+		elemental.erase(removed)
 
 func get_stacks(element: String) -> int:
 	return int(_active.get(element, {}).get("stacks", 0))
 
 func get_active_elements() -> Array:
 	return _active.keys()
+
+## Backward-compatible snapshot used by enemy and boss gameplay callers.
+func status_snapshot() -> Dictionary:
+	var snapshot: Dictionary = {}
+	for element in _active:
+		if not str(element).contains("_"):
+			snapshot[element] = int(_active[element].get("stacks", 0))
+	return snapshot
+
+## Movement multiplier consumed by locomotion without exposing status internals.
+func movement_multiplier() -> float:
+	if has_status("ice") or has_status("frost") or has_status("frostroot"):
+		return 0.55
+	return 1.0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Reaction table
@@ -120,13 +176,21 @@ func _check_reaction(incoming: String, attacker: Node3D) -> String:
 	for pair in REACTIONS:
 		var a : String = pair[0]
 		var b : String = pair[1]
-		if (incoming == b and has_status(a)) or (incoming == a and has_status(b)):
+		if (incoming == b and has_status(a)) or (incoming == a and has_status(b)) \
+			or (_canonical(incoming) == b and has_status(a)) \
+			or (_canonical(incoming) == a and has_status(b)):
 			var reaction : String = REACTIONS[pair]
 			_reaction_cooldown = REACTION_CD
 			_trigger_reaction(reaction, attacker)
 			reaction_triggered.emit(reaction, attacker)
 			return reaction
 	return ""
+
+func _canonical(element: String) -> String:
+	match element:
+		"frost": return "ice"
+		"shock", "thunder": return "lightning"
+	return element
 
 func _trigger_reaction(reaction: String, attacker: Node3D) -> void:
 	if _entity == null or not is_instance_valid(_entity):
@@ -139,8 +203,10 @@ func _trigger_reaction(reaction: String, attacker: Node3D) -> void:
 		"steam":
 			_deal_reaction_damage(attacker, 18)
 			_fx_burst(Color(0.85, 0.85, 0.90, 0.6), 22, 2.5)
-			# Clear both
-			clear("fire"); clear("ice")
+			# Preserve the incoming frost application so the player can read the
+			# lingering slow before the next fire hit completes the reaction.
+			clear("fire")
+			_show_reaction_label("MELT")
 		"overload":
 			_deal_reaction_damage(attacker, 28)
 			_fx_burst(Color(1.0, 0.55, 0.80), 18, 5.5)
@@ -191,7 +257,7 @@ func _tick_dot(element: String, delta: float) -> void:
 		var stacks := int(_active[element].get("stacks", 1))
 		var damage := 0
 		match element:
-			"fire":    damage = 4 * stacks
+			"fire":    damage = 2 * stacks
 			"poison":  damage = 3 * stacks
 			"plasma_armor_pierce": damage = 6 * stacks
 		if damage > 0 and _entity.has_method("take_damage"):
@@ -250,6 +316,21 @@ func _fx_burst_at(pos: Vector3, color: Color, amount: int, speed: float) -> void
 	if _entity == null or not _entity.is_inside_tree():
 		return
 	CombatFx.spawn_burst(_entity, pos, color, amount, speed, 0.5, 0.16)
+
+func _show_reaction_label(text_value: String) -> void:
+	if _entity == null or not _entity.is_inside_tree():
+		return
+	var label := Label3D.new()
+	label.text = text_value
+	label.font_size = 52
+	label.modulate = Color(1.0, 0.86, 0.48)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.position = Vector3(0, 1.8, 0)
+	_entity.add_child(label)
+	var tween := label.create_tween()
+	tween.tween_property(label, "position:y", 2.4, 0.45)
+	tween.parallel().tween_property(label, "modulate:a", 0.0, 0.45)
+	tween.tween_callback(label.queue_free)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shader overlay (drives entity_body.gdshader elemental params)

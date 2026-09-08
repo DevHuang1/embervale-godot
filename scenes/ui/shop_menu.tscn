@@ -25,7 +25,7 @@ offset_right = 420.0
 offset_bottom = 430.0
 
 [node name="VBox" type="VBoxContainer" parent="Root"]
-theme_override_constants/separation = 14
+theme_override_constants/separation = 22
 
 [node name="Header" type="HBoxContainer" parent="Root/VBox"]
 

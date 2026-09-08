@@ -1,6 +1,26 @@
 extends BossBase
 class_name HushlingMatriarch
 
+const MATRIARCH_PHASE_GUIDANCE: Dictionary = {
+	0: {"pattern": "Thorn lash and spacing", "safe_zone": "Stay outside the red lash arc; step in after it snaps."},
+	1: {"pattern": "Roots deny the center", "safe_zone": "Move to the clear outer crescent before roots close."},
+	2: {"pattern": "Storm then crown opening", "safe_zone": "Circle the arena edge; strike the crown after the storm fades."},
+	3: {"pattern": "Bramble enrage", "safe_zone": "Cross the final impact ring, then punish the exposed crown."},
+}
+
+const AUTHORED_LESSON: Dictionary = {
+	"introduce": "Read the thorn-lash arc and step outside it.",
+	"test": "Survive root denial by moving to the clear outer crescent.",
+	"combine": "Circle the storm while watching for the crown vulnerability.",
+	"mastery_payoff": "Break the crown, punish recovery, and claim the Matriarch relic.",
+}
+
+static func authored_lesson() -> Dictionary:
+	return AUTHORED_LESSON.duplicate(true)
+
+func phase_guidance() -> Dictionary:
+	return (MATRIARCH_PHASE_GUIDANCE.get(clampi(int(current_phase), 0, 3), {}) as Dictionary).duplicate(true)
+
 ## === Hushling Matriarch ===
 ## Phase 1: Bramble Queen - summons hushlings
 ## Phase 2: Thorn Cascade - area denial
@@ -183,17 +203,20 @@ func _skill_thorn_lattice(player: Node3D) -> void:
 	else:
 		audio.play_profile_cue(sfx_profile, "cast")
 	_shake_camera(0.4)
+	var timing := attack_timing("thorn_lattice")
+	var anticipation := float(timing.get("anticipation", 1.1))
+	var base_radius := float(attack_profile("thorn_lattice").get("radius", 5.0))
 	var generation := encounter_generation
 	for ring in 2:
-		var radius := 5.0 + ring * 6.0
+		var radius := base_radius + ring * 6.0
 		CombatFx.spawn_ground_telegraph(self,
 			Vector3(player.global_position.x, 0, player.global_position.z),
-			radius, Color(1, 0.45, 0.2), 1.1 + ring * 0.3)
+			radius, Color(1, 0.45, 0.2), anticipation + ring * 0.3)
 		for i in 10:
 			var angle := (i / 10.0) * TAU
 			var pos: Vector3 = player.global_position \
 				+ Vector3(cos(angle) * radius, 0, sin(angle) * radius)
-			var timer := get_tree().create_timer(0.7 + ring * 0.35, false)
+			var timer := get_tree().create_timer(anticipation + ring * 0.35, false)
 			timer.timeout.connect(_deal_thorn_damage.bind(pos, 2.2, 12, generation))
 
 ## Rot-blooms knit her wounds while they hiss.
@@ -202,9 +225,11 @@ func _skill_spore_bloom() -> void:
 		audio.play_enemy_telegraph()
 	else:
 		audio.play_profile_cue(sfx_profile, "cast")
+	var timing := attack_timing("spore_bloom")
+	var anticipation := float(timing.get("anticipation", 0.5))
 	var generation := encounter_generation
 	for tick in 3:
-		var timer := get_tree().create_timer(0.5 + tick * 0.7, false)
+		var timer := get_tree().create_timer(anticipation + tick * 0.7, false)
 		timer.timeout.connect(_bloom_heal_tick.bind(16, generation))
 
 func _bloom_heal_tick(amount: int, generation: int = -1) -> void:
@@ -262,13 +287,17 @@ func _thorn_rain(target: Node3D) -> void:
 	# Rain thorns in expanding circles
 	var circles = 3
 	var thorns_per_circle = 8
+	var profile := attack_profile("thorn_rain")
+	var base_radius := float(profile.get("radius", 2.5))
+	var timing := attack_timing("thorn_rain")
+	var anticipation := float(timing.get("anticipation", 0.8))
 	
 	# Telegraph shake so players feel it coming before damage lands
 	_shake_camera(0.35)
 	
 	var generation := encounter_generation
 	for c in range(circles):
-		var radius = 4.0 + c * 5.0
+		var radius = base_radius + c * 5.0
 		
 		# Danger-red warning ring for each incoming wave (protected layer)
 		CombatFx.spawn_ground_telegraph(self,
@@ -280,15 +309,16 @@ func _thorn_rain(target: Node3D) -> void:
 			var pos = target.global_position + Vector3(cos(angle) * radius, 0, sin(angle) * radius)
 			
 			# Delayed damage
-			var timer = get_tree().create_timer(0.8 + c * 0.3, false)
+			var timer = get_tree().create_timer(anticipation + c * 0.3, false)
 			timer.timeout.connect(_deal_thorn_damage.bind(pos, 2.5, 18, generation))
 
 func _root_prison(target: Node3D) -> void:
 	if target == null or not is_instance_valid(target):
 		return
 	var center := target.global_position
-	var radius := 3.5
-	var anticipation := 0.78
+	var radius := float(attack_profile("root_prison").get("radius", 3.5))
+	var timing := attack_timing("root_prison")
+	var anticipation := float(timing.get("anticipation", 0.78))
 	attack_telegraphed.emit("root_prison", radius, anticipation)
 	CombatFx.spawn_ground_telegraph(self, center, radius,
 		Color(1.0, 0.16, 0.08), anticipation)
@@ -324,17 +354,22 @@ func _bramble_storm() -> void:
 	_shake_camera(0.6)
 	
 	var generation := encounter_generation
+	var profile := attack_profile("bramble_storm")
+	var telegraph_radius := float(profile.get("radius", 4.0))
 	for i in range(count):
 		var angle = randf() * TAU
 		var r = randf() * radius
 		var pos = center + Vector3(cos(angle) * r, 0, sin(angle) * r)
 		
-		var delay := randf_range(0.65, 1.55)
-		attack_telegraphed.emit("bramble_storm", 4.0, delay)
-		CombatFx.spawn_ground_telegraph(self, pos, 4.0,
+		var timing := attack_timing("bramble_storm")
+		var delay := randf_range(
+			float(timing.get("anticipation", 0.65)),
+			float(timing.get("anticipation", 0.65)) + 0.9)
+		attack_telegraphed.emit("bramble_storm", telegraph_radius, delay)
+		CombatFx.spawn_ground_telegraph(self, pos, telegraph_radius,
 			Color(1.0, 0.16, 0.08), delay)
 		var timer = get_tree().create_timer(delay, false)
-		timer.timeout.connect(_deal_thorn_damage.bind(pos, 4.0, 25, generation))
+		timer.timeout.connect(_deal_thorn_damage.bind(pos, telegraph_radius, 25, generation))
 	
 	# Screen shake at the peak of the storm
 	var peak = get_tree().create_timer(1.2)
@@ -475,7 +510,7 @@ func _break_thorn_guard() -> void:
 		var thorn := _guard_visuals[i]
 		if not is_instance_valid(thorn):
 			continue
-		var spike_pos := thorn.global_position
+		var spike_pos := thorn.global_position if thorn.is_inside_tree() else thorn.position
 		CombatFx.spawn_burst(self, spike_pos,
 			Color(0.90, 0.22, 0.06, 0.9), 8, 6.0, 0.4, 0.14)
 		# Spawn 4 debris shards per spike
@@ -491,12 +526,16 @@ func _break_thorn_guard() -> void:
 				randf_range(0.04, 0.09))
 			shard.mesh = bm
 			shard.material_override = shard_mat
-			shard.global_position = spike_pos + Vector3(
+			var shard_pos := spike_pos + Vector3(
 				randf_range(-0.15, 0.15), randf_range(0.1, 0.4),
 				randf_range(-0.15, 0.15))
 			shard.rotation = Vector3(
 				randf_range(0.0, TAU), randf_range(0.0, TAU), randf_range(0.0, TAU))
 			add_child(shard)
+			if is_inside_tree():
+				shard.global_position = shard_pos
+			else:
+				shard.position = shard_pos
 			var vel := Vector3(
 				randf_range(-4.0, 4.0), randf_range(1.5, 5.5),
 				randf_range(-4.0, 4.0))
@@ -1041,4 +1080,3 @@ func _chitin_mat(base: Color, emit: Color) -> StandardMaterial3D:
 	m.emission = emit
 	m.emission_energy_multiplier = 0.10
 	return m
-

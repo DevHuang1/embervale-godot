@@ -23,6 +23,7 @@ signal realm_environment_changed(realm_id: String)
 var _combat_intensity : float  = 0.0
 var _rain_level       : float  = 0.0
 var _wind             : Vector2 = Vector2.ZERO
+var _gust_tween: Tween = null
 var magic_level      : float  = 0.35
 
 # === Node / landmark tracking =================================================
@@ -39,6 +40,8 @@ var wear : TerrainWear = null
 # === Current realm ============================================================
 var _current_realm    : String = "bramblewood"
 var _realm_time_of_day: float  = 0.25   # 0=midnight 0.5=noon
+## Persistent story flag used by the beacon aftermath to keep weather calm.
+var weather_locked: bool = false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -50,6 +53,7 @@ func _ready() -> void:
 	var quality := QualityScaler.new()
 	quality.name = "QualityScaler"
 	add_child(quality)
+	quality.level_changed.connect(_on_quality_level_changed)
 	var debris := DebrisSystem.new()
 	debris.name = "DebrisSystem"
 	add_child(debris)
@@ -74,11 +78,21 @@ func get_combat_intensity() -> float:
 
 func set_rain(v: float) -> void:
 	_rain_level = clampf(v, 0.0, 1.0)
-	RenderingServer.global_shader_parameter_set("world_rain_level", _rain_level)
+	RenderingServer.global_shader_parameter_set("world_rain_level", visual_rain_level())
 	rain_changed.emit(_rain_level)
 
 func get_rain() -> float:
 	return _rain_level
+
+## Presentation-only rain density. The saved/logical weather value remains
+## unchanged so realm state and scripted weather transitions are deterministic.
+func visual_rain_level() -> float:
+	var quality := get_node_or_null("QualityScaler") as QualityScaler
+	var scale := float(quality.particle_scale) if quality != null else 1.0
+	return clampf(_rain_level * scale, 0.0, 1.0)
+
+func _on_quality_level_changed(_level: int) -> void:
+	RenderingServer.global_shader_parameter_set("world_rain_level", visual_rain_level())
 
 func set_wind(v: Vector2) -> void:
 	_wind = v
@@ -92,11 +106,16 @@ func gust(direction: Vector2 = Vector2.ZERO, strength: float = 1.0) -> void:
 	# Short impulse — biome builders and SpringBoneSystem pick this up
 	var dir := direction if direction.length_squared() > 0.01 \
 		else Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized()
-	set_wind(dir * strength)
-	gust_triggered.emit(dir * strength)
-	# Fade back to calm
-	var tw := create_tween()
-	tw.tween_method(func(v): set_wind(v), dir * strength, _wind, 1.8) \
+	var peak := dir * strength
+	set_wind(peak)
+	gust_triggered.emit(peak)
+	# Fade back to calm. The tween must end at ZERO, not _wind: set_wind(peak)
+	# above already overwrote _wind, so tweening to it would pin wind at gale
+	# force forever (foliage/shaders would never settle).
+	if _gust_tween != null and _gust_tween.is_valid():
+		_gust_tween.kill()
+	_gust_tween = create_tween()
+	_gust_tween.tween_method(func(v): set_wind(v), peak, Vector2.ZERO, 1.8) \
 		.set_trans(Tween.TRANS_CUBIC)
 
 func set_hero_pos_radius(pos: Vector3, radius: float) -> void:
@@ -176,6 +195,7 @@ func to_dict() -> Dictionary:
 		"magic_level":      magic_level,
 		"current_realm":    _current_realm,
 		"time_of_day":      _realm_time_of_day,
+		"weather_locked":   weather_locked,
 		"gathered_nodes":   _gathered_nodes.duplicate(),
 		"discovered":       _discovered.duplicate(),
 	}
@@ -186,6 +206,7 @@ func from_dict(d: Dictionary) -> void:
 	set_magic_level(float(d.get("magic_level", 0.35)))
 	_current_realm    = str(d.get("current_realm", "bramblewood"))
 	_realm_time_of_day = float(d.get("time_of_day", 0.25))
+	weather_locked     = bool(d.get("weather_locked", false))
 	_gathered_nodes   = d.get("gathered_nodes", {})
 	_discovered       = d.get("discovered", {})
 	_apply_all_shader_globals()

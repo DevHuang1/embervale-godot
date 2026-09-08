@@ -67,12 +67,12 @@ func _run() -> void:
 	if menu.get_node("Root/HeroCard/HeroVBox/SecondaryRow/ContinueButton").disabled:
 		failures += 1
 		print("FAIL: continue still disabled with a save present")
-	menu._on_new_tale_pressed()
+	menu._on_cta_pressed()
 	if not menu.get_node("Root/HeroCard/HeroVBox/ConfirmCard").visible:
 		failures += 1
 		print("FAIL: confirm card not shown despite existing save")
-	menu._on_cancel_new_tale()
-	menu._begin_tale(true)
+	menu._on_confirm_no()
+	menu._start_new_game()
 	await create_timer(1.0).timeout
 	await _frames(5)
 	if current_scene == null or current_scene.name != "Grove":
@@ -84,6 +84,47 @@ func _run() -> void:
 		if hud == null or not hud.visible:
 			failures += 1
 			print("FAIL: HUD not visible after entering the tale")
+
+		# --- In-game settings (Fix 5): HUD button opens the instanced menu,
+		# ESC toggles it, quit returns to the main menu and clears the freeze.
+		var settings := current_scene.get_node_or_null("SettingsMenu")
+		if settings == null:
+			failures += 1
+			print("FAIL: SettingsMenu not instanced in the Grove")
+		else:
+			settings.visible = false
+			hud.call("_on_settings_pressed")
+			await _frames(3)  # freeze is pushed from _process on the next tick
+			if not settings.visible:
+				failures += 1
+				print("FAIL: HUD settings button did not open SettingsMenu")
+			if not paused:
+				failures += 1
+				print("FAIL: SettingsMenu open must freeze the world")
+			# ESC press, synthesized directly (menu handles it paused-safe).
+			var esc := InputEventKey.new()
+			esc.keycode = KEY_ESCAPE
+			esc.pressed = true
+			settings.call("_unhandled_input", esc)
+			await _frames(3)
+			if settings.visible:
+				failures += 1
+				print("FAIL: ESC did not close SettingsMenu")
+			if paused:
+				failures += 1
+				print("FAIL: ESC close must release the world freeze")
+			# Re-open, then quit to the landing page.
+			settings.call("open")
+			settings.call("_on_quit_pressed")
+			await create_timer(1.0).timeout
+			await _frames(5)
+			if current_scene == null or current_scene.name != "Main":
+				failures += 1
+				print("FAIL: quit-to-main did not reach main.tscn, got ",
+					current_scene.name if current_scene else "<null>")
+			if paused:
+				failures += 1
+				print("FAIL: main menu is paused after quitting — freeze leaked")
 
 	gs.delete_save()
 	if failures == 0:

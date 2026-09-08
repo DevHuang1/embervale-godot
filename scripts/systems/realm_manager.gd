@@ -139,7 +139,10 @@ func _swap_biome(realm_id: String) -> void:
 					if _biome_node.has_method("setup"):
 						_biome_node.call("setup", _world)
 
-	_apply_env_silent(realm_id)
+	# Keep the current environment as the starting point while the fade lifts;
+	# the target palette/fog/ambient values then interpolate over the same
+	# transition window instead of appearing as a hard post-load pop.
+	crossfade_env(_current, realm_id, maxf(0.8, fade_duration * 2.0))
 	_play_realm_ambient(realm_id)
 	_current = realm_id
 
@@ -194,9 +197,19 @@ func crossfade_env(from_realm: String, to_realm: String, duration: float = 2.0) 
 		return
 	var from_p : Dictionary = REALM_ENVS.get(from_realm, REALM_ENVS["bramblewood"])
 	var to_p   : Dictionary = REALM_ENVS.get(to_realm,   REALM_ENVS["bramblewood"])
-	var env    : Environment = env_node.environment
 	var tw := create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(env, "fog_light_color", to_p["fog_color"],       duration)
-	tw.tween_property(env, "fog_density",     to_p["fog_density"],     duration)
-	tw.tween_property(env, "ambient_light_energy", to_p["ambient_energy"], duration)
+	tw.tween_method(_apply_env_blend.bind(env_node.environment, from_p, to_p),
+		0.0, 1.0, maxf(0.0, duration))
+
+func _apply_env_blend(progress: float, env: Environment,
+		from_p: Dictionary, to_p: Dictionary) -> void:
+	var t := clampf(progress, 0.0, 1.0)
+	env.fog_light_color = (from_p["fog_color"] as Color).lerp(to_p["fog_color"] as Color, t)
+	env.fog_density = lerpf(float(from_p["fog_density"]), float(to_p["fog_density"]), t)
+	env.ambient_light_energy = lerpf(float(from_p["ambient_energy"]),
+		float(to_p["ambient_energy"]), t)
+	if env.sky != null and env.sky.sky_material is ProceduralSkyMaterial:
+		var sky := env.sky.sky_material as ProceduralSkyMaterial
+		sky.sky_top_color = (from_p["sky_top"] as Color).lerp(to_p["sky_top"] as Color, t)
+		sky.sky_horizon_color = (from_p["sky_horizon"] as Color).lerp(
+			to_p["sky_horizon"] as Color, t)

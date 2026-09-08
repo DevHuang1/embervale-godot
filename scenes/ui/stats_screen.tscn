@@ -39,8 +39,16 @@ horizontal_alignment = 1
 [node name="Currencies" type="Label" parent="Root/Center/Panel/VBox"]
 layout_mode = 2
 theme_type_variation = &"Body"
-text = "HP 34/34 · 🪙 30 · 💎 0"
+text = "HP 34/34 · GOLD 30 · DIAMONDS 0"
 horizontal_alignment = 1
+
+[node name="SoftCapNote" type="Label" parent="Root/Center/Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.68, 0.72, 0.64, 1)
+theme_override_font_sizes/font_size = 12
+text = "FIRST 20 POINTS: FULL VALUE  ·  AFTER 20: 50% EFFECTIVE VALUE"
+horizontal_alignment = 1
+autowrap_mode = 2
 
 [node name="Rows" type="GridContainer" parent="Root/Center/Panel/VBox"]
 layout_mode = 2

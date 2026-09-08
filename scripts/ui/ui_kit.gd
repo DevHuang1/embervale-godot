@@ -39,6 +39,80 @@ const MODAL_DIM := Color(0.002, 0.006, 0.005, 0.88)
 const RADIUS_PANEL := 16
 const RADIUS_BUTTON := 11
 const RADIUS_CARD := 9
+## Minimum interactive size for Android touch targets.
+const TOUCH_TARGET_MIN := 48.0
+## Portrait Android builds often expose a 1080px logical width. Treat that as
+## compact so modal controls wrap before they become unreadable.
+const COMPACT_BREAKPOINT := 1200.0
+const SAFE_MARGIN_COMPACT := 32.0
+const SAFE_MARGIN_EXPANDED := 64.0
+
+## Shared responsive metrics for code-built screens. Keeping the breakpoint and
+## safe-area math here prevents inventory, shop, and forge from drifting apart.
+static func responsive_metrics(viewport_size: Vector2) -> Dictionary:
+	var compact := viewport_size.x < COMPACT_BREAKPOINT
+	var margin := SAFE_MARGIN_COMPACT if compact else SAFE_MARGIN_EXPANDED
+	return {
+		"compact": compact,
+		"safe_margin": margin,
+		"content_width": maxf(0.0, viewport_size.x - margin * 2.0),
+		"columns": 2 if compact else 4,
+		"gap": 8.0 if compact else 12.0,
+	}
+
+## Shared semantic tokens for code-built screens. Callers should use these
+## values instead of inventing per-screen spacing, typography, or rarity colors.
+## Color is never the only status cue: item cards also render text and shape.
+static func theme_tokens() -> Dictionary:
+	return {
+		"spacing": {
+			"xs": 6.0, "sm": 8.0, "md": 12.0, "lg": 18.0, "xl": 28.0,
+		},
+		"typography": {
+			"caption": 16, "body": 20, "button": 23, "heading": 30,
+			"display": 42,
+		},
+		"surfaces": {
+			"deep": BG_DEEP, "panel": GLASS_BG, "raised": GLASS_BG_RAISED,
+			"chip": CHIP_BG, "modal_dim": MODAL_DIM,
+		},
+		"rarity": {
+			"common": Color(0.68, 0.72, 0.70),
+			"uncommon": SAGE_BRIGHT,
+			"rare": Color(0.38, 0.68, 1.0),
+			"epic": Color(0.78, 0.48, 1.0),
+			"legendary": EMBER_BRIGHT,
+		},
+		"focus": {
+			"outline": EMBER_BRIGHT, "outline_width": 2,
+			"minimum_touch": TOUCH_TARGET_MIN,
+		},
+		"safe_area": {
+			"compact_margin": SAFE_MARGIN_COMPACT,
+			"expanded_margin": SAFE_MARGIN_EXPANDED,
+		},
+	}
+
+## Semantic action copy shared by shops, forge, and scan surfaces. The state is
+## machine-readable so a caller can style/disable consistently while the text
+## remains understandable without color alone.
+static func action_state(state: String, detail: String = "") -> Dictionary:
+	var key := state.strip_edges().to_lower()
+	var labels := {
+		"locked": "LOCKED", "unavailable": "UNAVAILABLE", "loading": "LOADING…",
+		"available": "AVAILABLE", "analyzed": "ANALYZED",
+		"purchased": "PURCHASED", "owned": "OWNED / EQUIP", "equipped": "EQUIPPED",
+		"success": "SUCCESS",
+		"crafting": "CRAFTING…", "scanning": "SCANNING…",
+		"restoring": "RESTORING…", "failed": "FAILED",
+	}
+	return {
+		"state": key,
+		"label": str(labels.get(key, key.to_upper())),
+		"detail": detail,
+		"disabled": key in ["locked", "unavailable", "loading", "crafting",
+			"scanning", "restoring", "failed"],
+	}
 
 const _GLASS_SHADER := preload("res://assets/ui/glass_panel.gdshader")
 
@@ -131,6 +205,7 @@ static func icon_well_stylebox(accent: Color = EMBER) -> StyleBoxFlat:
 	return sb
 
 static func style_button(b: Button, accent: Color = EMBER) -> void:
+	ensure_touch_target(b)
 	for state in ["normal", "hover", "pressed", "disabled"]:
 		b.add_theme_stylebox_override(state, button_stylebox(state, accent))
 	b.add_theme_stylebox_override("focus", focus_stylebox(accent))
@@ -146,6 +221,7 @@ static func style_button(b: Button, accent: Color = EMBER) -> void:
 
 ## Big primary action: ember-lit surface instead of dark glass.
 static func style_primary_button(b: Button) -> void:
+	ensure_touch_target(b)
 	for state in ["normal", "hover", "pressed", "disabled"]:
 		var sb := button_stylebox(state)
 		match state:
@@ -252,7 +328,31 @@ static func _ui_tex(name: String) -> Texture2D:
 ## === Button roles ===
 ## Primary = ember-lit (CTA); secondary = subdued glass; danger = bloodied edge.
 
+static func ensure_touch_target(control: Control, minimum: float = TOUCH_TARGET_MIN) -> void:
+	var current := control.custom_minimum_size
+	control.custom_minimum_size = Vector2(maxf(current.x, minimum), maxf(current.y, minimum))
+
+static func apply_accessibility_text_scale(root: Node, scale: float) -> void:
+	## Store base sizes once so repeated settings changes never compound.
+	if root == null or not is_instance_valid(root):
+		return
+	var clamped := clampf(scale, 1.0, 1.3)
+	for node in root.find_children("*", "Control", true, false):
+		var control := node as Control
+		if control == null or not (control is Label or control is Button \
+				or control is LinkButton or control is CheckButton \
+				or control is OptionButton):
+			continue
+		var base_size: int
+		if control.has_meta("accessibility_base_font_size"):
+			base_size = int(control.get_meta("accessibility_base_font_size"))
+		else:
+			base_size = maxi(1, control.get_theme_font_size("font_size"))
+			control.set_meta("accessibility_base_font_size", base_size)
+		control.add_theme_font_size_override("font_size", roundi(float(base_size) * clamped))
+
 static func style_secondary_button(b: Button) -> void:
+	ensure_touch_target(b)
 	for state in ["normal", "hover", "pressed", "disabled"]:
 		var sb := button_stylebox(state, SAGE)
 		match state:
@@ -272,6 +372,7 @@ static func style_secondary_button(b: Button) -> void:
 	b.add_theme_constant_override("shadow_offset_y", 2)
 
 static func style_danger_button(b: Button) -> void:
+	ensure_touch_target(b)
 	for state in ["normal", "hover", "pressed", "disabled"]:
 		var sb := button_stylebox(state, DANGER)
 		match state:

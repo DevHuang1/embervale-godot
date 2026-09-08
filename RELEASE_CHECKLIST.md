@@ -6,7 +6,7 @@ added only in the release environment.
 
 ## Android package and signing
 
-- [x] Confirm package/application ID and display name. (`com.devhuang1.embervale` / "Embervale Mobile" verified via `aapt dump badging` on the Beta 1 APK, 2026-09-07.)
+- [x] Confirm package/application ID and display name. (`com.devhuang1.embervale` / "Embervale Mobile" verified via `aapt dump badging` on the Beta 1 APK, 2026-09-07; re-verified on the Beta 2 APK via its `AndroidManifest.xml` payload — package `com.devhuang1.embervale`, versionName `Beta 2`, versionCode `2`, engine 4.7.2.stable — 2026-09-08.)
 - [ ] Configure release keystore outside the repository and verify reproducible
       export settings.
 - [ ] Test install, update, uninstall/reinstall, and save migration on a clean

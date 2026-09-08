@@ -1,6 +1,8 @@
 extends CharacterBody3D
 class_name BossBase
 
+const BOSS_LESSONS := preload("res://scripts/systems/boss_lesson_catalog.gd")
+
 ## === Boss Base Class ===
 ## Multi-phase, mechanics, arena control, unique rewards
 
@@ -9,6 +11,7 @@ signal died
 signal death_sequence_started(boss: Node3D)
 signal attack_telegraphed(kind: String, radius: float, delay: float)
 signal encounter_reset
+signal phase_guidance_changed(phase: int, pattern: String, safe_zone: String)
 
 @onready var game_state: GameState = GameState
 @onready var audio: AudioManager = AudioManager
@@ -18,6 +21,60 @@ signal encounter_reset
 @onready var attack_areas: Node3D = $AttackAreas
 
 enum BossPhase { PHASE_1, PHASE_2, PHASE_3, ENRAGE }
+
+## Shared encounter timing contract. Subclasses may change presentation, but
+## the authored default keeps warning, collision, and recovery values reviewable
+## in one place. Damage remains phase/data driven below.
+const ATTACK_PROFILES: Dictionary = {
+	"mend": {"radius": 2.6, "anticipation": 1.4, "active": 0.2, "recovery": 0.25},
+	"basic_slam": {"radius": 3.0, "anticipation": 0.68, "active": 0.18, "recovery": 0.32},
+	"ultimate": {"anticipation": 1.25, "active": 0.35, "recovery": 0.4},
+	"root_prison": {"radius": 3.5, "anticipation": 0.78, "active": 0.25, "recovery": 0.45},
+	"thorn_rain": {"radius": 2.5, "anticipation": 0.8, "active": 0.25, "recovery": 0.5},
+	"bramble_storm": {"radius": 4.0, "anticipation": 0.65, "active": 0.3, "recovery": 0.6},
+	"thorn_lattice": {"radius": 5.0, "anticipation": 1.1, "active": 0.3, "recovery": 0.55},
+	"spore_bloom": {"anticipation": 0.5, "active": 2.1, "recovery": 0.45},
+}
+
+## Player-facing phase grammar. Specific bosses may override this method, but
+## every phase has a readable pattern and safe-space rule before bespoke arena
+## effects are added. Collision remains owned by the attack profiles/callbacks.
+const PHASE_GUIDANCE: Dictionary = {
+	0: {"pattern": "Learn the rhythm", "safe_zone": "Step out of the marked attack area."},
+	1: {"pattern": "Pressure rises", "safe_zone": "Use the open edge after the warning appears."},
+	2: {"pattern": "Punish the opening", "safe_zone": "Create space during the cast; strike after recovery."},
+	3: {"pattern": "Survive the enrage", "safe_zone": "Stay beyond the final impact ring until it fades."},
+}
+
+static func phase_guidance_for(phase: int) -> Dictionary:
+	return (PHASE_GUIDANCE.get(clampi(phase, 0, 3), {}) as Dictionary).duplicate(true)
+
+func phase_guidance() -> Dictionary:
+	return phase_guidance_for(int(current_phase))
+
+func boss_lesson() -> Dictionary:
+	var index := clampi(stage_rank(), 0, BOSS_LESSONS.LESSON.size() - 1)
+	return BOSS_LESSONS.LESSON[index].duplicate(true)
+
+static func attack_profile(kind: String) -> Dictionary:
+	return (ATTACK_PROFILES.get(kind, {}) as Dictionary).duplicate(true)
+
+## One reviewable timing contract for warning, impact, and recovery. Callers
+## may use the returned values for presentation, while collision resolution
+## remains owned by the existing delayed callbacks.
+static func attack_timing(kind: String) -> Dictionary:
+	var profile := attack_profile(kind)
+	var anticipation := maxf(0.0, float(profile.get("anticipation", 0.0)))
+	var active := maxf(0.0, float(profile.get("active", 0.0)))
+	var recovery := maxf(0.0, float(profile.get("recovery", 0.0)))
+	return {
+		"anticipation": anticipation,
+		"impact_at": anticipation,
+		"active": active,
+		"impact_window": active,
+		"recovery": recovery,
+		"total_lock": anticipation + active + recovery,
+	}
 
 @export var max_hp: int = 500
 # NOTE: `velocity` is the native CharacterBody3D property — do NOT redeclare
@@ -77,6 +134,10 @@ var sfx_profile: String = "vanilla"
 ## Realm bosses select a Blender profile before calling super._ready().
 var authored_model_profile: String = "boss_matriarch"
 @export_range(0, 1) var authored_visual_variant: int = 0
+## True when an authored glowing model actually mounted this boot. Derived
+## bosses skip procedural identity builds (spikes/halo) that would otherwise
+## double-render on top of the authored silhouette.
+var authored_model_mounted: bool = false
 var elemental_status: Node = null
 # Practice respawns skip rewards and the scan-earn loop.
 @export var is_practice: bool = false
@@ -94,6 +155,7 @@ func _ready() -> void:
 	add_child(health_bar)
 	elemental_status = preload("res://scripts/systems/elemental_status.gd").new()
 	elemental_status.name = "ElementalStatus"
+	elemental_status.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(elemental_status)
 	_calculate_phase_thresholds()
 	
@@ -126,7 +188,7 @@ func _ready() -> void:
 			and str(game_state.current_realm) == "whispergrove":
 		var grove_variants := ["boss_whispergrove_rootwarden", "boss_whispergrove_dewseer"]
 		authored_model_profile = grove_variants[clampi(authored_visual_variant, 0, 1)]
-	CharacterRigLoader.try_if_wire(self, authored_model_profile)
+	authored_model_mounted = CharacterRigLoader.try_if_wire(self, authored_model_profile)
 
 ## Menace pass: burning eyes and a molten chest core. Colors follow the
 ## body shader's current emissive so customization re-themes them too.
@@ -288,10 +350,16 @@ func _on_phase_transition() -> void:
 	# Override in derived classes
 	var rank := stage_rank()
 	audio.play_boss_phase_roar(rank)  # escalating stage stinger
+	var state := get_node_or_null("/root/GameState")
+	if state != null and state.has_method("record_activity"):
+		state.call("record_activity", "BOSS PHASE %d · %s" % [rank + 1, name])
 	if sfx_profile != "vanilla":
 		audio.play_profile_cue(sfx_profile, "vocal")
 	print("Boss entered stage: %s" % current_phase)
 	_evolve_for_phase(int(current_phase))
+	var guidance := phase_guidance()
+	phase_guidance_changed.emit(int(current_phase), str(guidance.get("pattern", "")),
+		str(guidance.get("safe_zone", "")))
 	if boss_phase_label:
 		var phase_names = {
 			BossPhase.PHASE_1: "PHASE 1 · AWAKENED",
@@ -299,7 +367,7 @@ func _on_phase_transition() -> void:
 			BossPhase.PHASE_3: "PHASE 3 · FURIOUS",
 			BossPhase.ENRAGE: "ENRAGE"
 		}
-		boss_phase_label.text = phase_names.get(current_phase, "PHASE ?")
+		_set_phase_guidance_label(str(phase_names.get(current_phase, "PHASE ?")))
 
 func _update_ai(delta: float) -> void:
 	if stun_timer > 0:
@@ -374,9 +442,11 @@ func _perform_mend() -> void:
 	mend_uses_left -= 1
 	mend_cooldown_left = mend_cooldown
 	var center := global_position
-	var radius := 2.6
-	var channel := 1.4
-	lock_action(channel + 0.25)
+	var profile := attack_profile("mend")
+	var timing := attack_timing("mend")
+	var radius := float(profile.radius)
+	var channel := float(timing.anticipation)
+	lock_action(float(timing.total_lock))
 	attack_telegraphed.emit("mend", radius, channel)
 	# Verdant telegraph reads as restoration, not danger.
 	CombatFx.spawn_ground_telegraph(self, center, radius,
@@ -414,9 +484,11 @@ func _perform_basic_attack(player: Node3D) -> void:
 	# The warning and damage share one center/radius contract. Damage resolves
 	# after anticipation, never on the frame the boss chooses the attack.
 	var center := global_position
-	var radius := 3.0
-	var anticipation := 0.68
-	lock_action(anticipation + 0.32)
+	var profile := attack_profile("basic_slam")
+	var timing := attack_timing("basic_slam")
+	var radius := float(profile.radius)
+	var anticipation := float(timing.anticipation)
+	lock_action(float(timing.total_lock))
 	attack_telegraphed.emit("basic_slam", radius, anticipation)
 	CombatFx.spawn_ground_telegraph(self, center, radius,
 		Color(1.0, 0.16, 0.08), anticipation)
@@ -469,10 +541,11 @@ func _perform_ultimate(player: Node3D = null) -> void:
 	var rank := stage_rank()
 	var ult_radius := 5.0 + 1.5 * float(rank)
 	var ult_damage := maxi(1, int(round(effective_atk() * (1.2 + 0.25 * float(rank)))))
-	var ult_delay := 1.25
+	var ult_timing := attack_timing("ultimate")
+	var ult_delay := float(ult_timing.anticipation)
 	attack_cooldowns["ultimate"] = 27.0 - 3.0 * float(rank)  # enrage recasts faster
 	var center := global_position
-	lock_action(ult_delay + 0.4)
+	lock_action(float(ult_timing.total_lock))
 	attack_telegraphed.emit("ultimate", ult_radius, ult_delay)
 	var tint: Color = stage_tints[rank]
 	CombatFx.spawn_ground_telegraph(self, center, ult_radius, tint, ult_delay)
@@ -540,7 +613,10 @@ func take_damage(amount: int, knockback_dir: Vector3, critical: bool = false) ->
 	# Stage armor: higher stages shrug off more of every hit (min 1 gets through).
 	var applied := maxi(1, amount - stage_armor_value())
 	hp -= applied
-	FloatingText.spawn_damage_on_entity(self, applied, critical)
+	var state := get_node_or_null("/root/GameState")
+	if state != null and state.has_method("record_activity"):
+		state.call("record_activity", "BOSS HIT · %d%s" % [applied, " · CRIT" if critical else ""])
+	ImpactDirector.dispatch_damage_event(self, applied, critical, knockback_dir)
 	var health_bar := get_node_or_null("EnemyHealthBar")
 	if health_bar != null and health_bar.has_method("notify_damage"):
 		health_bar.notify_damage()
@@ -695,10 +771,25 @@ func _on_death_finished() -> void:
 		if was_first_kill and diamond_reward > 0:
 			var amount := diamond_reward + randi_range(0, 2)
 			game_state.add_diamonds(amount,
-				"💎 +%d diamonds — a glint from the old world remains." % amount)
+				"+%d DIAMONDS — a glint from the old world remains." % amount)
 	_spawn_rewards()
+	_announce_repeat_reward_choice()
 	died.emit()
 	queue_free()
+
+func _announce_repeat_reward_choice() -> void:
+	if was_first_kill:
+		return
+	var boss_id := _boss_key().get_file().get_basename()
+	if boss_id.begins_with("boss_"):
+		boss_id = boss_id.trim_prefix("boss_")
+	var catalog := preload("res://scripts/systems/boss_reward_catalog.gd")
+	var choices: Array[Dictionary] = catalog.choices_for(boss_id)
+	if choices.is_empty():
+		return
+	var reward_manager := get_node_or_null("/root/RewardManager")
+	if reward_manager != null and reward_manager.has_signal("boss_reward_choice_available"):
+		reward_manager.boss_reward_choice_available.emit(boss_id, choices)
 
 ## Identity used for first-kill rewards; data-driven bosses (one shared
 ## script) override this so each def records its own first kill.
@@ -731,6 +822,9 @@ func set_encounter_origin(origin: Vector3) -> void:
 ## Full retry transaction used by WorldManager after player defeat. Derived
 ## bosses extend this to clear summons/phase props but must call super.
 func reset_encounter() -> void:
+	var state := get_node_or_null("/root/GameState")
+	if state != null and state.has_method("record_activity"):
+		state.call("record_activity", "BOSS RESET · %s" % name)
 	encounter_generation += 1
 	_death_finalized = false
 	is_defeated = false
@@ -783,6 +877,24 @@ func _refresh_boss_bar() -> void:
 	if boss_hp_bar:
 		boss_hp_bar.max_value = max_hp
 		boss_hp_bar.value = hp
+	if boss_phase_label:
+		var phase_names := {
+			BossPhase.PHASE_1: "PHASE 1 · AWAKENED",
+			BossPhase.PHASE_2: "PHASE 2 · HARDENED",
+			BossPhase.PHASE_3: "PHASE 3 · FURIOUS",
+			BossPhase.ENRAGE: "ENRAGE",
+		}
+		_set_phase_guidance_label(str(phase_names.get(current_phase, "PHASE ?")))
+
+func _set_phase_guidance_label(phase_name: String) -> void:
+	if boss_phase_label == null:
+		return
+	var guidance := phase_guidance()
+	var lesson := boss_lesson()
+	boss_phase_label.text = "%s\n%s · %s" % [phase_name,
+		str(guidance.get("pattern", "")), str(guidance.get("safe_zone", ""))]
+	if not lesson.is_empty():
+		boss_phase_label.text += "\nLESSON · %s" % str(lesson.get("rule", ""))
 
 func _hide_boss_health_bar() -> void:
 	if boss_bar_root:
@@ -793,7 +905,9 @@ func is_dead() -> bool:
 
 func apply_elemental_status(element: String, intensity: int = 1) -> void:
 	if elemental_status != null and elemental_status.has_method("apply"):
-		elemental_status.apply(element, intensity)
+		var applications: int = maxi(1, intensity)
+		for _index in applications:
+			elemental_status.apply(element, 4.0)
 
 func get_elemental_status_snapshot() -> Dictionary:
 	if elemental_status != null and elemental_status.has_method("status_snapshot"):

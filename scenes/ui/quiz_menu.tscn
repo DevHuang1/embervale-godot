@@ -1,0 +1,49 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/quiz_menu.gd" id="1_quiz"]
+
+[node name="QuizMenu" type="CanvasLayer"]
+layer = 25
+script = ExtResource("1_quiz")
+
+[node name="Root" type="PanelContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 80.0
+offset_top = 180.0
+offset_right = -80.0
+offset_bottom = -180.0
+
+[node name="VBox" type="VBoxContainer" parent="Root"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="Root/VBox"]
+layout_mode = 2
+theme_type_variation = &"MenuTitle"
+text = "CHAPTER LESSON"
+horizontal_alignment = 1
+
+[node name="Question" type="Label" parent="Root/VBox"]
+layout_mode = 2
+autowrap_mode = 2
+theme_type_variation = &"Subtitle"
+text = "Question"
+horizontal_alignment = 1
+
+[node name="Answers" type="VBoxContainer" parent="Root/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Result" type="Label" parent="Root/VBox"]
+layout_mode = 2
+autowrap_mode = 2
+theme_type_variation = &"Body"
+text = ""
+horizontal_alignment = 1
+
+[node name="Close" type="Button" parent="Root/VBox"]
+custom_minimum_size = Vector2(0, 54)
+layout_mode = 2
+text = "CLOSE LESSON"

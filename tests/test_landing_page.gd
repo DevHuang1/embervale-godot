@@ -24,6 +24,8 @@ func _check(failures: int, cond: bool, msg: String) -> int:
 func _run() -> void:
 	var failures := 0
 	var gs = root.get_node("/root/GameState")
+	# Never mutate a player's real user:// save during this smoke test.
+	gs.save_path = "/tmp/embervale_landing_%d.cfg" % OS.get_process_id()
 	gs.delete_save()
 	gs.reset()
 

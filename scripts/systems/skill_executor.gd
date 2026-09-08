@@ -17,9 +17,15 @@ extends Node
 ## All effects use CombatFx — no external assets required.
 
 signal skill_fired(slot: int, skill: Dictionary)
+var _active_timers: Array[SceneTreeTimer] = []
+var _activation_id: int = 0
+var _active_activation_id: int = 0
+var _pending_callbacks: int = 0
+var _last_report: Dictionary = {}
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	add_to_group("skill_executor")
 
 ## Main entry point called by HUD.
 func execute_skill(slot: int, skill: Dictionary) -> void:
@@ -29,6 +35,8 @@ func execute_skill(slot: int, skill: Dictionary) -> void:
 	var hero  := _find_hero()
 	var target := _get_target(gs)
 
+	var activation := begin_activation(slot, skill)
+	var started := Time.get_ticks_usec()
 	var kind   : String = str(skill.get("type", "aoe"))
 	var dmg    : int    = _calc_damage(skill, gs)
 	var radius : float  = float(skill.get("radius", 4.0))
@@ -46,6 +54,55 @@ func execute_skill(slot: int, skill: Dictionary) -> void:
 		_:              _skill_aoe(hero, target, radius, dmg)
 
 	skill_fired.emit(slot, skill)
+	_last_report = {"slot": slot, "type": kind, "setup_usec": Time.get_ticks_usec() - started,
+		"activation_id": activation, "active_timers": _active_timers.size(),
+		"pending_callbacks": _pending_callbacks, "time_scale": Engine.time_scale,
+		"time_scale_leases": _time_scale_leases()}
+
+func performance_report() -> Dictionary:
+	return _last_report.duplicate(true)
+
+func begin_activation(slot: int, skill: Dictionary) -> int:
+	var previous_hero := _find_hero()
+	if previous_hero != null and _active_activation_id > 0:
+		CombatFx.cancel_context_effects(previous_hero)
+	_activation_id += 1
+	_active_activation_id = _activation_id
+	# A new cast invalidates delayed callbacks from the previous cast. The
+	# SceneTreeTimer objects will expire harmlessly, but their callbacks must
+	# never continue to accumulate gameplay or FX work.
+	_active_timers.clear()
+	_pending_callbacks = 0
+	return _active_activation_id
+
+func cancel_active_effects() -> void:
+	_activation_id += 1
+	_active_activation_id = _activation_id
+	_active_timers.clear()
+	_pending_callbacks = 0
+	var hero := _find_hero()
+	if hero != null:
+		if hero.has_method("cancel_active_skill_effects"):
+			hero.call("cancel_active_skill_effects")
+		CombatFx.cancel_context_effects(hero)
+	CombatFx.clear_expired_effects()
+	var guard := get_node_or_null("/root/TimeScaleGuard")
+	if guard != null and guard.has_method("cancel_owner_leases"):
+		guard.cancel_owner_leases("skill:")
+
+func _time_scale_leases() -> Array:
+	var guard := get_node_or_null("/root/TimeScaleGuard")
+	return guard.active_leases() if guard != null and guard.has_method("active_leases") else []
+
+func _skill_timer(delay: float, callback: Callable, activation: int) -> void:
+	var timer := get_tree().create_timer(delay, false)
+	_active_timers.append(timer)
+	_pending_callbacks += 1
+	timer.timeout.connect(func():
+		_active_timers.erase(timer)
+		_pending_callbacks = maxi(_pending_callbacks - 1, 0)
+		if activation == _activation_id:
+			callback.call())
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -107,12 +164,11 @@ func _skill_explosion(hero: Node3D, target: Node3D, radius: float, damage: int) 
 	# Telegraph
 	CombatFx.spawn_ground_telegraph(hero, dest, radius, col, 0.9)
 	var gen := 0
-	var t := get_tree().create_timer(0.9, false)
-	t.timeout.connect(func():
+	_skill_timer(0.9, func():
 		CombatFx.spawn_burst(hero, dest + Vector3(0, 0.8, 0), col, 28, 8.5, 0.5, 0.22)
 		CombatFx.spawn_ring(hero, dest, radius, col, 0.45)
 		_deal_skill_damage(hero, dest, radius, damage)
-		_shake(0.45))
+		_shake(0.45), _activation_id)
 
 func _skill_heal_bloom(hero: Node3D, heal: int, gs: Node) -> void:
 	if hero == null: return
@@ -146,10 +202,9 @@ func _skill_whirl(hero: Node3D, radius: float, damage: int) -> void:
 	for i in 3:
 		var r   := radius * (0.6 + float(i) * 0.3)
 		var dl  := float(i) * 0.18
-		var t := get_tree().create_timer(dl, false)
-		t.timeout.connect(func():
+		_skill_timer(dl, func():
 			CombatFx.spawn_ring(hero, hero.global_position, r, col, 0.4)
-			_deal_skill_damage(hero, hero.global_position, r, int(damage * 0.85)))
+			_deal_skill_damage(hero, hero.global_position, r, int(damage * 0.85)), _activation_id)
 	_shake(0.28)
 
 func _skill_dash_strike(hero: Node3D, target: Node3D, damage: int) -> void:
@@ -176,24 +231,22 @@ func _skill_comet(hero: Node3D, target: Node3D, radius: float, damage: int) -> v
 	CombatFx.spawn_ground_telegraph(hero, dest, radius, col, 1.8)
 	# Comet descend effect
 	var comet_start := dest + Vector3(randf_range(-2, 2), 14.0, randf_range(-2, 2))
-	var t := get_tree().create_timer(1.8, false)
-	t.timeout.connect(func():
+	_skill_timer(1.8, func():
 		CombatFx.spawn_burst(hero, dest + Vector3(0, 1.0, 0), col, 36, 10.0, 0.55, 0.24)
 		CombatFx.spawn_shockwave(hero, dest, radius * 1.4, col, 0.65)
 		_deal_skill_damage(hero, dest, radius, damage)
-		_shake(0.65))
+		_shake(0.65), _activation_id)
 
 func _skill_heavy_aoe(hero: Node3D, radius: float, damage: int) -> void:
 	if hero == null: return
 	var gs  := get_node_or_null("/root/GameState")
 	var col := _weapon_color(gs)
 	CombatFx.spawn_ground_telegraph(hero, hero.global_position, radius, col, 0.65)
-	var t := get_tree().create_timer(0.65, false)
-	t.timeout.connect(func():
+	_skill_timer(0.65, func():
 		CombatFx.spawn_shockwave(hero, hero.global_position, radius, col, 0.55)
 		CombatFx.spawn_burst(hero, hero.global_position + Vector3(0, 0.5, 0), col, 32, 9.0, 0.5, 0.22)
 		_deal_skill_damage(hero, hero.global_position, radius, damage)
-		_shake(0.60))
+		_shake(0.60), _activation_id)
 
 func _shake(intensity: float) -> void:
 	var hero := _find_hero()

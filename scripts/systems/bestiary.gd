@@ -1,6 +1,8 @@
 extends Node
 class_name Bestiary
 
+const REALM_IDENTITY := preload("res://scripts/systems/realm_identity_catalog.gd")
+
 ## === Bestiary — Realm + Wave + Enemy Variant Registry ===
 ## Single source of truth for:
 ##   - REALMS: palette/audio/material tints per realm
@@ -58,6 +60,14 @@ const REALMS := {
 	},
 }
 
+static func ecology_summary(realm_id: String) -> String:
+	var ecology: Dictionary = REALM_IDENTITY.for_realm(realm_id).get("ecology", {})
+	return "PREDATOR / PREY  ·  %s\nRIVALS  ·  %s\nELEMENTAL REACTION  ·  %s\nHAZARD  ·  %s" % [
+		str(ecology.get("predator_prey", "Unknown")),
+		str(ecology.get("rivals", "Unknown")),
+		str(ecology.get("elemental_reaction", "Unknown")),
+		str(ecology.get("hazard", "Unknown"))]
+
 # Quest stage → realm id mapping (index matches QuestStage enum)
 const STAGE_REALMS := ["bramblewood", "bramblewood", "mistfen", "heartwood"]
 
@@ -112,6 +122,32 @@ static func realm_id_for_stage(stage: int) -> String:
 static func variant_for(realm_id: String, tier: String) -> Dictionary:
 	var realm_variants : Dictionary = VARIANTS.get(realm_id, VARIANTS["bramblewood"])
 	return realm_variants.get(tier, realm_variants.get("normal", {}))
+
+static func scan_report(enemy: Node) -> Dictionary:
+	if enemy == null or not is_instance_valid(enemy):
+		return {}
+	var hp_value = enemy.get("max_hp") if enemy.get("max_hp") != null else enemy.get("hp")
+	var attack_value = enemy.get("attack_damage") if enemy.get("attack_damage") != null else enemy.get("damage")
+	var speed_value = enemy.get("move_speed") if enemy.get("move_speed") != null else enemy.get("speed")
+	var kind_value = enemy.get("enemy_kind") if enemy.get("enemy_kind") != null else enemy.name
+	var hp := int(hp_value if hp_value != null else enemy.get_meta("scan_hp", 1))
+	var attack := int(attack_value if attack_value != null else enemy.get_meta("scan_attack", 0))
+	var speed := float(speed_value if speed_value != null else enemy.get_meta("scan_speed", 0.0))
+	var kind := str(kind_value if kind_value != null else enemy.get_meta("scan_kind", enemy.name))
+	var realm_id := str(enemy.get("realm_id") if enemy.get("realm_id") != null else
+		enemy.get_meta("realm_id", "bramblewood"))
+	var magic := kind.contains("fen") or kind.contains("spore") or kind.contains("relic")
+	return {
+		"display": str(enemy.get("display_name") if enemy.get("display_name") != null else enemy.name),
+		"kind": kind,
+		"hp": maxi(hp, 1),
+		"attack": maxi(attack, 0),
+		"speed": speed,
+		"physical_resist": 0 if magic else 12,
+		"magic_resist": 18 if magic else 5,
+		"reward": "Material cache + realm essence" if not magic else "Elemental essence + scan fragment chance",
+		"ecology": ecology_summary(realm_id),
+	}
 
 ## All realm ids as an array.
 static func all_realm_ids() -> Array:
@@ -171,7 +207,7 @@ const BOSS_DEFS := {
 		"rewards": {
 			"xp": 250,
 			"loot": {"hushling_thorn": 4},
-			"weapon": {"id": "thornbite_cleaver", "name": "THORNBITE CLEAVER", "glyph": "🪓",
+			"weapon": {"id": "thornbite_cleaver", "name": "THORNBITE CLEAVER", "glyph": "axe",
 				"atk": 18, "swing_time": 0.7, "range": 9.5,
 				"skill": {"name": "Bramble Rend", "type": "heavy_aoe", "cooldown": 9.0,
 					"radius": 14.0, "dmg_mult": 1.8}, "rarity": 3},
@@ -192,7 +228,7 @@ const BOSS_DEFS := {
 		"rewards": {
 			"xp": 320,
 			"loot": {"moss_tonic": 3},
-			"weapon": {"id": "tidecall_brand", "name": "TIDECALL BRAND", "glyph": "🔱",
+			"weapon": {"id": "tidecall_brand", "name": "TIDECALL BRAND", "glyph": "staff",
 				"atk": 20, "swing_time": 0.65, "range": 11.0,
 				"skill": {"name": "Drowning Wake", "type": "heavy_aoe", "cooldown": 8.0,
 					"radius": 16.0, "dmg_mult": 2.0}, "rarity": 3},
@@ -214,7 +250,7 @@ const BOSS_DEFS := {
 		"rewards": {
 			"xp": 410, "materials": {"emberstone": 5, "monster_core": 2},
 			"loot": {"moss_tonic": 2},
-			"weapon": {"id": "cinderhart_maul", "name": "CINDERHART MAUL", "glyph": "🔨",
+			"weapon": {"id": "cinderhart_maul", "name": "CINDERHART MAUL", "glyph": "mace",
 				"atk": 23, "swing_time": 0.82, "range": 10.0,
 				"skill": {"name": "Furnace Break", "type": "heavy_aoe", "cooldown": 9.5,
 					"radius": 15.0, "dmg_mult": 2.25}, "rarity": 4},
@@ -235,7 +271,7 @@ const BOSS_DEFS := {
 		"rewards": {
 			"xp": 480, "materials": {"moonmoss": 5, "crystal_fragment": 3},
 			"loot": {"moss_tonic": 3},
-			"weapon": {"id": "oracle_crescent", "name": "ORACLE CRESCENT", "glyph": "☾",
+			"weapon": {"id": "oracle_crescent", "name": "ORACLE CRESCENT", "glyph": "blade",
 				"atk": 24, "swing_time": 0.58, "range": 12.0,
 				"skill": {"name": "Undertide Mirror", "type": "whirl", "cooldown": 8.0,
 					"radius": 17.0, "dmg_mult": 2.1}, "rarity": 4},
@@ -256,14 +292,14 @@ const WORLD_REALMS := {
 		"name": "Whispergrove",
 		"scene": "res://scenes/world/grove.tscn",
 		"unlock": "",
-		"bounds": Rect2(-300, -300, 600, 600),
+		"bounds": Rect2(-1000, -1000, 2000, 2000),
 		"map_color": Color(0.14, 0.22, 0.18),
 	},
 	"bramblewood": {
 		"name": "Bramblewood",
 		"scene": "res://scenes/world/grove.tscn",
 		"unlock": "",
-		"bounds": Rect2(-300, -300, 600, 600),
+		"bounds": Rect2(-1000, -1000, 2000, 2000),
 		"map_color": Color(0.14, 0.22, 0.18),
 	},
 	"mistfen": {
