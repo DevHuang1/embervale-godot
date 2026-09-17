@@ -11,6 +11,7 @@ const HUD_NODES := [
 	"Root/MetaRow", "Root/CombatCard", "Root/BossHealthBar",
 	"Root/LevelToast", "Root/LootToast", "Root/FieldNote",
 	"Root/MoveJoystick", "Root/DodgeButton", "Root/JumpButton",
+	"Root/InteractButton",
 	"Root/SkillBar/Skill0Button", "Root/SkillBar/Skill1Button",
 	"Root/SkillBar/Skill2Button", "Root/SkillBar/AttackButton",
 ]

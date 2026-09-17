@@ -26,6 +26,10 @@ var first_person_active: bool = false   # true while CameraRig drives a 1-finger
 var active_camera: Camera3D = null
 var active_camera_controller: Node = null
 var held_move_keys: Dictionary = {}
+const MOVEMENT_KEYCODES: Array[int] = [
+	KEY_W, KEY_A, KEY_S, KEY_D, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT,
+]
+var _was_paused: bool = false
 var _drag_samples: Dictionary = {}  # index -> {speed: float, dir: Vector2}
 var _drag_start_positions: Dictionary = {}  # pointer id -> screen position
 var _joystick_pointer_ids: Dictionary = {}
@@ -41,6 +45,33 @@ func _ready() -> void:
 	Input.set_use_accumulated_input(false)
 	add_to_group("input_manager")
 	_load_key_bindings()
+	# Stay subscribed while the tree is paused so a key or touch release that
+	# happens over an open menu is still observed (see _recover_input_state).
+	process_mode = Node.PROCESS_MODE_ALWAYS
+
+func _process(_delta: float) -> void:
+	var paused := get_tree().paused
+	if _was_paused and not paused:
+		_recover_input_state()
+	_was_paused = paused
+
+## Menus freeze the world and take ownership of input while they are open, so a
+## release that lands during the pause may never reach this node (and arrow keys
+## are consumed by focused controls even when it does). Rebuild the held state
+## from the engine, which keeps tracking keys regardless of pause, so the hero
+## cannot resume with a stale direction, and drop any touch gesture that the
+## menu swallowed for the same reason.
+func _recover_input_state() -> void:
+	clear_joystick_pointers()
+	_drag_start_positions.clear()
+	_first_person_look_pointer = -1
+	world_gesture_active = false
+	for keycode in MOVEMENT_KEYCODES:
+		if Input.is_key_pressed(keycode):
+			held_move_keys[keycode] = true
+		else:
+			held_move_keys.erase(keycode)
+	_emit_keyboard_move()
 
 func get_key_binding(action: String) -> int:
 	return int(key_bindings.get(action, DEFAULT_KEY_BINDINGS.get(action, -1)))
@@ -88,6 +119,17 @@ func _bindings_are_valid(bindings: Dictionary) -> bool:
 	return true
 
 func _unhandled_input(event: InputEvent) -> void:
+	if get_tree().paused:
+		# A frozen world means a menu owns input. Gameplay actions must not fire
+		# here, but held movement keys still have to be tracked: a release that
+		# lands while the menu is open would otherwise be lost and the hero
+		# would resume walking in that direction on its own.
+		if event is InputEventKey and not event.echo:
+			if event.pressed:
+				held_move_keys[event.keycode] = true
+			else:
+				held_move_keys.erase(event.keycode)
+		return
 	if event is InputEventKey:
 		_handle_key(event)
 	elif event is InputEventScreenTouch and is_mobile:

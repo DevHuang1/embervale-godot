@@ -43,7 +43,7 @@ window/mode/window_mode=0
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
+enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg", "res://addons/revenuecat_bridge/plugin.cfg")
 
 [groups]
 

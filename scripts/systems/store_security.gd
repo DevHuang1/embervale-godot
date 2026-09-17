@@ -138,6 +138,33 @@ static func is_plausible_secret(value: String) -> bool:
 		return false
 	return is_safe_header_value(trimmed)
 
+## RevenueCat PUBLIC SDK keys are per-platform and designed to ship inside the
+## client, so this check guards against typos and cross-wired keys (a secret
+## pasted where a public key belongs), never against disclosure.
+const PUBLIC_SDK_KEY_PREFIXES: Array[String] = ["appl_", "goog_", "amzn_", "test_",
+	"rcb_"]
+const MIN_PUBLIC_KEY_LENGTH := 16
+const MAX_PUBLIC_KEY_LENGTH := 255
+
+static func validate_public_sdk_key(value: String) -> String:
+	var trimmed := value.strip_edges()
+	if trimmed.is_empty():
+		return "empty_public_key"
+	if trimmed.length() < MIN_PUBLIC_KEY_LENGTH:
+		return "public_key_too_short"
+	if trimmed.length() > MAX_PUBLIC_KEY_LENGTH:
+		return "public_key_too_long"
+	var matched := false
+	for prefix in PUBLIC_SDK_KEY_PREFIXES:
+		if trimmed.begins_with(prefix):
+			matched = true
+			break
+	if not matched:
+		return "public_key_prefix"
+	if not is_safe_header_value(trimmed):
+		return "public_key_charset"
+	return ""
+
 ## Header injection guard: printable ASCII with no spaces, CR, LF, or tab.
 static func is_safe_header_value(value: String) -> bool:
 	if value.is_empty():

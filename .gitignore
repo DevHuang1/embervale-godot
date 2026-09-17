@@ -28,6 +28,8 @@ exports/
 *.apk
 *.aab
 *.ipa
+# Android build template marker (the template itself is regenerable)
+android/.build_version
 *.mobileprovision
 
 # Local config
@@ -69,3 +71,6 @@ project.godot.bak
 __pycache__/
 # Local MCP plugin cache
 addons/godot_mcp/cache/
+
+# Gradle local cache (android-plugin builds regenerate it)
+android-plugin/.gradle/

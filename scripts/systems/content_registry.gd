@@ -57,10 +57,17 @@ static func validate(registry: Dictionary) -> Array[String]:
 				global_ids[id] = category
 			for reference_key in ["scene", "source", "path"]:
 				var reference := str(record.get(reference_key, "")).strip_edges()
-				if reference.begins_with("res://") and not FileAccess.file_exists(reference):
+				if reference.begins_with("res://") and not _reference_exists(reference):
 					errors.append("%s record %s references missing %s: %s" % [
 						category, id, reference_key, reference])
 	return errors
+
+static func _reference_exists(reference: String) -> bool:
+	## Exported builds pack scenes and scripts as remapped .scn/.gdc files, so
+	## the authored res:// path has no file on disk even though the resource is
+	## present. ResourceLoader resolves that remap; FileAccess still catches
+	## plain files (text, raw assets) that ResourceLoader has no loader for.
+	return FileAccess.file_exists(reference) or ResourceLoader.exists(reference)
 
 static func lookup(registry: Dictionary, category: String, content_id: String) -> Dictionary:
 	var records: Dictionary = registry.get(category, {})

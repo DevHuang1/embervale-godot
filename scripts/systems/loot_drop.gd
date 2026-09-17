@@ -177,6 +177,11 @@ func _on_body_entered(body: Node3D) -> void:
 	if body != null and body.is_in_group("player"):
 		_collect(body)
 
+## Public claim path for the HUD's contextual PICK UP button; the walk-over
+## path above stays primary.
+func collect(collector: Node3D = null) -> void:
+	_collect(collector)
+
 func _collect(_collector: Node3D) -> void:
 	if collected:
 		return

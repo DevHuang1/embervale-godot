@@ -47,7 +47,6 @@ func _process(delta: float) -> bool:
 func _drive_menu() -> void:
 	var menu := current_scene.get_node_or_null("MainMenu")
 	print("DIAG menu=", menu)
-	root.get_node_or_null("/root/SaveLoadManager").call("bind", root.get_node_or_null("/root/GameState"))
 	var cont := menu.get_node_or_null("Root/HeroCard/HeroVBox/SecondaryRow/ContinueButton") as Button
 	if cont and not cont.disabled:
 		print("DIAG pressing ContinueButton")

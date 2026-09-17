@@ -31,10 +31,17 @@ var _mesh_root  : Node3D  = null
 var _sparkle    : GPUParticles3D = null
 var _mat_color  : Color  = Color(0.42, 0.88, 0.30)
 var _t          : float  = 0.0
+## Discovery contract shared with the other interactables: the world's
+## nearby-interactable router skips a node whose `opened` is true, so a node
+## on respawn cooldown never shadows a real chest beside it.
+var opened      : bool   = false
 
 func _ready() -> void:
+	add_to_group("interactable")
+	add_to_group("gathering")
 	_node_id = "%s_%s" % [material_id, get_instance_id()]
 	_check_cooldown()
+	opened = not _available
 	_build_visual()
 	_build_interact_area()
 	_build_sparkle()
@@ -141,9 +148,19 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("interact") or event.is_action_pressed("ui_accept"):
 		_do_gather()
 
+## WorldManager and the HUD's contextual button use the same contract as
+## chests and landmarks: keyboard input still reaches the legacy path above.
+func interact() -> void:
+	_do_gather()
+
+## Contextual-button verb for the HUD's on-screen action button.
+func interact_prompt() -> String:
+	return "GATHER"
+
 func _do_gather() -> void:
 	if not _available: return
 	_available = false
+	opened = true
 
 	var qty := randi_range(quantity_min, quantity_max)
 	gathered.emit(material_id, qty)
@@ -185,6 +202,7 @@ func _respawn() -> void:
 		if ws.call("is_gathered", _node_id):
 			return  # still on cooldown
 	_available = true
+	opened = false
 	if _mesh_root:
 		var tw := create_tween()
 		tw.tween_property(_mesh_root, "scale", Vector3.ONE, 0.55).set_trans(Tween.TRANS_BACK)

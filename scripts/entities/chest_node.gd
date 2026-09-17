@@ -264,6 +264,10 @@ func _unhandled_input(event: InputEvent) -> void:
 func interact() -> void:
 	_open_chest()
 
+## Contextual-button verb for the HUD's on-screen action button.
+func interact_prompt() -> String:
+	return "OPEN"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Open
 # ─────────────────────────────────────────────────────────────────────────────

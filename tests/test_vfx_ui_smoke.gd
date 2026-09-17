@@ -109,6 +109,31 @@ func _run() -> void:
 			failures += 1
 			print("FAIL: cast kind produced no tween: ", kind)
 
+	# --- Contextual interact button (chest open / gather / loot) ---
+	print("MARK: interact button")
+	var interact_button := hud.get_node_or_null("Root/InteractButton") as FightButton
+	if interact_button == null:
+		failures += 1
+		print("FAIL: HUD has no Root/InteractButton")
+	else:
+		# With no world scene attached the prompt resolver has nothing to offer,
+		# so the button must stay hidden instead of showing a dead control.
+		hud.call("_refresh_interact_prompt")
+		await process_frame
+		if interact_button.visible:
+			failures += 1
+			print("FAIL: interact button visible with no interactable scene")
+		var im = root.get_node("/root/InputManager")
+		var fired := {"value": false}
+		var handler := func() -> void: fired["value"] = true
+		im.interact_pressed.connect(handler)
+		interact_button.fight_pressed.emit()
+		await process_frame
+		im.interact_pressed.disconnect(handler)
+		if not fired["value"]:
+			failures += 1
+			print("FAIL: interact button did not emit InputManager.interact_pressed")
+
 	# --- HUD theme applied ---
 	if hud.get_node("Root/QuestLedger").get_theme_stylebox("panel") == null:
 		failures += 1

@@ -7,6 +7,10 @@ const ROOT_HARROW_BOSS_KEY := "boss_whispergrove_root_harrow"
 const BOSS_DIRECTOR_SCRIPT := preload("res://scripts/systems/boss_encounter_director.gd")
 const TRAINING_TARGET_SCENE: PackedScene = preload("res://scenes/entities/combat_training_target.tscn")
 const PROFILE_TELEMETRY := preload("res://scripts/systems/android_profile_telemetry.gd")
+## Contextual-button reach for walk-over loot. The drop itself still auto-
+## collects under LootDrop.COLLECT_RADIUS; this only lets the on-screen
+## button claim one the hero stopped just short of.
+const LOOT_REACH := 2.0
 
 ## === Whispergrove World Manager ===
 ## Handles quest progression, spawns, day/night, environment
@@ -918,6 +922,48 @@ func _on_hero_interact() -> void:
 		# never open.
 		if nearby.has_method("interact"):
 			nearby.interact()
+		return
+	# Nothing openable in reach: claim the nearest loot drop the hero has not
+	# already walked over, so the contextual button always does what it says.
+	var drop := _get_nearby_loot_drop()
+	if drop != null and drop.has_method("collect"):
+		drop.call("collect", hero)
+
+## Contextual interaction contract for the HUD's on-screen action button.
+## Returns {} when nothing is in reach; otherwise the verb the button should
+## show plus the node a press will act on.
+func get_interact_prompt() -> Dictionary:
+	var target := _get_nearby_interactable()
+	if target != null:
+		return {"verb": _interact_verb_for(target), "target": target}
+	var drop := _get_nearby_loot_drop()
+	if drop != null:
+		return {"verb": "PICK UP", "target": drop}
+	return {}
+
+func _interact_verb_for(target: Node) -> String:
+	if target.has_method("interact_prompt"):
+		return str(target.call("interact_prompt"))
+	if target.is_in_group("chest"):
+		return "OPEN"
+	if target.is_in_group("gathering"):
+		return "GATHER"
+	if target.is_in_group("activity"):
+		return "BEGIN"
+	return "INTERACT"
+
+func _get_nearby_loot_drop() -> Node3D:
+	var closest: Node3D = null
+	var closest_dist := LOOT_REACH
+	for candidate in get_tree().get_nodes_in_group("loot_drop"):
+		var drop := candidate as Node3D
+		if drop == null or not is_instance_valid(drop) or bool(drop.get("collected")):
+			continue
+		var dist := hero.global_position.distance_to(drop.global_position)
+		if dist < closest_dist:
+			closest_dist = dist
+			closest = drop
+	return closest
 
 func _get_nearby_interactable() -> Node:
 	# Prefer the facing ray for deliberate interaction, but fall back to the

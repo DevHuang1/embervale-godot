@@ -78,9 +78,21 @@ var _boss_telegraph_until_ms: int = 0
 var _analyzed_enemy_id: int = 0
 var _activity_line: Label = null
 var _activity_poll_in: float = 0.0
+var _interact_button: FightButton = null
+var _interact_label: Label = null
+var _interact_verb := ""
+var _interact_poll_in: float = 0.0
 var _actions_toggle: Button = null
 var _compact_actions_open: bool = false
 var _left_handed_applied := false
+
+## The contextual interact button is the only visible affordance for opening
+## chests and starting gathers on touch: keyboard Space and an on-screen
+## double-tap both exist, but neither is discoverable. Poll fast enough to
+## feel live without re-scanning the interactable group every frame.
+const INTERACT_POLL_SECONDS := 0.2
+## Authored slot directly left of the JUMP button, clear of the skill row.
+const INTERACT_BUTTON_RECT := Rect2(-308.0, -480.0, 100.0, 100.0)
 
 ## Wide-bar frame limits. Narrow portrait viewports clamp these instead of
 ## letting the boss bar or the currency row run off the screen edge. Values
@@ -104,6 +116,9 @@ const SKILL_RUNES := {
 
 func _ready() -> void:
 	call_deferred("_connect_dungeon_completion")
+	# Built before the preference pass so action scale, opacity, and the
+	# left-handed mirror treat it exactly like the authored combat controls.
+	_build_interact_button()
 	_apply_mobile_control_preferences()
 	# The joystick owns pointer capture and deadzone shaping; forward its
 	# already-normalized output through the same movement signal used by
@@ -751,6 +766,72 @@ func _on_skill_cooldown_changed(slot: int, remaining: float) -> void:
 			"Cooldown %0.1fs remaining" % remaining if remaining > 0.0 else "Ready")
 	elif btn: btn.disabled = remaining > 0.0
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Contextual interact button
+# ─────────────────────────────────────────────────────────────────────────────
+
+## A thumb-reachable button that appears only while something in the world can
+## be acted on (chest, gather node, landmark, dropped loot). It routes through
+## InputManager.interact_pressed — the same canonical path as Space and the
+## gamepad A button — so WorldManager's nearby-interactable router stays the
+## single owner of what a press actually does.
+func _build_interact_button() -> void:
+	var root := get_node_or_null("Root") as Control
+	if root == null:
+		return
+	_interact_button = FightButton.new()
+	_interact_button.name = "InteractButton"
+	_interact_button.shape = FightButton.Shape.CIRCLE
+	_interact_button.accent = Color(0.96, 0.72, 0.29)
+	_interact_button.custom_minimum_size = INTERACT_BUTTON_RECT.size
+	_interact_button.anchor_left = 1.0
+	_interact_button.anchor_top = 1.0
+	_interact_button.anchor_right = 1.0
+	_interact_button.anchor_bottom = 1.0
+	_interact_button.offset_left = INTERACT_BUTTON_RECT.position.x
+	_interact_button.offset_top = INTERACT_BUTTON_RECT.position.y
+	_interact_button.offset_right = INTERACT_BUTTON_RECT.end.x
+	_interact_button.offset_bottom = INTERACT_BUTTON_RECT.end.y
+	_interact_button.visible = false
+	_interact_button.add_to_group("combat_action_controls")
+	_interact_label = Label.new()
+	_interact_label.name = "InteractLabel"
+	_interact_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_interact_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_interact_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_interact_label.add_theme_font_size_override("font_size", 13)
+	_interact_label.add_theme_color_override("font_color", Color(1.0, 0.92, 0.72))
+	_interact_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_interact_button.add_child(_interact_label)
+	_interact_button.fight_pressed.connect(_on_interact_pressed)
+	root.add_child(_interact_button)
+
+func _on_interact_pressed() -> void:
+	if input_manager != null:
+		input_manager.interact_pressed.emit()
+
+func _refresh_interact_prompt() -> void:
+	if _interact_button == null or not is_instance_valid(_interact_button):
+		return
+	var scene := get_tree().current_scene
+	var prompt: Dictionary = {}
+	if scene != null and scene.has_method("get_interact_prompt"):
+		prompt = scene.call("get_interact_prompt")
+	var available := not prompt.is_empty()
+	_interact_button.visible = available
+	if not available:
+		_interact_verb = ""
+		return
+	var verb := str(prompt.get("verb", "INTERACT"))
+	if verb == _interact_verb:
+		return
+	_interact_verb = verb
+	if _interact_label != null:
+		_interact_label.text = verb
+	_interact_button.tooltip_text = "%s (Space)" % verb.capitalize()
+	_interact_button.set_action_state("available",
+		"Press to %s" % verb.to_lower())
+
 ## The Attack/Dodge/Jump FightButtons are plain Controls — nothing wired
 ## them before, so the primary STRIKE button literally did nothing on
 ## touch. Route them through InputManager exactly like their keyboard
@@ -1220,6 +1301,10 @@ func _process(delta: float) -> void:
 	if _activity_poll_in <= 0.0:
 		_activity_poll_in = 0.35
 		_refresh_nearby_activity()
+	_interact_poll_in -= delta
+	if _interact_poll_in <= 0.0:
+		_interact_poll_in = INTERACT_POLL_SECONDS
+		_refresh_interact_prompt()
 	if _boss_telegraph_until_ms > 0 and Time.get_ticks_msec() >= _boss_telegraph_until_ms:
 		_boss_telegraph_until_ms = 0
 		if phase_indicator and _active_boss != null and is_instance_valid(_active_boss):

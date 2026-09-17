@@ -141,6 +141,10 @@ func start_gather() -> void:
 func interact() -> void:
 	start_gather()
 
+## Contextual-button verb: one press begins the hold ritual.
+func interact_prompt() -> String:
+	return "GATHER"
+
 func _cancel_gather() -> void:
 	_gathering = false
 	_gather_timer = 0.0

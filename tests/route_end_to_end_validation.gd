@@ -178,6 +178,12 @@ func _run_gathering_and_forge(grove: Node) -> void:
 		var before: int = _gs.get_material_qty(material_id) if not material_id.is_empty() else 0
 		hero.global_position = node.global_position + Vector3(0.9, 0.0, 0.0)
 		await _frames(3)
+		# The HUD's contextual button reads this same contract; a regression
+		# here means the button would offer nothing at a real gathering node.
+		var gather_prompt: Dictionary = grove.call("get_interact_prompt") \
+			if grove.has_method("get_interact_prompt") else {}
+		_assert_true(str(gather_prompt.get("verb", "")) == "GATHER",
+			"contextual prompt offers GATHER at a gathering node (got %s)" % gather_prompt)
 		node.call("interact")
 		# Themed gathering is a hold ritual; the yield lands when it completes.
 		await create_timer(float(node.get("gather_time")) + 0.4).timeout
@@ -348,12 +354,42 @@ func _run_expedition(grove: Node) -> void:
 				copies += 1
 		_assert_true(copies <= 1, "boss reward did not duplicate a ledger entry")
 
-	# Valuable loot: an authored chest claims once and pays out.
-	var chest := _find_chest()
-	_assert_true(chest != null, "the realm exposes an authored chest")
-	if chest != null and hero != null:
-		hero.global_position = chest.global_position + Vector3(0.9, 0.0, 0.0)
+	# Valuable loot: an authored chest claims once and pays out. Resolve the
+	# scene and hero again here: a reference captured earlier in the route can
+	# point at a node the live realm no longer drives, which reads as an empty
+	# prompt and teleports the wrong body.
+	var live := current_scene
+	var live_hero := live.get_node_or_null("Hero") as Node3D if live != null else null
+	var chest := _find_closed_chest(live)
+	_assert_true(chest != null, "the realm exposes an unopened authored chest")
+	if chest != null and live != null and live_hero != null:
+		live_hero.global_position = chest.global_position + Vector3(0.5, 0.0, 0.0)
 		await _frames(6)
+		# The router reads the same contract the HUD's button renders. Re-pin the
+		# hero every attempt: a body still carrying velocity from the elite fight
+		# can fall away from the chest between the teleport and the query.
+		var chest_prompt: Dictionary = {}
+		for _attempt in 12:
+			live_hero.global_position = chest.global_position + Vector3(0.5, 0.0, 0.0)
+			if live_hero is CharacterBody3D:
+				(live_hero as CharacterBody3D).velocity = Vector3.ZERO
+			await _frames(2)
+			chest_prompt = live.call("get_interact_prompt") \
+				if live.has_method("get_interact_prompt") else {}
+			if str(chest_prompt.get("verb", "")) == "OPEN":
+				break
+			await create_timer(0.05).timeout
+		_assert_true(str(chest_prompt.get("verb", "")) == "OPEN",
+			"contextual prompt offers OPEN at a chest (got %s, dist=%.1f)" % [
+				chest_prompt,
+				live_hero.global_position.distance_to(chest.global_position)])
+		# And the HUD renders that contract as a real, visible button.
+		var hud := live.get_node_or_null("HUD")
+		if hud != null:
+			await create_timer(0.3).timeout
+			var interact_button := hud.get_node_or_null("Root/InteractButton") as Control
+			_assert_true(interact_button != null and interact_button.visible,
+				"HUD shows the contextual interact button at an interactable")
 		var gold_before: int = _gs.gold
 		var materials_before: Dictionary = _gs.raw_materials.duplicate(true)
 		var items_before := _inventory_quantities()
@@ -497,6 +533,20 @@ func _find_gathering_node() -> Node3D:
 func _find_chest() -> Node3D:
 	for node in get_nodes_in_group("chest"):
 		if node is Node3D and is_instance_valid(node):
+			return node as Node3D
+	return null
+
+## A chest the route has not opened yet: the contextual prompt only offers an
+## unopened chest, so an already-claimed one cannot prove the contract. The
+## search is scoped to the live realm so a chest in a scene being torn down
+## cannot win and send the hero to a coordinate the realm does not own.
+func _find_closed_chest(root: Node) -> Node3D:
+	for node in get_nodes_in_group("chest"):
+		if not (node is Node3D) or not is_instance_valid(node):
+			continue
+		if root != null and not root.is_ancestor_of(node):
+			continue
+		if not bool(node.get("opened")):
 			return node as Node3D
 	return null
 

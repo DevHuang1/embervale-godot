@@ -1,0 +1,36 @@
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// The Godot version this bridge is compiled against. Keep it in step with the
+// engine that builds the export (see `godot --version`).
+def godotVersion = '4.7.2.stable'
+// The RevenueCat Android SDK the export resolves at app build time. The AAR
+// does not bundle it; `addons/revenuecat_bridge/export_plugin.gd` declares it
+// as a maven dependency of the exported app.
+def revenueCatVersion = '10.22.1'
+
+android {
+    namespace 'com.embervale.revenuecat'
+    compileSdk 36
+
+    defaultConfig {
+        minSdk 24
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    // Provided by the Godot Android app at runtime; compile-only here.
+    compileOnly "org.godotengine:godot:$godotVersion"
+    compileOnly "com.revenuecat.purchases:purchases:$revenueCatVersion"
+}
