@@ -243,6 +243,16 @@ func _run_expedition(grove: Node) -> void:
 	var manager := _biome_manager(world)
 	_assert_true(manager != null, "expedition exposes the realm manager")
 
+	# The realm's pre-boss gate opens with the expedition and holds the world
+	# frozen until it is resolved. It must be cleared here or the rest of the
+	# route runs paused: nothing moves and no pocket can spawn.
+	var gate: Node = manager.get("_altar") if manager != null else null
+	if gate != null and is_instance_valid(gate) and self.paused:
+		gate.call("_resolve", false)
+		await _frames(3)
+	_assert_true(not self.paused,
+		"the world is running when the elite pocket is approached")
+
 	# Elite: an authored pocket spawns a fight the player can win.
 	var encounter := world.find_child("Encounter_beacon_breach", true, false) as Node3D
 	_assert_true(encounter != null, "the route exposes an authored elite encounter")
