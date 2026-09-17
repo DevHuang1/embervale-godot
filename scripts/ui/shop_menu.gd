@@ -10,6 +10,7 @@ class_name ShopMenu
 @onready var message_label: Label = $Root/VBox/MessageLabel
 
 var _freeze_was_visible := false
+var _freeze_held := false
 var _mode := "buy"
 var _tabs: GridContainer
 var _buy_button: Button
@@ -27,7 +28,6 @@ const RARITY_COLORS: Array[Color] = [
 func _ready() -> void:
 	$Root.add_theme_stylebox_override("panel", UiKit.glass_stylebox())
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_freeze_was_visible = visible
 	UiKit.style_button(close_button, UiKit.SAGE)
 	close_button.add_theme_font_size_override("font_size", 16)
 	close_button.pressed.connect(close)
@@ -151,8 +151,9 @@ func _poll_world_freeze() -> void:
 	_freeze_was_visible = visible
 	if visible:
 		game_state.push_world_freeze()
+		_freeze_held = true
 	else:
-		game_state.pop_world_freeze()
+		_release_world_freeze()
 
 func _process(_delta: float) -> void:
 	_poll_world_freeze()
@@ -430,3 +431,17 @@ func _on_equip_pressed(id: String, kind: String) -> void:
 	message_label.text = "%s equipped." % id.to_upper()
 	audio.play_ui_blip()
 	_refresh()
+
+## A menu freed while it still holds the world must not leave it paused behind
+## it. Every freeze-holding surface shares this guarantee, matching the altar's
+## teardown behaviour.
+func _exit_tree() -> void:
+	_release_world_freeze()
+
+func _release_world_freeze() -> void:
+	if not _freeze_held:
+		return
+	_freeze_held = false
+	var gs := get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("pop_world_freeze"):
+		gs.call("pop_world_freeze")

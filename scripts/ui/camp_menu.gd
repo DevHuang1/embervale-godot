@@ -5,6 +5,7 @@ class_name CampMenu
 @onready var status: Label = $Root/VBox/Status
 var pending_id: String = ""
 var _freeze_was_visible: bool = false
+var _freeze_held: bool = false
 ## One persistent confirm control for the whole menu. The previous version
 ## appended a fresh button on every facility press and never removed it, so the
 ## list grew duplicate CONFIRM UNLOCK entries that all fired at whatever was
@@ -51,8 +52,9 @@ func _process(_delta: float) -> void:
 	_freeze_was_visible = visible
 	if visible:
 		GameState.push_world_freeze()
+		_freeze_held = true
 	else:
-		GameState.pop_world_freeze()
+		_release_world_freeze()
 
 func open() -> void:
 	visible = true
@@ -111,3 +113,17 @@ func _hide_confirm() -> void:
 
 func _show_notice(message: String) -> void:
 	status.text = message
+
+## A menu freed while it still holds the world must not leave it paused behind
+## it. Every freeze-holding surface shares this guarantee, matching the altar's
+## teardown behaviour.
+func _exit_tree() -> void:
+	_release_world_freeze()
+
+func _release_world_freeze() -> void:
+	if not _freeze_held:
+		return
+	_freeze_held = false
+	var gs := get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("pop_world_freeze"):
+		gs.call("pop_world_freeze")

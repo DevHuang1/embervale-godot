@@ -32,6 +32,7 @@ var _stats_component: StatsPanel
 var _active_section := "items"
 var _inventory_filter := "all"
 var _freeze_was_visible := false
+var _freeze_held := false
 
 const FILTERS: Array[String] = ["all", "weapon", "armor", "consumable", "material", "quest"]
 # GameState.EQUIPMENT_SLOTS remains the authoritative equipment contract;
@@ -41,7 +42,6 @@ const FILTERS: Array[String] = ["all", "weapon", "armor", "consumable", "materia
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_freeze_was_visible = visible
 	var root_panel := $Root as Control
 	if root_panel is PanelContainer:
 		UiKit.apply_glass(root_panel as PanelContainer)
@@ -65,8 +65,9 @@ func _process(_delta: float) -> void:
 	_freeze_was_visible = visible
 	if visible:
 		game_state.push_world_freeze()
+		_freeze_held = true
 	else:
-		game_state.pop_world_freeze()
+		_release_world_freeze()
 
 func _connect_signals() -> void:
 	game_state.loot_received.connect(_on_inventory_changed)
@@ -767,3 +768,17 @@ func _on_forge_pressed() -> void:
 ## StatsPanel owns the actual responsive grid now.
 func _stats_column_count() -> int:
 	return 3 if get_viewport().get_visible_rect().size.x < UiKit.COMPACT_BREAKPOINT else 6
+
+## A menu freed while it still holds the world must not leave it paused behind
+## it. Every freeze-holding surface shares this guarantee, matching the altar's
+## teardown behaviour.
+func _exit_tree() -> void:
+	_release_world_freeze()
+
+func _release_world_freeze() -> void:
+	if not _freeze_held:
+		return
+	_freeze_held = false
+	var gs := get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("pop_world_freeze"):
+		gs.call("pop_world_freeze")

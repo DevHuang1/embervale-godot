@@ -37,6 +37,7 @@ var pending_confidence: float = 0.0
 var discard_button: Button
 
 var _freeze_was_visible := false
+var _freeze_held := false
 var element_switcher: PanelContainer = null
 var element_status: Label = null
 var element_buttons: Dictionary = {}
@@ -56,8 +57,9 @@ func _poll_world_freeze() -> void:
 	_freeze_was_visible = visible
 	if visible:
 		game_state.push_world_freeze()
+		_freeze_held = true
 	else:
-		game_state.pop_world_freeze()
+		_release_world_freeze()
 
 func _process(_delta: float) -> void:
 	_poll_world_freeze()
@@ -65,7 +67,6 @@ func _process(_delta: float) -> void:
 func _ready() -> void:
 	$Root.add_theme_stylebox_override("panel", UiKit.glass_stylebox())
 	process_mode = Node.PROCESS_MODE_ALWAYS  # stay interactive while the world is frozen
-	_freeze_was_visible = visible
 	# The revealed relic reads on warm letter stock; actions carry roles.
 	UiKit.apply_parchment(result_panel, UiKit.RADIUS_BUTTON)
 	UiKit.style_primary_button(scan_button)
@@ -360,3 +361,17 @@ func _on_discard_pressed() -> void:
 	_hide_result()
 	kit_preview.text = "Result discarded. The scan was already consumed; no inventory item was created."
 	audio.play_ui_back()
+
+## A menu freed while it still holds the world must not leave it paused behind
+## it. Every freeze-holding surface shares this guarantee, matching the altar's
+## teardown behaviour.
+func _exit_tree() -> void:
+	_release_world_freeze()
+
+func _release_world_freeze() -> void:
+	if not _freeze_held:
+		return
+	_freeze_held = false
+	var gs := get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("pop_world_freeze"):
+		gs.call("pop_world_freeze")

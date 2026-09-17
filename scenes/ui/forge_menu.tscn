@@ -1,12 +1,13 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://esgouq2rpjnp"]
 
-[ext_resource type="Script" path="res://scripts/ui/forge_menu.gd" id="1_0"]
+[ext_resource type="Script" uid="uid://w10hr1c18u4w" path="res://scripts/ui/forge_menu.gd" id="1_0"]
 
-[node name="ForgeMenu" type="CanvasLayer"]
+[node name="ForgeMenu" type="CanvasLayer" unique_id=1215889538]
 layer = 20
+visible = false
 script = ExtResource("1_0")
 
-[node name="Root" type="Panel" parent="."]
+[node name="Root" type="Panel" parent="." unique_id=2040764896]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -15,38 +16,40 @@ offset_top = 60.0
 offset_right = -60.0
 offset_bottom = -60.0
 
-[node name="Header" type="Control" parent="Root"]
+[node name="Header" type="Control" parent="Root" unique_id=491623851]
 layout_mode = 1
-anchors_preset = 15
+anchors_preset = 10
 anchor_right = 1.0
-anchor_bottom = 0.0
 offset_left = 24.0
 offset_top = 24.0
 offset_right = -24.0
 offset_bottom = 84.0
 grow_horizontal = 2
+grow_vertical = 2
 
-[node name="Title" type="Label" parent="Root/Header"]
+[node name="Title" type="Label" parent="Root/Header" unique_id=1406547931]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
 offset_right = -180.0
+offset_bottom = 23.0
 grow_horizontal = 2
 theme_type_variation = &"MenuTitle"
 text = "DIVINING LENS"
 
-[node name="CloseButton" type="Button" parent="Root/Header"]
+[node name="CloseButton" type="Button" parent="Root/Header" unique_id=1735736118]
+custom_minimum_size = Vector2(150, 56)
 layout_mode = 1
+anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -150.0
 grow_horizontal = 0
-custom_minimum_size = Vector2(150, 56)
 tooltip_text = "Close (Esc)"
-text = "CLOSE"
 theme_override_font_sizes/font_size = 19
+text = "CLOSE"
 
-[node name="VBox" type="VBoxContainer" parent="Root"]
+[node name="VBox" type="VBoxContainer" parent="Root" unique_id=2068385279]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -59,188 +62,187 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 14
 
-[node name="CameraView" type="PanelContainer" parent="Root/VBox"]
+[node name="CameraView" type="PanelContainer" parent="Root/VBox" unique_id=1908425348]
 custom_minimum_size = Vector2(0, 170)
 layout_mode = 2
 
-[node name="CameraFeed" type="TextureRect" parent="Root/VBox/CameraView"]
+[node name="CameraFeed" type="TextureRect" parent="Root/VBox/CameraView" unique_id=1704068605]
 layout_mode = 2
 mouse_filter = 2
 expand_mode = 1
 stretch_mode = 6
 
-[node name="CameraStatus" type="Label" parent="Root/VBox/CameraView"]
+[node name="CameraStatus" type="Label" parent="Root/VBox/CameraView" unique_id=2044104766]
 layout_mode = 2
-mouse_filter = 2
+theme_override_font_sizes/font_size = 15
 text = "CAMERA PREVIEW · OFFLINE FALLBACK AVAILABLE"
 horizontal_alignment = 1
 vertical_alignment = 2
-theme_override_font_sizes/font_size = 15
 
-[node name="Pipeline" type="PanelContainer" parent="Root/VBox"]
+[node name="Pipeline" type="PanelContainer" parent="Root/VBox" unique_id=997263700]
 layout_mode = 2
 size_flags_vertical = 2
 
-[node name="PipelineVBox" type="VBoxContainer" parent="Root/VBox/Pipeline"]
+[node name="PipelineVBox" type="VBoxContainer" parent="Root/VBox/Pipeline" unique_id=7280098]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="PipelineTitle" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
+[node name="PipelineTitle" type="Label" parent="Root/VBox/Pipeline/PipelineVBox" unique_id=1472720611]
 layout_mode = 2
 theme_type_variation = &"Eyebrow"
 text = "FORGING PIPELINE"
 
-[node name="PrivacyNotice" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
+[node name="PrivacyNotice" type="Label" parent="Root/VBox/Pipeline/PipelineVBox" unique_id=967905242]
 layout_mode = 2
 theme_type_variation = &"Caption"
 text = "PRIVACY · Camera frames are processed locally and are not uploaded. The game result is generated from the detected class, not a stored photo."
 autowrap_mode = 2
 
-[node name="Step1" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
+[node name="Step1" type="Label" parent="Root/VBox/Pipeline/PipelineVBox" unique_id=1512944426]
 layout_mode = 2
 theme_type_variation = &"Caption"
 text = "1 — process the camera frame locally"
 
-[node name="Step2" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
+[node name="Step2" type="Label" parent="Root/VBox/Pipeline/PipelineVBox" unique_id=1874184203]
 layout_mode = 2
 theme_type_variation = &"Caption"
 text = "2 — bind its class to a weapon form"
 
-[node name="Step3" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
+[node name="Step3" type="Label" parent="Root/VBox/Pipeline/PipelineVBox" unique_id=1069730958]
 layout_mode = 2
 theme_type_variation = &"Caption"
 text = "3 — roll rarity from the photo itself"
 
-[node name="Step4" type="Label" parent="Root/VBox/Pipeline/PipelineVBox"]
+[node name="Step4" type="Label" parent="Root/VBox/Pipeline/PipelineVBox" unique_id=260674225]
 layout_mode = 2
 theme_type_variation = &"Caption"
 text = "4 — reveal your forged gear"
 
-[node name="Result" type="PanelContainer" parent="Root/VBox"]
+[node name="Result" type="PanelContainer" parent="Root/VBox" unique_id=1820734057]
 visible = false
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="ResultVBox" type="VBoxContainer" parent="Root/VBox/Result"]
+[node name="ResultVBox" type="VBoxContainer" parent="Root/VBox/Result" unique_id=923944188]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="ResultTitle" type="Label" parent="Root/VBox/Result/ResultVBox"]
+[node name="ResultTitle" type="Label" parent="Root/VBox/Result/ResultVBox" unique_id=754791660]
 layout_mode = 2
 theme_type_variation = &"MenuTitle"
-text = "FORGE COMPLETE"
 theme_override_font_sizes/font_size = 28
+text = "FORGE COMPLETE"
 
-[node name="WeaponGlyph" type="Label" parent="Root/VBox/Result/ResultVBox"]
+[node name="WeaponGlyph" type="Label" parent="Root/VBox/Result/ResultVBox" unique_id=177807749]
 layout_mode = 2
 theme_type_variation = &"Title"
-text = "+"
 theme_override_font_sizes/font_size = 56
+text = "+"
 
-[node name="WeaponName" type="Label" parent="Root/VBox/Result/ResultVBox"]
+[node name="WeaponName" type="Label" parent="Root/VBox/Result/ResultVBox" unique_id=1634815649]
 layout_mode = 2
 theme_type_variation = &"Title"
-text = "MUG MACE"
 theme_override_font_sizes/font_size = 30
+text = "MUG MACE"
 
-[node name="WeaponStats" type="Label" parent="Root/VBox/Result/ResultVBox"]
+[node name="WeaponStats" type="Label" parent="Root/VBox/Result/ResultVBox" unique_id=715894179]
 layout_mode = 2
 theme_type_variation = &"Subtitle"
 text = "ATK 7 / REACH 8.2 / MUG SLAM (AOE)"
 
-[node name="RarityLabel" type="Label" parent="Root/VBox/Result/ResultVBox"]
+[node name="RarityLabel" type="Label" parent="Root/VBox/Result/ResultVBox" unique_id=539456886]
 layout_mode = 2
 theme_type_variation = &"RowLabel"
 text = "RARITY: COMMON"
 
-[node name="NamingTitle" type="Label" parent="Root/VBox/Result/ResultVBox"]
+[node name="NamingTitle" type="Label" parent="Root/VBox/Result/ResultVBox" unique_id=262782613]
 layout_mode = 2
 theme_type_variation = &"Eyebrow"
 text = "NAME THE RELIC & ITS RITES"
 
-[node name="ItemRow" type="HBoxContainer" parent="Root/VBox/Result/ResultVBox"]
+[node name="ItemRow" type="HBoxContainer" parent="Root/VBox/Result/ResultVBox" unique_id=1934697048]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="ItemTag" type="Label" parent="Root/VBox/Result/ResultVBox/ItemRow"]
+[node name="ItemTag" type="Label" parent="Root/VBox/Result/ResultVBox/ItemRow" unique_id=1247378845]
 custom_minimum_size = Vector2(150, 0)
 layout_mode = 2
 theme_type_variation = &"Eyebrow"
 text = "ITEM"
 
-[node name="ItemNameEdit" type="LineEdit" parent="Root/VBox/Result/ResultVBox/ItemRow"]
+[node name="ItemNameEdit" type="LineEdit" parent="Root/VBox/Result/ResultVBox/ItemRow" unique_id=414902298]
 layout_mode = 2
 size_flags_horizontal = 3
-max_length = 22
 placeholder_text = "Name this relic..."
+max_length = 22
 
-[node name="Skill1Row" type="HBoxContainer" parent="Root/VBox/Result/ResultVBox"]
+[node name="Skill1Row" type="HBoxContainer" parent="Root/VBox/Result/ResultVBox" unique_id=773546335]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="Skill1Tag" type="Label" parent="Root/VBox/Result/ResultVBox/Skill1Row"]
+[node name="Skill1Tag" type="Label" parent="Root/VBox/Result/ResultVBox/Skill1Row" unique_id=730647161]
 custom_minimum_size = Vector2(150, 0)
 layout_mode = 2
 theme_type_variation = &"Eyebrow"
 text = "SKILL 1"
 
-[node name="Skill1Edit" type="LineEdit" parent="Root/VBox/Result/ResultVBox/Skill1Row"]
+[node name="Skill1Edit" type="LineEdit" parent="Root/VBox/Result/ResultVBox/Skill1Row" unique_id=710319712]
 layout_mode = 2
 size_flags_horizontal = 3
-max_length = 22
 placeholder_text = "Kindled Strike"
+max_length = 22
 
-[node name="Skill2Row" type="HBoxContainer" parent="Root/VBox/Result/ResultVBox"]
+[node name="Skill2Row" type="HBoxContainer" parent="Root/VBox/Result/ResultVBox" unique_id=1260644344]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="Skill2Tag" type="Label" parent="Root/VBox/Result/ResultVBox/Skill2Row"]
+[node name="Skill2Tag" type="Label" parent="Root/VBox/Result/ResultVBox/Skill2Row" unique_id=1143110614]
 custom_minimum_size = Vector2(150, 0)
 layout_mode = 2
 theme_type_variation = &"Eyebrow"
 text = "SKILL 2"
 
-[node name="Skill2Edit" type="LineEdit" parent="Root/VBox/Result/ResultVBox/Skill2Row"]
+[node name="Skill2Edit" type="LineEdit" parent="Root/VBox/Result/ResultVBox/Skill2Row" unique_id=162083714]
 layout_mode = 2
 size_flags_horizontal = 3
-max_length = 22
 placeholder_text = "Grove Cyclone"
+max_length = 22
 
-[node name="UltimateRow" type="HBoxContainer" parent="Root/VBox/Result/ResultVBox"]
+[node name="UltimateRow" type="HBoxContainer" parent="Root/VBox/Result/ResultVBox" unique_id=1752332005]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="UltimateTag" type="Label" parent="Root/VBox/Result/ResultVBox/UltimateRow"]
+[node name="UltimateTag" type="Label" parent="Root/VBox/Result/ResultVBox/UltimateRow" unique_id=1791237074]
 custom_minimum_size = Vector2(150, 0)
 layout_mode = 2
 theme_type_variation = &"Eyebrow"
 text = "ULTIMATE"
 
-[node name="UltimateEdit" type="LineEdit" parent="Root/VBox/Result/ResultVBox/UltimateRow"]
+[node name="UltimateEdit" type="LineEdit" parent="Root/VBox/Result/ResultVBox/UltimateRow" unique_id=600246346]
 layout_mode = 2
 size_flags_horizontal = 3
-max_length = 22
 placeholder_text = "Relic Cataclysm"
+max_length = 22
 
-[node name="KitPreview" type="Label" parent="Root/VBox/Result/ResultVBox"]
+[node name="KitPreview" type="Label" parent="Root/VBox/Result/ResultVBox" unique_id=1872966076]
 layout_mode = 2
 theme_type_variation = &"Caption"
 text = "The lens fixes every number — names are yours alone."
 autowrap_mode = 2
 
-[node name="EquipButton" type="Button" parent="Root/VBox/Result/ResultVBox"]
+[node name="EquipButton" type="Button" parent="Root/VBox/Result/ResultVBox" unique_id=1441637413]
 custom_minimum_size = Vector2(0, 70)
 layout_mode = 2
-text = "EQUIP"
 theme_override_font_sizes/font_size = 22
+text = "EQUIP"
 
-[node name="ScanButton" type="Button" parent="Root/VBox"]
+[node name="ScanButton" type="Button" parent="Root/VBox" unique_id=1942341772]
 custom_minimum_size = Vector2(0, 80)
 layout_mode = 2
 theme_override_font_sizes/font_size = 24
 text = "BEGIN DIVINATION"
 
-[node name="ScanCount" type="Label" parent="Root/VBox"]
+[node name="ScanCount" type="Label" parent="Root/VBox" unique_id=994631318]
 layout_mode = 2
 theme_type_variation = &"Caption"
 text = "SCANS AVAILABLE: 5"

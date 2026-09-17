@@ -24,7 +24,6 @@ var _store: Node = null
 func _ready() -> void:
 	visible = false
 	process_mode = Node.PROCESS_MODE_ALWAYS  # stay interactive while the world is frozen
-	_freeze_was_visible = visible
 	# The Glintmonger's case reads as a warm display sheet over the dim.
 	UiKit.apply_parchment($Root/Center/Panel)
 	UiKit.style_secondary_button(close_button)
@@ -59,6 +58,7 @@ func set_scan_purchase_state(state: String) -> bool:
 	return true
 
 var _freeze_was_visible := false
+var _freeze_held := false
 
 ## Freeze/resume the world whenever this interface toggles, whichever
 ## code path opened or closed it.
@@ -68,8 +68,9 @@ func _poll_world_freeze() -> void:
 	_freeze_was_visible = visible
 	if visible:
 		game_state.push_world_freeze()
+		_freeze_held = true
 	else:
-		game_state.pop_world_freeze()
+		_release_world_freeze()
 
 func _process(_delta: float) -> void:
 	_poll_world_freeze()
@@ -298,3 +299,17 @@ func _on_unequip_all() -> void:
 	game_state.equip_cosmetic("aura", "", "")
 	audio.play_ui_back()
 	_refresh()
+
+## A menu freed while it still holds the world must not leave it paused behind
+## it. Every freeze-holding surface shares this guarantee, matching the altar's
+## teardown behaviour.
+func _exit_tree() -> void:
+	_release_world_freeze()
+
+func _release_world_freeze() -> void:
+	if not _freeze_held:
+		return
+	_freeze_held = false
+	var gs := get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("pop_world_freeze"):
+		gs.call("pop_world_freeze")

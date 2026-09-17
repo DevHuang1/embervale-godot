@@ -12,10 +12,10 @@ const INSTANCES := [
 @onready var title: Label = $Root/Center/Panel/VBox/Header/Title
 @onready var status: Label = $Root/Center/Panel/VBox/Status
 var _freeze_was_visible := false
+var _freeze_held := false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_freeze_was_visible = visible
 	UiKit.apply_glass($Root/Center/Panel, 18.0, 0.14)
 	UiKit.style_button(close_button, UiKit.SAGE)
 	close_button.pressed.connect(close)
@@ -27,8 +27,9 @@ func _process(_delta: float) -> void:
 	_freeze_was_visible = visible
 	if visible:
 		GameState.push_world_freeze()
+		_freeze_held = true
 	else:
-		GameState.pop_world_freeze()
+		_release_world_freeze()
 
 func open() -> void:
 	visible = true
@@ -143,3 +144,17 @@ func _travel_with_fade(scene_path: String) -> void:
 	var tween := fade.create_tween()
 	tween.tween_property(fade, "color:a", 1.0, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tween.tween_callback(get_tree().change_scene_to_file.bind(scene_path))
+
+## A menu freed while it still holds the world must not leave it paused behind
+## it. Every freeze-holding surface shares this guarantee, matching the altar's
+## teardown behaviour.
+func _exit_tree() -> void:
+	_release_world_freeze()
+
+func _release_world_freeze() -> void:
+	if not _freeze_held:
+		return
+	_freeze_held = false
+	var gs := get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("pop_world_freeze"):
+		gs.call("pop_world_freeze")
