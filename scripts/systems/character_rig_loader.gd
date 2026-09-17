@@ -23,6 +23,7 @@ const MODEL_BASE_PATH := "res://assets/models/"
 ## clutter the top-level model list. _any_model falls back here so the
 ## authored GLBs actually resolve for BiomeBoss profiles.
 const BOSS_VARIANT_DIR := "boss_variants/"
+const BOSS_V2_DIR := "bosses_v2/"
 const EXTERNAL_MODEL_PATHS := {
 	"npc_human": "res://assets/models/kenney_mini_dungeon/Models/character-human.fbx",
 	"npc_orc": "res://assets/models/kenney_mini_dungeon/Models/character-orc.fbx",
@@ -110,9 +111,16 @@ static func try_if_wire(entity: Node3D, profile: String) -> bool:
 	# their procedural geometry never double-renders next to the authored
 	# model. Read null-safe: an entity that never exports the flag must not
 	# fail the mount.
-	var raw_replace: Variant = entity.get("replace_procedural_on_mount")
 	var boss_profile := path.contains(BOSS_VARIANT_DIR) \
 		or str(profile).begins_with("boss_")
+	# The checked-in headless V2 GLBs and the Blender exports share the same
+	# authoring contract, but their scene origin is not the gameplay body's
+	# floor. Snap only the new V2 family to that floor; legacy silhouettes keep
+	# their existing authored transforms. Aerial bosses still hover because the
+	# CharacterBody3D moves their encounter root upward at runtime.
+	if str(profile).begins_with("boss_v2_"):
+		_snap_rig_to_host_floor(rig)
+	var raw_replace: Variant = entity.get("replace_procedural_on_mount")
 	if (raw_replace is bool and bool(raw_replace)) or boss_profile:
 		_hide_replaced_visuals(rig_parent, rig)
 
@@ -178,6 +186,29 @@ static func _world_height(root: Node3D) -> float:
 			else:
 				box = box.expand(wp)
 	return box.size.y if started else 0.0
+
+## Return the mounted rig's lowest authored point in its own local space.
+## V2 model origins are intentionally consistent but not required to sit at
+## the gameplay floor, so this remains geometry-driven rather than a per-boss
+## magic offset.
+static func _local_bottom(root: Node3D) -> float:
+	var lowest := INF
+	for mi in root.find_children("*", "MeshInstance3D", true, false):
+		var mesh := mi as MeshInstance3D
+		if mesh == null or mesh.mesh == null:
+			continue
+		var bounds := mesh.get_aabb()
+		for index in 8:
+			var world_point: Vector3 = mesh.global_transform * bounds.get_endpoint(index)
+			lowest = minf(lowest, root.to_local(world_point).y)
+	return lowest if is_finite(lowest) else 0.0
+
+static func _snap_rig_to_host_floor(rig: Node3D) -> void:
+	if rig == null:
+		return
+	var lowest := _local_bottom(rig)
+	if absf(lowest) > 0.001:
+		rig.position.y -= lowest
 
 ## Report authored clip coverage without making imported assets mandatory.
 ## Animation names vary between packs, so matching is token-based and the
@@ -307,13 +338,13 @@ static func _bone_anchor(skeleton: Skeleton3D, bone_name: String) -> BoneAttachm
 
 static func _find_socket(entity: Node3D, socket_id: String) -> Node3D:
 	for child in entity.get_children():
-		if child.get("socket_id") == socket_id:
+		if child.get("socket_id") == socket_id or str(child.name) == socket_id:
 			return child
 	return _find_socket_recursive(entity, socket_id)
 
 static func _find_socket_recursive(node: Node, socket_id: String) -> Node3D:
 	for child in node.get_children():
-		if child.get("socket_id") == socket_id:
+		if child.get("socket_id") == socket_id or str(child.name) == socket_id:
 			return child
 		var found := _find_socket_recursive(child, socket_id)
 		if found != null:
@@ -332,6 +363,10 @@ static func preload_all() -> void:
 		"boss_mistfen_veilmother", "boss_mistfen_drownedsage",
 		"boss_heartwood_cinderhart", "boss_heartwood_ashcolossus",
 		"boss_moonfen_tideoracle", "boss_moonfen_lunarleviathan",
+		"boss_v2_whispergrove_root_harrow", "boss_v2_bramblewood_thorn_regent",
+		"boss_v2_bramblewood_briar_widow", "boss_v2_mistfen_fogmaw",
+		"boss_v2_heartwood_cinderhart", "boss_v2_heartwood_ash_bellower",
+		"boss_v2_moonfen_tide_oracle", "boss_v2_moonfen_lunar_leviathan",
 	]
 	for p in profiles:
 		var path: String = _any_model(p)
@@ -368,6 +403,11 @@ static func _any_model(profile: String) -> String:
 		var path: String = MODEL_BASE_PATH + profile + "." + ext
 		if ResourceLoader.exists(path):
 			return path
+		if str(profile).begins_with("boss_v2_"):
+			var canonical := str(profile).trim_prefix("boss_v2_")
+			var v2_path: String = MODEL_BASE_PATH + BOSS_V2_DIR + "boss_" + canonical + "." + ext
+			if ResourceLoader.exists(v2_path):
+				return v2_path
 		# Realm boss variants live in res://assets/models/boss_variants/.
 		var variant_path: String = MODEL_BASE_PATH + BOSS_VARIANT_DIR + profile + "." + ext
 		if ResourceLoader.exists(variant_path):

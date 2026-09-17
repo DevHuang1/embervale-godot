@@ -6,7 +6,7 @@
 layer = 20
 script = ExtResource("1_0")
 
-[node name="Root" type="PanelContainer" parent="."]
+[node name="Root" type="Panel" parent="."]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -15,23 +15,49 @@ offset_top = 60.0
 offset_right = -60.0
 offset_bottom = -60.0
 
-[node name="VBox" type="VBoxContainer" parent="Root"]
-theme_override_constants/separation = 14
+[node name="Header" type="Control" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 0.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = 84.0
+grow_horizontal = 2
 
-[node name="Header" type="HBoxContainer" parent="Root/VBox"]
-layout_mode = 2
-
-[node name="Title" type="Label" parent="Root/VBox/Header"]
-layout_mode = 2
+[node name="Title" type="Label" parent="Root/Header"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_right = -180.0
+grow_horizontal = 2
 theme_type_variation = &"MenuTitle"
 text = "DIVINING LENS"
 
-[node name="CloseButton" type="Button" parent="Root/VBox/Header"]
+[node name="CloseButton" type="Button" parent="Root/Header"]
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -150.0
+grow_horizontal = 0
 custom_minimum_size = Vector2(150, 56)
-layout_mode = 2
 tooltip_text = "Close (Esc)"
-text = "✕  CLOSE"
+text = "CLOSE"
 theme_override_font_sizes/font_size = 19
+
+[node name="VBox" type="VBoxContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 98.0
+offset_right = -24.0
+offset_bottom = -24.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 14
 
 [node name="CameraView" type="PanelContainer" parent="Root/VBox"]
 custom_minimum_size = Vector2(0, 170)

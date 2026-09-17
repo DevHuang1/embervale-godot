@@ -149,12 +149,9 @@ func _do_gather() -> void:
 	gathered.emit(material_id, qty)
 
 	# Grant to GameState
-	var gs := get_node_or_null("/root/GameState")
+	var gs := get_node_or_null("/root/GameState") as GameState
 	if gs != null:
-		var mats : Dictionary = gs.get("raw_materials") if gs.get("raw_materials") != null else {}
-		mats[material_id] = int(mats.get(material_id, 0)) + qty
-		gs.set("raw_materials", mats)
-		if gs.has_method("save_game"): gs.call("save_game")
+		gs.add_material(material_id, qty)
 
 	# Mark in WorldState for respawn tracking
 	var ws := get_node_or_null("/root/WorldState")

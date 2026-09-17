@@ -1,17 +1,14 @@
-extends Node
+extends RefCounted
 class_name SkillRange
 
 ## === Skill Range System ===
 ## Tile-based range validation for both enemy and player skills.
 ## Uses a grid system where each tile can have different range properties.
 
-@export var tile_size: float = 2.0
-@export var max_range_tiles: int = 6
+var tile_size: float = 2.0
+var max_range_tiles: int = 6
 
 static var _instance: SkillRange = null
-
-func _ready() -> void:
-	_instance = self
 
 static func get_instance() -> SkillRange:
 	if _instance == null or not is_instance_valid(_instance):

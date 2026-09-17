@@ -10,7 +10,7 @@ class_name RealmExpansion
 ##
 ## Responsibilities:
 ##   - Gate unlocks: show MoonfenGate when Bramblewood boss is defeated
-##   - Show ReturnGate back to previous realm
+##   - Gate visibility tracks quest stage (hub travel back is the built gates)
 ##   - Handle gate interaction → GameState.realm_changed signal
 ##   - Altar placement for boss practice respawns
 ##   - Relic trophy pedestal update after forge
@@ -35,7 +35,7 @@ const DUNGEON_MODULES: Dictionary = {
 	"chest": "res://assets/models/kenney_mini_dungeon/Models/chest.fbx",
 }
 const DUNGEON_ENEMY_SCENE: PackedScene = preload("res://scenes/entities/hushling.tscn")
-const DUNGEON_BOSS_SCENE: PackedScene = preload("res://scenes/entities/boss_bramblewood_thornwarden.tscn")
+const DUNGEON_BOSS_SCENE: PackedScene = preload("res://scenes/entities/boss_articulated.tscn")
 
 func setup(world_manager: Node3D) -> void:
 	_world = world_manager
@@ -232,6 +232,8 @@ func _add_dungeon_encounter() -> void:
 	_dungeon_root.add_child(boss_room)
 	var boss := DUNGEON_BOSS_SCENE.instantiate() as Node3D
 	if boss != null:
+		if "def_id" in boss:
+			boss.set("def_id", "bramblewood_thorn_regent")
 		boss.name = "EmbervaultThornWarden"
 		boss.position = DUNGEON_POSITION + Vector3(0.0, 0.2, -2.5)
 		boss_room.add_child(boss)
@@ -287,10 +289,9 @@ func _sync_gates() -> void:
 	var stage := int(gs.get("current_stage") if gs.get("current_stage") != null else 0)
 	# MoonfenGate opens after COMPLETE (stage 3)
 	_set_gate_visible("MoonfenGate",  stage >= 3)
-	_set_gate_visible("ReturnGate",   stage >= 1)
 
 func _set_gate_visible(gate_name: String, visible: bool) -> void:
-	if _world == null:
+	if _world == null or not is_instance_valid(_world):
 		return
 	var gate := _world.get_node_or_null(gate_name)
 	if gate != null:
@@ -315,9 +316,11 @@ func _on_victory() -> void:
 	if stage >= 3:
 		_open_gate_fx("MoonfenGate")
 
-func _on_realm_changed(realm_id: String) -> void:
-	# Show ReturnGate in new realm if we came from somewhere
-	_set_gate_visible("ReturnGate", true)
+func _on_realm_changed(_realm_id: String) -> void:
+	# Realm-to-realm travel is owned by the biome manager's built travel gates,
+	# which already expose the hub as a destination in every realm. Only the
+	# grove's stage-gated hub portal needs re-syncing when the realm changes.
+	_sync_gates()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Practice altar
@@ -369,7 +372,7 @@ func _try_place_practice_altar() -> void:
 # ─────────────────────────────────────────────────────────────────────────────
 
 func _open_gate_fx(gate_name: String) -> void:
-	if _world == null:
+	if _world == null or not is_instance_valid(_world):
 		return
 	var gate := _world.get_node_or_null(gate_name)
 	if gate == null:

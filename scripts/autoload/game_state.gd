@@ -4,10 +4,14 @@ const CONTENT_SCHEMA := preload("res://scripts/systems/content_schema.gd")
 const CONTENT_REGISTRY := preload("res://scripts/systems/content_registry.gd")
 const CRAFTING_DATA := preload("res://scripts/systems/crafting_data.gd")
 const BESTIARY_DATA := preload("res://scripts/systems/bestiary.gd")
+const BOSS_ROSTER := preload("res://scripts/systems/boss_roster_catalog.gd")
+const BOSS_ASSET_MANIFEST := preload("res://scripts/systems/boss_asset_manifest.gd")
 const BOSS_REWARD_CATALOG := preload("res://scripts/systems/boss_reward_catalog.gd")
 const CLOUD_SYNC_QUEUE := preload("res://scripts/systems/cloud_sync_queue.gd")
 const ASSET_INTAKE := preload("res://scripts/systems/asset_intake_catalog.gd")
 const LOOT_DATA := preload("res://scripts/systems/loot_table.gd")
+const SAVE_SERVICE_SCRIPT := preload("res://scripts/systems/save_service.gd")
+const STORE_SECURITY := preload("res://scripts/systems/store_security.gd")
 
 ## === Embervale Game State (exact port from embervale-rpg) ===
 
@@ -31,15 +35,68 @@ const MATERIAL_DEFS := {
 	"monster_core": { "name": "Monster Core", "realm": "heartwood", "rarity": 2 },
 	"camp_ember": { "name": "Camp Ember", "realm": "camp", "rarity": 2 },
 }
+
+# === Craftable consumables ===
+## Canonical item records for crafted potions. Recipes in CraftingData may
+## output any id here; craft_transaction appends a fresh inventory entry when
+## the player has not yet crafted the brew before. use_item reads "heal".
+const CONSUMABLE_DEFS := {
+	"moss_tonic": {
+		"id": "moss_tonic", "name": "Moss Tonic", "price": 12,
+		"kind": ItemKind.CONSUMABLE, "quantity": 1,
+		"description": "A cool green draft steeped beneath Whispergrove's root stones.",
+		"rarity": ItemRarity.COMMON,
+		"stats": ["Restores %d warmth" % MOSS_TONIC_HEAL, "Single-use remedy"],
+		"use_label": "Drink", "glyph": "potion", "heal": MOSS_TONIC_HEAL,
+	},
+	"ember_salve": {
+		"id": "ember_salve", "name": "Ember Salve", "price": 20,
+		"kind": ItemKind.CONSUMABLE, "quantity": 1,
+		"description": "A warm salve folded into a draft; concentrated hearth heat in a cup.",
+		"rarity": ItemRarity.UNCOMMON,
+		"stats": ["Restores 20 warmth", "Single-use remedy"],
+		"use_label": "Drink", "glyph": "potion", "heal": 20,
+	},
+	"moon_draught": {
+		"id": "moon_draught", "name": "Moon Draught", "price": 25,
+		"kind": ItemKind.CONSUMABLE, "quantity": 1,
+		"description": "Milk-white brew steeped with moonmoss; deep and soothing.",
+		"rarity": ItemRarity.UNCOMMON,
+		"stats": ["Restores 18 warmth", "Single-use remedy"],
+		"use_label": "Drink", "glyph": "potion", "heal": 18,
+	},
+	"spore_antidote": {
+		"id": "spore_antidote", "name": "Spore Antidote", "price": 14,
+		"kind": ItemKind.CONSUMABLE, "quantity": 1,
+		"description": "A bracing grim-sweet tonic meant to cut the astringent haze of fen spore.",
+		"rarity": ItemRarity.COMMON,
+		"stats": ["Restores 14 warmth", "Single-use remedy"],
+		"use_label": "Drink", "glyph": "potion", "heal": 14,
+	},
+}
+
+## Build a fresh inventory record for an as-yet-uncrafted consumable id.
+func _make_consumable(item_id: String) -> Dictionary:
+	return CONSUMABLE_DEFS.get(item_id, {}).duplicate(true)
 var raw_materials: Dictionary = {}
 var gathered_nodes: Dictionary = {}
 var discovered_landmarks: Dictionary = {}
+## Additive hybrid persistence for optional realm activities.  The four maps
+## are intentionally independent from quest/checkpoint state so a malformed
+## activity payload can be discarded without losing core progression.
+var world_activity_state: Dictionary = {
+	"version": 1,
+	"completed": {},
+	"discovered": {},
+	"cooldowns": {},
+	"soft_unlocks": {},
+}
 
 # === Weapon registry: each style drives its own attack animation + FX kit ===
 const WEAPON_DEFS := {
 	"mug_mace": {
 		"id": "mug_mace", "name": "MUG MACE", "glyph": "mace", "style": "blunt",
-		"element": "fire",
+		"element": "fire", "price": 20,
 		"atk": 7, "swing_time":     0.32, "range": 8.2,
 		"skills": [
 			{"name": "MUG SLAM", "icon": "explosion", "type": "aoe", "cooldown": 2.0, "radius": 13.0, "dmg_mult": 1.5},
@@ -49,8 +106,22 @@ const WEAPON_DEFS := {
 				"desc": "Restores warmth in a verdant bloom."}
 		]
 	},
+	# Crafted step up from the starter mace. Distinct id so the recipe cannot
+	# silently rename (or overwrite) the weapon the player already upgraded.
+	"thornmace": {
+		"id": "thornmace", "name": "THORNMACE", "glyph": "mace", "style": "blunt",
+		"element": "nature", "rarity": 2, "price": 50,
+		"atk": 10, "swing_time": 0.34, "range": 8.4,
+		"skills": [
+			{"name": "THORN SLAM", "icon": "explosion", "type": "aoe", "cooldown": 2.0, "radius": 13.0, "dmg_mult": 1.6},
+			{"name": "BRIAR LASH", "icon": "strike", "type": "strike", "cooldown": 2.4, "dmg_mult": 2.0,
+				"desc": "Snap a thorned lash through the marked target."},
+			{"name": "ROOT SIP", "icon": "heal_bloom", "type": "heal_bloom", "cooldown": 4.5, "heal": 12,
+				"desc": "Draw a slow warmth from the deep roots."}
+		]
+	},
 	"ember_sword": {
-		"id": "ember_sword", "name": "EMBERFANG", "glyph": "sword", "style": "slash",
+		"id": "ember_sword", "name": "EMBERFANG", "glyph": "sword", "style": "slash", "price": 75,
 		"atk": 8, "swing_time":     0.26, "range": 8.6,
 		"skills": [
 			{"name": "CRESCENT CUT", "icon": "strike", "type": "strike", "cooldown": 1.5, "dmg_mult": 2.2,
@@ -62,7 +133,7 @@ const WEAPON_DEFS := {
 		]
 	},
 	"arcane_staff": {
-		"id": "arcane_staff", "name": "MOONBOUGH", "glyph": "staff", "style": "magic",
+		"id": "arcane_staff", "name": "MOONBOUGH", "glyph": "staff", "style": "magic", "price": 90,
 		"atk": 6, "swing_time":     0.38, "range": 10.5,
 		"skills": [
 			{"name": "EMBER NOVA", "icon": "explosion", "type": "explosion", "cooldown": 2.0, "radius": 3.0, "dmg_mult": 1.9,
@@ -75,7 +146,7 @@ const WEAPON_DEFS := {
 	},
 	"matriarch_scepter": {
 		"id": "matriarch_scepter", "name": "CROWN OF THE OLD ROOT", "glyph": "staff",
-		"style": "magic", "element": "nature", "rarity": 4,
+		"style": "magic", "element": "nature", "rarity": 4, "price": 140,
 		"atk": 11, "swing_time":     0.42, "range": 11.0,
 		"auto_bloom_every": 2, "auto_bloom_bonus": 5,
 		"passive_name": "QUEEN'S GERMINATION",
@@ -91,7 +162,7 @@ const WEAPON_DEFS := {
 				"heal": 18, "desc": "Turn the old root's vigor into restored warmth."}
 		]
 	},
-	"pocket_blade": {"id": "pocket_blade", "name": "POCKET BLADE", "glyph": "blade", "style": "slash", "element": "shadow", "atk": 5, "swing_time": 0.26, "range": 6.4,
+	"pocket_blade": {"id": "pocket_blade", "name": "POCKET BLADE", "glyph": "blade", "style": "slash", "element": "shadow", "atk": 5, "swing_time": 0.26, "range": 6.4, "price": 15,
 		"skills": [
 			{"name": "FLASH BANG", "icon": "explosion", "type": "explosion", "cooldown": 6.0, "radius": 4.0, "dmg_mult": 1.5},
 			{"name": "QUIET STEP", "icon": "dash_strike", "type": "dash_strike", "cooldown": 3.5, "dmg_mult": 1.4},
@@ -144,7 +215,130 @@ const WEAPON_DEFS := {
 			{"name": "SHIELD BASH", "icon": "strike", "type": "strike", "cooldown": 2.5, "dmg_mult": 1.8},
 			{"name": "WARDING RING", "icon": "aoe", "type": "aoe", "cooldown": 4.5, "radius": 3.5, "dmg_mult": 1.4},
 			{"name": "GUARDIAN'S BLOOM", "icon": "heal_bloom", "type": "heal_bloom", "cooldown": 6.0, "heal": 12}
-		]}
+		]},
+	# === Craftable epic (rarity 3) ===
+	"siltcarver_blade": {
+		"id": "siltcarver_blade", "name": "SILTSCALE BLADE", "glyph": "blade", "style": "slash", "price": 130,
+		"element": "frost", "rarity": 3,
+		"atk": 11, "swing_time": 0.34, "range": 8.2,
+		"skills": [
+			{"name": "MIRE LANCE", "icon": "strike", "type": "strike", "cooldown": 1.8, "dmg_mult": 2.2,
+				"desc": "A chilling thrust through the marked target."},
+			{"name": "SILT WHIRL", "icon": "whirl", "type": "whirl", "cooldown": 2.6, "radius": 3.4, "dmg_mult": 1.7,
+				"desc": "Spin a veil of bog mist around you, striking all nearby."},
+			{"name": "FOG STEP", "icon": "dash_strike", "type": "dash_strike", "cooldown": 3.0, "dmg_mult": 1.9,
+				"desc": "Fade through the mire and cut as you reappear."}
+		]
+	},
+	"cinderbound_maul": {
+		"id": "cinderbound_maul", "name": "CINDERBOUND MAUL", "glyph": "mace", "style": "blunt", "price": 150,
+		"element": "fire", "rarity": 3,
+		"atk": 13, "swing_time": 0.50, "range": 9.2,
+		"skills": [
+			{"name": "CINDER CRUSH", "icon": "strike", "type": "strike", "cooldown": 2.2, "dmg_mult": 2.3,
+				"desc": "A molten overhead smash."},
+			{"name": "HEARTFIRE RING", "icon": "nature", "type": "aoe", "cooldown": 4.5, "radius": 4.2, "dmg_mult": 1.7,
+				"desc": "The bound embercore pulses, scorching the ground around you."},
+			{"name": "MAGMA BLOW", "icon": "explosion", "type": "heavy_aoe", "cooldown": 7.0, "radius": 6.0, "dmg_mult": 1.9,
+				"desc": "Slam the maul and detonate a wide magma burst."}
+		]
+	},
+	"tideward_staff": {
+		"id": "tideward_staff", "name": "TIDEWARD STAFF", "glyph": "staff", "style": "magic", "price": 140,
+		"element": "nature", "rarity": 3,
+		"atk": 10, "swing_time": 0.40, "range": 10.8,
+		"skills": [
+			{"name": "MOONTIDE", "icon": "comet", "type": "comet", "cooldown": 2.5, "radius": 3.2, "dmg_mult": 2.1,
+				"desc": "Call a slow moonlit wave; a splash follows."},
+			{"name": "WELLSPRING BURST", "icon": "explosion", "type": "explosion", "cooldown": 3.5, "radius": 3.6, "dmg_mult": 1.8,
+				"desc": "Burst the wellspring beneath the marked target."},
+			{"name": "TIDEWARD BLOOM", "icon": "heal_bloom", "type": "heal_bloom", "cooldown": 5.0, "heal": 15,
+				"desc": "Bloom wet-green light, restoring warmth."}
+		]
+	},
+	# === Craftable legendary (rarity 4) ===
+	"rootbound_cleaver": {
+		"id": "rootbound_cleaver", "name": "ROOTBOUND CLEAVER", "glyph": "axe", "style": "slash", "price": 260,
+		"element": "nature", "rarity": 4,
+		"atk": 15, "swing_time": 0.36, "range": 9.0,
+		"passive_name": "WARDEN'S BITE",
+		"passive_desc": "Strikes against marked foes bite harder with each realm blessing borne.",
+		"skills": [
+			{"name": "CLEAVE THE ROOT", "icon": "strike", "type": "strike", "cooldown": 1.9, "dmg_mult": 2.4,
+				"desc": "A great two-handed stroke through the marked target."},
+			{"name": "BRAMBLE RAZOR", "icon": "whirl", "type": "whirl", "cooldown": 2.8, "radius": 3.8, "dmg_mult": 1.8,
+				"desc": "Spin roots and steel in a grinding ring."},
+			{"name": "THRESHING DASH", "icon": "dash_strike", "type": "dash_strike", "cooldown": 3.2, "dmg_mult": 2.0,
+				"desc": "Charge the marked target, cleaver first."}
+		]
+	},
+	"moonpact_staff": {
+		"id": "moonpact_staff", "name": "MOONPACT STAFF", "glyph": "staff", "style": "magic", "price": 280,
+		"element": "frost", "rarity": 4,
+		"atk": 13, "swing_time": 0.44, "range": 11.5,
+		"passive_name": "PACT OF THE MIRROR",
+		"passive_desc": "Casting while above full warmth returns a whisper of the cost.",
+		"skills": [
+			{"name": "SILVER COMET", "icon": "comet", "type": "comet", "cooldown": 2.6, "radius": 4.0, "dmg_mult": 2.9,
+				"desc": "Draw a slow silver comet; a wide moon-burst follows."},
+			{"name": "MIRROR NOVA", "icon": "explosion", "type": "explosion", "cooldown": 4.0, "radius": 4.2, "dmg_mult": 2.0,
+				"desc": "Detonate a mirror-cold nova on the marked target."},
+			{"name": "LUNAR REPRIEVE", "icon": "heal_bloom", "type": "heal_bloom", "cooldown": 6.5, "heal": 17,
+				"desc": "Restore warmth with a quiet lunar bloom."}
+		]
+	},
+	"thornbite_cleaver": {
+		"id": "thornbite_cleaver", "name": "THORNBITE CLEAVER", "glyph": "axe", "style": "slash", "price": 320,
+		"element": "nature", "rarity": 3, "source": "Defeat the Thornhide Alpha",
+		"atk": 18, "swing_time": 0.7, "range": 9.5,
+		"skills": [
+			{"name": "BRAMBLE REND", "icon": "nature", "type": "heavy_aoe", "cooldown": 9.0, "radius": 14.0, "dmg_mult": 1.8,
+				"desc": "A slow, wide rend that tears the undergrowth and anything in it."},
+			{"name": "THORN WHIRL", "icon": "whirl", "type": "whirl", "cooldown": 3.0, "radius": 3.8, "dmg_mult": 1.6,
+				"desc": "Spin a ring of bramble slashes around you."},
+			{"name": "HEWING SLASH", "icon": "strike", "type": "strike", "cooldown": 2.0, "dmg_mult": 1.9,
+				"desc": "A hard cleaving blow through the marked foe."}
+		]
+	},
+	"tidecall_brand": {
+		"id": "tidecall_brand", "name": "TIDECALL BRAND", "glyph": "staff", "style": "magic", "price": 360,
+		"element": "water", "rarity": 3, "source": "Defeat the Fenmaw",
+		"atk": 20, "swing_time": 0.65, "range": 11.0,
+		"skills": [
+			{"name": "DROWNING WAKE", "icon": "water", "type": "heavy_aoe", "cooldown": 8.0, "radius": 16.0, "dmg_mult": 2.0,
+				"desc": "Call up an overwhelming wave that swallows a wide ring."},
+			{"name": "FOG BURST", "icon": "explosion", "type": "explosion", "cooldown": 3.5, "radius": 4.0, "dmg_mult": 1.8,
+				"desc": "Detonate a pressurized mist-burst on the marked target."},
+			{"name": "TIDEWASH STRIKE", "icon": "strike", "type": "strike", "cooldown": 2.0, "dmg_mult": 1.7,
+				"desc": "Drive a cold brand through the marked foe."}
+		]
+	},
+	"cinderhart_maul": {
+		"id": "cinderhart_maul", "name": "CINDERHART MAUL", "glyph": "mace", "style": "blunt", "price": 420,
+		"element": "fire", "rarity": 4, "source": "Defeat the Cinderhart Colossus",
+		"atk": 23, "swing_time": 0.82, "range": 10.0,
+		"skills": [
+			{"name": "FURNACE BREAK", "icon": "fire", "type": "heavy_aoe", "cooldown": 9.5, "radius": 15.0, "dmg_mult": 2.25,
+				"desc": "Shatter ground into a furnace-wide break that staggers survivors."},
+			{"name": "EMBER SLAM", "icon": "explosion", "type": "explosion", "cooldown": 4.5, "radius": 5.0, "dmg_mult": 2.0,
+				"desc": "A molten slam that detonates embers around the impact."},
+			{"name": "GRANITE BLOW", "icon": "strike", "type": "strike", "cooldown": 2.2, "dmg_mult": 1.9,
+				"desc": "A crushing hammer-blow through the marked foe."}
+		]
+	},
+	"oracle_crescent": {
+		"id": "oracle_crescent", "name": "ORACLE CRESCENT", "glyph": "blade", "style": "slash",
+		"element": "arcane", "rarity": 4, "source": "Defeat the Moonfen Oracle",
+		"atk": 24, "swing_time": 0.58, "range": 12.0,
+		"skills": [
+			{"name": "UNDERTIDE MIRROR", "icon": "whirl", "type": "whirl", "cooldown": 8.0, "radius": 17.0, "dmg_mult": 2.1,
+				"desc": "Spin a crescent of mirrored water, cutting everything in reach."},
+			{"name": "MOONFALL COMET", "icon": "comet", "type": "comet", "cooldown": 4.0, "radius": 5.0, "dmg_mult": 2.6,
+				"desc": "Call down a slow moon-comet; a wide burst follows."},
+			{"name": "MIRROR SLASH", "icon": "strike", "type": "strike", "cooldown": 2.0, "dmg_mult": 1.9,
+				"desc": "A sharp mirrored cut through the marked foe."}
+		]
+	}
 }
 
 # === Armor registry: defense reduces every hit, tint restyles the body ===
@@ -160,15 +354,52 @@ const ARMOR_DEFS := {
 		"defense": 1, "speed_mult": 1.08, "price": 40,
 		"tint": Color(0.34, 0.21, 0.12), "roughness": 0.75, "metallic": 0.0,
 		"desc": "Warm-woven travel cloak. -1 damage, moves swifter."
+	},
+	# === Craftable entry cloaks. Each crafted recipe owns a distinct id so two
+	# recipes can never silently overwrite one entry in forged_armors. ===
+	"spore_wrap": {
+		"id": "spore_wrap", "name": "SPORE WRAP", "glyph": "cloak",
+		"defense": 1, "speed_mult": 1.05, "price": 20, "rarity": 1,
+		"tint": Color(0.30, 0.36, 0.24), "roughness": 0.86, "metallic": 0.0,
+		"desc": "Fen-fibre wrap stiffened with spore wax. -1 damage, light on the feet."
+	},
+	"moonfen_cloak": {
+		"id": "moonfen_cloak", "name": "MOONFEN CLOAK", "glyph": "cloak",
+		"defense": 2, "speed_mult": 1.02, "price": 35, "rarity": 2,
+		"tint": Color(0.26, 0.31, 0.44), "roughness": 0.70, "metallic": 0.05,
+		"desc": "Reed-woven cloak steeped in moonmoss. -2 damage, steadier footing."
+	},
+	# === Craftable epic (rarity 3) ===
+	"siltband_cloak": {
+		"id": "siltband_cloak", "name": "SILTSCALE CLOAK", "glyph": "cloak",
+		"defense": 4, "speed_mult": 1.05, "price": 120, "rarity": 3,
+		"tint": Color(0.30, 0.42, 0.40), "roughness": 0.72, "metallic": 0.05,
+		"desc": "Cloak woven from silt-silk. Reduces each hit by 4, swift as running water."
+	},
+	"cinderplate": {
+		"id": "cinderplate", "name": "CINDERPLATE", "glyph": "shield",
+		"defense": 5, "speed_mult": 0.97, "price": 160, "rarity": 3,
+		"tint": Color(0.36, 0.20, 0.10), "roughness": 0.55, "metallic": 0.4,
+		"desc": "Embercore-forged plate. Reduces each hit by 5; slow but impervious."
+	},
+	# === Craftable legendary (rarity 4) ===
+	"moonsilk_vest": {
+		"id": "moonsilk_vest", "name": "MOONSILK VEST", "glyph": "cloak",
+		"defense": 6, "speed_mult": 1.06, "price": 220, "rarity": 4,
+		"tint": Color(0.34, 0.36, 0.46), "roughness": 0.65, "metallic": 0.05,
+		"desc": "Silk spun under a closed moon. Reduces each hit by 6 and quickens the stride."
 	}
 }
 
+## What the trader stocks. Prices are NOT repeated here: every id resolves its
+## asking price from its own def via `gear_buy_price`, so a stock row and the
+## item it sells can never disagree about cost.
 const SHOP_STOCK := [
-	{"id": "ember_sword", "kind": "weapon", "price": 75},
-	{"id": "arcane_staff", "kind": "weapon", "price": 90},
-	{"id": "warden_plate", "kind": "armor", "price": 60},
-	{"id": "emberweave_cloak", "kind": "armor", "price": 40},
-	{"id": "moss_tonic", "kind": "potion", "price": 12, "rarity": 0},
+	{"id": "ember_sword", "kind": "weapon"},
+	{"id": "arcane_staff", "kind": "weapon"},
+	{"id": "warden_plate", "kind": "armor"},
+	{"id": "emberweave_cloak", "kind": "armor"},
+	{"id": "moss_tonic", "kind": "potion"},
 ]
 
 @export var current_stage: QuestStage = QuestStage.SEEK_SPRITE
@@ -178,6 +409,21 @@ const SHOP_STOCK := [
 var expedition_run_id: int = 0
 var activity_recovery: Dictionary = {}
 var content_registry_errors: Array[String] = []
+
+const BRAMBLEWOOD_EXPANSION_RESPAWNS: Dictionary = {
+	"bramblewood_expansion_start": Vector2(20, -48),
+	"rootcut_gully": Vector2(46, -86),
+	"hollow_camp": Vector2(82, -124),
+	"beacon_breach": Vector2(124, -164),
+	"rootbound_court": Vector2(172, -208),
+	"rootway_shortcut": Vector2(172, -208),
+}
+var bramblewood_expansion: Dictionary = {
+	"version": 1,
+	"started": false,
+	"completed": false,
+	"discovered_pockets": [],
+}
 
 func get_content_registry() -> Dictionary:
 	var objectives: Dictionary = {}
@@ -198,6 +444,10 @@ func get_content_registry() -> Dictionary:
 	var registry := CONTENT_REGISTRY.snapshot(WEAPON_DEFS, ARMOR_DEFS,
 		MATERIAL_DEFS, CRAFTING_DATA.RECIPES, BESTIARY_DATA.REALMS,
 		BESTIARY_DATA.BOSS_DEFS, objectives)
+	var boss_records: Dictionary = registry.get("boss", {})
+	for boss_id in BOSS_ROSTER.CANONICAL_IDS:
+		boss_records[str(boss_id)] = BOSS_ROSTER.definition_for(str(boss_id))
+	registry["boss"] = boss_records
 	registry["skill"] = skills
 	registry["quest"] = quests
 	var loot_tables: Dictionary = {}
@@ -239,6 +489,11 @@ func get_content_registry() -> Dictionary:
 	registry["terrain_material"] = {
 		"whispergrove_ground": {"id": "whispergrove_ground", "source": "res://scripts/systems/world_ground_composition.gd"},
 	}
+	var boss_asset_records := BOSS_ASSET_MANIFEST.registry()
+	for category in ["prop", "vfx", "sfx"]:
+		var records: Dictionary = registry.get(category, {})
+		records.merge(boss_asset_records.get(category, {}))
+		registry[category] = records
 	var asset_records: Dictionary = CONTENT_REGISTRY.asset_records(AssetIntakeCatalog.ENTRIES)
 	for category in asset_records:
 		var records: Dictionary = registry.get(category, {})
@@ -263,6 +518,8 @@ func _catalog_loot_table(table_id: String) -> LootTable:
 # Currencies: gold buys gear at the trader; diamonds buy cosmetics only
 @export var gold: int = 30
 @export var diamonds: int = 0
+@export var last_daily_bonus: int = 0
+@export var daily_streak: int = 0
 
 # Quest flags
 @export var shard_collected: bool = false
@@ -274,6 +531,10 @@ func _catalog_loot_table(table_id: String) -> LootTable:
 
 # Skill cooldowns (seconds remaining), keyed "slot_0".."slot_2" per weapon kit
 var skill_cooldowns: Dictionary = {}
+
+## Deliberate combat pacing: skills take this much longer to recover
+## than their authored cooldown, without touching damage numbers.
+const SKILL_COOLDOWN_PACING := 1.20
 
 # === Scan economy & boss customization ===
 # Scans are a local currency: 5 free to start, +1 earned per boss defeat,
@@ -313,11 +574,17 @@ func _notification(what: int) -> void:
 		handle_application_resumed()
 	elif what == NOTIFICATION_OS_MEMORY_WARNING:
 		handle_low_memory_warning()
+	elif what == NOTIFICATION_WM_CLOSE_REQUEST:
+		flush_save()
+		var audio := get_node_or_null("/root/AudioManager")
+		if audio != null and audio.has_method("shutdown_for_exit"):
+			audio.call("shutdown_for_exit")
+		get_tree().quit()
 
 func handle_application_paused() -> void:
 	## Flush the existing local save so Android process death can recover the
 	## queue and progression. This never sends or grants anything remotely.
-	save_game()
+	flush_save()
 	application_paused.emit()
 
 func handle_application_resumed() -> void:
@@ -326,7 +593,7 @@ func handle_application_resumed() -> void:
 func handle_low_memory_warning() -> void:
 	## Preserve progression first, then ask the existing quality owner to shed
 	## presentation cost. No inventory, reward, or combat state is discarded.
-	save_game()
+	flush_save()
 	var scaler := get_node_or_null("/root/WorldState/QualityScaler")
 	if scaler != null and scaler.has_method("set_mode"):
 		scaler.call("set_mode", 0)
@@ -402,6 +669,7 @@ signal mark_locked(target: Node3D)
 signal mark_released
 signal materials_changed
 signal gathered_nodes_changed
+signal world_activity_changed(realm_id: String, activity_id: String, status: String)
 signal upgrade_completed(item_id: String, new_level: int)
 signal objective_completed(objective_id: String)
 signal route_checkpoint_changed(checkpoint_id: String)
@@ -418,7 +686,24 @@ const LEVEL_2_ATK_BONUS = 3
 func _get_default_weapon() -> Dictionary:
 	return WEAPON_DEFS["mug_mace"].duplicate(true)
 
+## The starter weapon is real gear. Keep the equipped weapon in the forge
+## ledger so it can be compared, upgraded, re-equipped after a swap, and
+## salvaged like anything else — without ever resurrecting an entry the player
+## deliberately got rid of (the ledger is only topped up when it is missing).
+func _ensure_equipped_weapon_in_ledger() -> void:
+	var weapon_id := str(equipped_weapon.get("id", ""))
+	if weapon_id.is_empty():
+		return
+	# Legacy saves can hold a bare id; canonicalize before the two slots have
+	# to agree, so the hero and the ledger never disagree about its stats.
+	equipped_weapon = _normalize_weapon_record(equipped_weapon)
+	if forged_weapons.any(func(item: Dictionary) -> bool:
+			return str(item.get("id", "")) == weapon_id):
+		return
+	forged_weapons.append(equipped_weapon.duplicate(true))
+
 func _ready() -> void:
+	_ensure_save_service()
 	reset()
 	_validate_content_registry_at_startup()
 
@@ -437,6 +722,13 @@ func _process(delta: float) -> void:
 	update_skill_cooldowns(delta)
 
 func reset() -> void:
+	_ensure_save_service()
+	# Preserve the established save_game(); reset(); load_game() contract. A
+	# reset must not discard a coalesced write for the state being replaced.
+	if _save_dirty:
+		flush_save()
+	if _save_flush_timer != null and _save_flush_timer.is_inside_tree():
+		_save_flush_timer.stop()
 	var camp := get_node_or_null("/root/CampProgression")
 	if camp != null and camp.has_method("reset"):
 		camp.reset()
@@ -450,7 +742,11 @@ func reset() -> void:
 	gold = 30
 	expedition_run_id = 0
 	activity_recovery = {}
+	bramblewood_expansion = {"version": 1, "started": false,
+		"completed": false, "discovered_pockets": []}
 	diamonds = 0
+	last_daily_bonus = 0
+	daily_streak = 0
 	stat_points = 0
 	stat_str = 0
 	stat_dex = 0
@@ -467,10 +763,12 @@ func reset() -> void:
 	boss_first_kills = {}
 	quest_reward_claims = {}
 	opened_chests = {}
+	pending_chest_drops = {}
 	active_cosmetic_ids = {}
 	raw_materials = {}
 	gathered_nodes = {}
 	discovered_landmarks = {}
+	world_activity_state = _empty_world_activity_state()
 	quest_objectives = []
 	pinned_objective_id = ""
 	completed_quizzes = {}
@@ -490,6 +788,7 @@ func reset() -> void:
 	
 	forged_weapons.clear()
 	equipped_weapon = _get_default_weapon()
+	_ensure_equipped_weapon_in_ledger()
 	forged_armors.clear()
 	equipped_armor = {}
 	equipment_slots = _empty_equipment_slots()
@@ -526,6 +825,8 @@ func reset() -> void:
 
 # === Quest ===
 func advance_stage(new_stage: QuestStage) -> void:
+	if int(new_stage) <= int(current_stage):
+		return
 	current_stage = new_stage
 	# Story progression supersedes any prior activity attempt; clear the
 	# recovery banner in the same save as the new checkpoint/objectives.
@@ -535,7 +836,11 @@ func advance_stage(new_stage: QuestStage) -> void:
 		return not str(objective.get("id", "")).begins_with("chapter"))
 	_seed_stage_objectives(new_stage)
 	stage_changed.emit(new_stage)
+	var rewards := get_node_or_null("/root/RewardManager")
+	if rewards != null and rewards.has_method("grant_quest_stage"):
+		rewards.call("grant_quest_stage", int(new_stage))
 	save_game()
+	flush_save()
 	
 	match new_stage:
 		QuestStage.CLAIM_SHARD:
@@ -559,15 +864,25 @@ func _checkpoint_for_stage(stage: QuestStage) -> String:
 ## grants currency, advances a quest, or emits duplicate progress.
 func set_route_checkpoint(checkpoint_id: String, persist: bool = true) -> bool:
 	var normalized := checkpoint_id.strip_edges().to_lower()
-	if normalized.is_empty() or normalized == route_checkpoint_id:
+	if normalized.is_empty():
 		return false
-	route_checkpoint_id = normalized
-	route_checkpoint_changed.emit(route_checkpoint_id)
-	if persist:
+	var changed := false
+	if normalized != route_checkpoint_id:
+		route_checkpoint_id = normalized
+		route_checkpoint_changed.emit(route_checkpoint_id)
+		changed = true
+	var respawn := _respawn_for_checkpoint(normalized)
+	if route_respawn_position != respawn:
+		route_respawn_position = respawn
+		changed = true
+	if changed and persist:
 		save_game()
-	return true
+		flush_save()
+	return changed
 
 func _respawn_for_checkpoint(checkpoint_id: String) -> Vector2:
+	if BRAMBLEWOOD_EXPANSION_RESPAWNS.has(checkpoint_id):
+		return BRAMBLEWOOD_EXPANSION_RESPAWNS[checkpoint_id]
 	match checkpoint_id:
 		"hushling_cleared": return Vector2(-5, -5)
 		"shard_claimed": return Vector2(7, -4)
@@ -584,10 +899,11 @@ func set_route_checkpoint_for_stage(stage: QuestStage, persist: bool = true) -> 
 		changed = true
 	if changed and persist:
 		save_game()
+		flush_save()
 	return changed
 
 func set_route_checkpoint_for_shortcut(shortcut_id: String, persist: bool = true) -> bool:
-	if shortcut_id != "camp_route":
+	if shortcut_id not in ["camp_route", "rootway_shortcut"]:
 		return false
 	var changed := set_route_checkpoint(shortcut_id, false)
 	var respawn := _respawn_for_checkpoint(shortcut_id)
@@ -596,7 +912,64 @@ func set_route_checkpoint_for_shortcut(shortcut_id: String, persist: bool = true
 		changed = true
 	if changed and persist:
 		save_game()
+		flush_save()
 	return changed
+
+func bramblewood_expansion_snapshot() -> Dictionary:
+	return bramblewood_expansion.duplicate(true)
+
+func begin_bramblewood_expansion() -> bool:
+	if bool(bramblewood_expansion.get("completed", false)):
+		return false
+	var changed := false
+	var was_started := bool(bramblewood_expansion.get("started", false))
+	if not was_started:
+		bramblewood_expansion["started"] = true
+		changed = true
+	var discovered: Array = bramblewood_expansion.get("discovered_pockets", [])
+	if not was_started and discovered.is_empty() \
+			and set_route_checkpoint("bramblewood_expansion_start", false):
+		changed = true
+	if activity_recovery.is_empty() or str(activity_recovery.get("activity_id", "")) \
+			!= "bramblewood_expansion":
+		begin_activity("bramblewood_expansion", "bramblewood_expansion_start")
+		changed = true
+	if changed:
+		save_game()
+	return changed
+
+func discover_bramblewood_pocket(pocket_id: String) -> bool:
+	var normalized := pocket_id.strip_edges().to_lower()
+	if normalized.is_empty():
+		return false
+	var discovered: Array = bramblewood_expansion.get("discovered_pockets", [])
+	if normalized in discovered:
+		return false
+	discovered.append(normalized)
+	bramblewood_expansion["discovered_pockets"] = discovered
+	save_game()
+	return true
+
+func complete_bramblewood_expansion() -> bool:
+	if bool(quest_reward_claims.get("bramblewood_expansion_complete", false)) \
+			or bool(bramblewood_expansion.get("completed", false)):
+		return false
+	quest_reward_claims["bramblewood_expansion_complete"] = true
+	bramblewood_expansion["started"] = true
+	bramblewood_expansion["completed"] = true
+	bramblewood_expansion["discovered_pockets"] = [
+		"split_road_oak", "rootcut_gully", "hollow_camp",
+		"beacon_breach", "rootbound_court"]
+	activity_recovery = {}
+	set_route_checkpoint("rootway_shortcut", false)
+	var camp := get_node_or_null("/root/CampProgression")
+	if camp != null and camp.has_method("grant_route_feature_once"):
+		camp.call("grant_route_feature_once", "rootway_beacon")
+	record_activity("BRAMBLEWOOD EXPEDITION COMPLETE · ROOTWAY OPEN")
+	quest_progress.emit("The Rootbound Warden falls. The Rootway Beacon is open at camp.")
+	save_game()
+	flush_save()
+	return true
 
 func get_quest_instruction(stage: QuestStage) -> String:
 	if stage == QuestStage.SEEK_SPRITE: return "Follow the pale path until the bramble sprite stirs."
@@ -617,6 +990,7 @@ func route_objective_snapshot() -> Dictionary:
 		"why": str(copy.get("why", "Advance along the route.")),
 		"next_action": str(copy.get("next_action", "Continue forward.")),
 		"objectives": get_active_objectives(),
+		"bramblewood_expansion": bramblewood_expansion_snapshot(),
 	}
 
 func get_quest_copy(stage: QuestStage) -> Dictionary:
@@ -667,18 +1041,46 @@ func update_objective(type: String, item_id: String = "", qty: int = 1,
 	var changed := false
 	for obj in quest_objectives:
 		if obj.get("type", "") == type and not obj.completed:
-			if item_id == "" or obj.get("id", "").contains(item_id):
+			var objective_changed := false
+			if _objective_matches(obj, type, item_id):
 				obj.current_qty = mini(int(obj.get("current_qty", 0)) + qty, int(obj.get("target_qty", 1)))
 				changed = true
-			if obj.current_qty >= int(obj.get("target_qty", 1)):
+				objective_changed = true
+			if objective_changed and obj.current_qty >= int(obj.get("target_qty", 1)):
 				obj.completed = true
 				if str(obj.get("id", "")) == pinned_objective_id:
 					pinned_objective_id = ""
-					objective_completed.emit(obj.id)
-					quest_progress.emit("Objective complete: %s" % obj.description)
+				objective_completed.emit(str(obj.get("id", "")))
+				quest_progress.emit("Objective complete: %s" % str(obj.get("description", "Objective")))
 	inventory_changed.emit()
 	if changed and persist:
 		save_game()
+
+func _objective_matches(objective: Dictionary, type: String, item_id: String) -> bool:
+	if item_id.is_empty():
+		return true
+	var objective_id := str(objective.get("id", ""))
+	if objective_id.contains(item_id) or item_id.contains(objective_id):
+		return true
+	if objective_id.ends_with("_%s" % type):
+		return true
+	# Current route has one generic upgrade/open/reach objective at a time. The
+	# fallback keeps those objectives responsive when the event carries an item
+	# id rather than the authored objective id, without broadening kill matches.
+	if type in ["gather", "craft", "equip", "upgrade", "reach", "open_chest"]:
+		var remaining := 0
+		for candidate in quest_objectives:
+			if str(candidate.get("type", "")) == type \
+					and not bool(candidate.get("completed", false)):
+				remaining += 1
+		return remaining == 1
+	return false
+
+func get_objective(objective_id: String) -> Dictionary:
+	for obj in quest_objectives:
+		if str(obj.get("id", "")) == objective_id:
+			return obj.duplicate(true)
+	return {}
 
 func get_active_objectives() -> Array:
 	var active := []
@@ -893,9 +1295,22 @@ func take_damage(amount: int) -> bool:
 		disengage_enemy()
 		save_game()
 		defeated.emit()
+		# Emit synchronously so the active world can restore the player to its
+		# checkpoint before the final forced write below.
+		flush_save()
 		return true
 	save_game()
 	return false
+
+func recover_from_defeat() -> void:
+	var old_hp := hp
+	hp = max_hp
+	combat_state = CombatState.EXPLORING
+	disengage_enemy()
+	if old_hp != hp:
+		hp_changed.emit(old_hp, hp)
+	save_game()
+	flush_save()
 
 func heal(amount: int) -> int:
 	var old_hp = hp
@@ -940,7 +1355,7 @@ func use_skill(slot: int) -> Dictionary:
 			"message": "Your lantern lights no foe yet — tap an enemy to mark it."}
 	
 	# Deliberate combat pacing: cooldowns are longer without changing damage.
-	skill_cooldowns[key] = float(sk.cooldown) * 1.20
+	skill_cooldowns[key] = float(sk.cooldown) * SKILL_COOLDOWN_PACING
 	skill_cooldown_changed.emit(slot, skill_cooldowns[key])
 	return {"success": true, "slot": slot, "skill": sk}
 
@@ -1053,12 +1468,15 @@ func apply_loadout_preset(slot: int) -> bool:
 func add_armor(armor: Dictionary, equip_if_none: bool = true) -> void:
 	if not armor.has("id"):
 		return
-	var stored := armor.duplicate(true)
+	var stored: Dictionary = armor.duplicate(true)
+	var merged := false
 	for i in forged_armors.size():
-		if forged_armors[i].get("id", "") == stored.id:
+		if forged_armors[i].get("id", "") == str(stored.id):
+			stored = merge_upgrade_progress(forged_armors[i], stored, "defense")
 			forged_armors[i] = stored
+			merged = true
 			break
-	if not forged_armors.any(func(item): return item.get("id", "") == stored.id):
+	if not merged:
 		forged_armors.append(stored)
 	inventory_changed.emit()
 	if equip_if_none and equipped_armor.is_empty():
@@ -1077,6 +1495,117 @@ func record_activity(entry: String) -> void:
 func get_activity_history() -> Array[String]:
 	return activity_history.duplicate()
 
+func _empty_world_activity_state() -> Dictionary:
+	return {"version": 1, "completed": {}, "discovered": {},
+		"cooldowns": {}, "soft_unlocks": {}}
+
+func get_world_activity_state() -> Dictionary:
+	return world_activity_state.duplicate(true)
+
+func is_world_activity_completed(realm_id: String, activity_id: String) -> bool:
+	var completed: Dictionary = world_activity_state.get("completed", {}) \
+		if world_activity_state.get("completed", {}) is Dictionary else {}
+	var realm_completed: Dictionary = completed.get(realm_id, {}) \
+		if completed.get(realm_id, {}) is Dictionary else {}
+	return bool(realm_completed.get(activity_id, false))
+
+func complete_world_activity(realm_id: String, activity_id: String,
+		persistence: String = "one_time") -> bool:
+	if realm_id.strip_edges().is_empty() or activity_id.strip_edges().is_empty():
+		return false
+	if persistence == "one_time" and is_world_activity_completed(realm_id, activity_id):
+		return false
+	if persistence == "one_time":
+		var completed: Dictionary = world_activity_state.get("completed", {})
+		var realm_completed: Dictionary = completed.get(realm_id, {}) \
+			if completed.get(realm_id, {}) is Dictionary else {}
+		realm_completed[activity_id] = true
+		completed[realm_id] = realm_completed
+		world_activity_state["completed"] = completed
+		var discovered: Dictionary = world_activity_state.get("discovered", {})
+		var realm_discovered: Dictionary = discovered.get(realm_id, {}) \
+			if discovered.get(realm_id, {}) is Dictionary else {}
+		realm_discovered[activity_id] = true
+		discovered[realm_id] = realm_discovered
+		world_activity_state["discovered"] = discovered
+	world_activity_changed.emit(realm_id, activity_id, "completed")
+	save_game()
+	return true
+
+func set_world_activity_cooldown(realm_id: String, activity_id: String,
+		until_unix_time: float) -> void:
+	var cooldowns: Dictionary = world_activity_state.get("cooldowns", {})
+	var realm_cooldowns: Dictionary = cooldowns.get(realm_id, {}) \
+		if cooldowns.get(realm_id, {}) is Dictionary else {}
+	realm_cooldowns[activity_id] = maxf(0.0, until_unix_time)
+	cooldowns[realm_id] = realm_cooldowns
+	world_activity_state["cooldowns"] = cooldowns
+	world_activity_changed.emit(realm_id, activity_id, "cooldown")
+	save_game()
+
+func get_world_activity_cooldown(realm_id: String, activity_id: String) -> float:
+	var cooldowns: Dictionary = world_activity_state.get("cooldowns", {}) \
+		if world_activity_state.get("cooldowns", {}) is Dictionary else {}
+	var realm_cooldowns: Dictionary = cooldowns.get(realm_id, {}) \
+		if cooldowns.get(realm_id, {}) is Dictionary else {}
+	return float(realm_cooldowns.get(activity_id, 0.0))
+
+func unlock_world_activity(realm_id: String, unlock_id: String, label: String = "") -> bool:
+	if realm_id.strip_edges().is_empty() or unlock_id.strip_edges().is_empty():
+		return false
+	var unlocks: Dictionary = world_activity_state.get("soft_unlocks", {})
+	var realm_unlocks: Dictionary = unlocks.get(realm_id, {}) \
+		if unlocks.get(realm_id, {}) is Dictionary else {}
+	if realm_unlocks.has(unlock_id):
+		return false
+	realm_unlocks[unlock_id] = label if not label.strip_edges().is_empty() else true
+	unlocks[realm_id] = realm_unlocks
+	world_activity_state["soft_unlocks"] = unlocks
+	world_activity_changed.emit(realm_id, unlock_id, "unlocked")
+	save_game()
+	return true
+
+func has_world_activity_unlock(realm_id: String, unlock_id: String) -> bool:
+	var unlocks: Dictionary = world_activity_state.get("soft_unlocks", {}) \
+		if world_activity_state.get("soft_unlocks", {}) is Dictionary else {}
+	var realm_unlocks: Dictionary = unlocks.get(realm_id, {}) \
+		if unlocks.get(realm_id, {}) is Dictionary else {}
+	return realm_unlocks.has(unlock_id)
+
+func _normalize_world_activity_state(saved) -> Dictionary:
+	var normalized := _empty_world_activity_state()
+	if not saved is Dictionary:
+		return normalized
+	for category in ["completed", "discovered", "cooldowns", "soft_unlocks"]:
+		var saved_category = saved.get(category, {})
+		if not saved_category is Dictionary:
+			continue
+		var output_category: Dictionary = {}
+		for realm_key in saved_category.keys():
+			var realm_id := str(realm_key).strip_edges().to_lower()
+			if realm_id.is_empty() or not saved_category[realm_key] is Dictionary:
+				continue
+			var output_realm: Dictionary = {}
+			for activity_key in (saved_category[realm_key] as Dictionary).keys():
+				var activity_id := str(activity_key).strip_edges().to_lower()
+				if activity_id.is_empty():
+					continue
+				var value = (saved_category[realm_key] as Dictionary)[activity_key]
+				if category == "cooldowns":
+					if value is int or value is float:
+						output_realm[activity_id] = maxf(0.0, float(value))
+				elif category == "completed" or category == "discovered":
+					if bool(value):
+						output_realm[activity_id] = true
+				else:
+					if value is String or value is bool:
+						output_realm[activity_id] = value
+			if not output_realm.is_empty():
+				output_category[realm_id] = output_realm
+		if not output_category.is_empty():
+			normalized[category] = output_category
+	return normalized
+
 func add_gold(amount: int, notice: String = "") -> void:
 	gold += amount
 	gold_changed.emit(gold)
@@ -1086,6 +1615,14 @@ func add_gold(amount: int, notice: String = "") -> void:
 		loot_count = amount
 		loot_pulse += 1
 		loot_received.emit(notice, amount)
+	save_game()
+
+func get_daily_bonus_state() -> Dictionary:
+	return {"last_claim": last_daily_bonus, "streak": daily_streak}
+
+func set_daily_bonus_state(last_claim: int, streak: int) -> void:
+	last_daily_bonus = maxi(0, last_claim)
+	daily_streak = clampi(streak, 0, 3650)
 	save_game()
 
 ## Diamonds buy cosmetics only — never stats. Rare by design.
@@ -1098,7 +1635,7 @@ func add_diamonds(amount: int, notice: String = "") -> void:
 	save_game()
 
 func spend_diamonds(amount: int) -> bool:
-	if diamonds < amount:
+	if amount <= 0 or diamonds < amount:
 		return false
 	diamonds -= amount
 	diamonds_changed.emit(diamonds)
@@ -1202,28 +1739,46 @@ func defense_stat() -> int:
 func max_hp_total() -> int:
 	return MAX_HP_BASE + int(round(3.0 * soft_cap_points(stat_vit)))
 
-## Spend one point on "str"/"dex"/"vit"/"luk"/"end".
-func allocate_stat(key: String) -> bool:
-	if stat_points <= 0:
-		return false
-	match key:
-		"str": stat_str += 1
-		"dex":
-			stat_dex += 1
-		"vit":
-			stat_vit += 1
-			var old_max := max_hp
-			max_hp = max_hp_total()
-			hp = mini(hp + (max_hp - old_max), max_hp)
-			hp_changed.emit(old_max, max_hp)
-		"luk": stat_luk += 1
-		"end": stat_end += 1
-		_:
-			return false
-	stat_points -= 1
+## Commit a staged stat allocation as one validated transaction. The preview UI
+## keeps points untouched until this method succeeds, so invalid or oversized
+## requests cannot partially mutate the player or emit duplicate refreshes.
+func commit_stat_allocation(allocation: Dictionary) -> Dictionary:
+	if allocation.is_empty():
+		return {"success": false, "message": "No stat points staged."}
+	var normalized: Dictionary = {}
+	var total := 0
+	for raw_key in allocation:
+		var key := str(raw_key)
+		var amount := int(allocation[raw_key])
+		if key not in ["str", "dex", "vit", "luk", "end"] or amount < 0:
+			return {"success": false, "message": "Invalid stat allocation."}
+		if amount > 0:
+			normalized[key] = amount
+			total += amount
+	if total <= 0:
+		return {"success": false, "message": "No stat points staged."}
+	if total > stat_points:
+		return {"success": false, "message": "Not enough unspent stat points."}
+
+	var old_max := max_hp
+	stat_str += int(normalized.get("str", 0))
+	stat_dex += int(normalized.get("dex", 0))
+	stat_vit += int(normalized.get("vit", 0))
+	stat_luk += int(normalized.get("luk", 0))
+	stat_end += int(normalized.get("end", 0))
+	stat_points -= total
+	if int(normalized.get("vit", 0)) > 0:
+		max_hp = max_hp_total()
+		hp = mini(hp + (max_hp - old_max), max_hp)
+		hp_changed.emit(old_max, max_hp)
 	stats_changed.emit()
 	save_game()
-	return true
+	return {"success": true, "allocation": normalized, "points_remaining": stat_points}
+
+## Spend one point on "str"/"dex"/"vit"/"luk"/"end".
+## Kept as a compatibility wrapper for gameplay and legacy callers.
+func allocate_stat(key: String) -> bool:
+	return bool(commit_stat_allocation({key: 1}).get("success", false))
 
 const RESPEC_BASE_GOLD: int = 20
 
@@ -1256,21 +1811,96 @@ var boss_first_kills: Dictionary = {}
 var boss_reward_selections: Dictionary = {}
 var quest_reward_claims: Dictionary = {}
 var opened_chests: Dictionary = {}
+## Chests whose roll was claimed but whose physical loot has not been fully
+## picked up. Keyed by chest_id -> Array of drop records; consumed slots are
+## stored as null so remaining drop indices stay stable. Persisted with the
+## opened_chests claim so a reload restores uncollected loot exactly once
+## instead of losing or duplicating it.
+var pending_chest_drops: Dictionary = {}
 
 ## True the first time this boss key is defeated; later kills return false.
 func mark_boss_killed(boss_key: String) -> bool:
-	if boss_first_kills.get(boss_key, false):
+	var canonical_key := BOSS_ROSTER.canonical_key_for(boss_key)
+	if has_boss_killed(canonical_key):
 		return false
-	boss_first_kills[boss_key] = true
+	# Store the canonical key for all new encounters. has_boss_killed() also
+	# scans legacy keys, so old saves and old gates remain compatible without
+	# awarding a second first-kill reward.
+	boss_first_kills[canonical_key] = true
 	save_game()
 	return true
 
 func has_boss_killed(boss_key: String) -> bool:
-	return bool(boss_first_kills.get(boss_key, false))
+	if bool(boss_first_kills.get(boss_key, false)):
+		return true
+	var canonical_key := BOSS_ROSTER.canonical_key_for(boss_key)
+	if bool(boss_first_kills.get(canonical_key, false)):
+		return true
+	# A save may have been written by the pre-roster boss scripts. Compare
+	# normalized keys instead of mutating the loaded dictionary during reads.
+	for saved_key in boss_first_kills:
+		if bool(boss_first_kills[saved_key]) \
+				and BOSS_ROSTER.canonical_key_for(str(saved_key)) == canonical_key:
+			return true
+	return false
+
+# ─── Chest claim + pending physical loot ───────────────────────────────────
+# A persistent chest is claimed and its rolled physical drops are recorded in
+# one save. The chest can never be re-opened, and the recorded drops are the
+# single source of truth for what still needs to be picked up, so a reload
+# restores exactly the uncollected remainder.
+
+## Atomically mark a chest opened and persist its rolled physical drops.
+## Returns false when the chest id is empty or was already claimed.
+func begin_chest_claim(chest_id: String, drops: Array) -> bool:
+	if chest_id.is_empty():
+		return false
+	if bool(opened_chests.get(chest_id, false)):
+		return false
+	opened_chests[chest_id] = true
+	if drops.is_empty():
+		pending_chest_drops.erase(chest_id)
+	else:
+		pending_chest_drops[chest_id] = drops.duplicate(true)
+	save_game()
+	return true
+
+## Remaining recorded drops for an uncollected chest (nulls mark consumed slots).
+func get_pending_chest_drops(chest_id: String) -> Array:
+	var drops: Variant = pending_chest_drops.get(chest_id, null)
+	return (drops as Array).duplicate(true) if drops is Array else []
+
+func has_pending_chest_drops(chest_id: String) -> bool:
+	return pending_chest_drops.has(chest_id)
+
+## Mark one recorded drop as collected; the chest entry is dropped once the
+## whole remainder has been consumed.
+func collect_chest_drop(chest_id: String, drop_index: int) -> void:
+	if chest_id.is_empty():
+		return
+	var drops: Variant = pending_chest_drops.get(chest_id, null)
+	if not drops is Array:
+		return
+	var array: Array = drops
+	if drop_index < 0 or drop_index >= array.size():
+		return
+	array[drop_index] = null
+	var remaining := false
+	for entry in array:
+		if entry != null:
+			remaining = true
+			break
+	if not remaining:
+		pending_chest_drops.erase(chest_id)
+	save_game()
 
 func choose_boss_reward(boss_id: String, reward_id: String) -> Dictionary:
-	if boss_reward_selections.has(boss_id):
+	var requested_key := BOSS_ROSTER.canonical_key_for(boss_id)
+	if boss_reward_selections.has(boss_id) or boss_reward_selections.has(requested_key):
 		return {"success": false, "reason": "already_chosen"}
+	for saved_id in boss_reward_selections:
+		if BOSS_ROSTER.canonical_key_for(str(saved_id)) == requested_key:
+			return {"success": false, "reason": "already_chosen"}
 	var valid := false
 	for choice in BOSS_REWARD_CATALOG.choices_for(boss_id):
 		if str(choice.get("id", "")) == reward_id:
@@ -1278,50 +1908,84 @@ func choose_boss_reward(boss_id: String, reward_id: String) -> Dictionary:
 			break
 	if not valid:
 		return {"success": false, "reason": "invalid_choice"}
+	# A boss clear must always yield something. Reward directions share a gear
+	# pool, so a second boss offering a piece the player already carries pays
+	# that piece's own resale value instead of silently granting nothing.
+	var duplicate := false
+	var reward_kind := ""
+	var reward_name := reward_id
 	if WEAPON_DEFS.has(reward_id):
-		var weapon: Dictionary = WEAPON_DEFS[reward_id].duplicate(true)
-		if not forged_weapons.any(func(item: Dictionary) -> bool: return str(item.get("id", "")) == reward_id):
-			forged_weapons.append(weapon)
-		inventory_changed.emit()
+		reward_kind = "weapon"
+		reward_name = str(WEAPON_DEFS[reward_id].get("name", reward_id))
+		duplicate = forged_weapons.any(func(item: Dictionary) -> bool:
+			return str(item.get("id", "")) == reward_id)
+		if not duplicate:
+			forged_weapons.append(WEAPON_DEFS[reward_id].duplicate(true))
+			inventory_changed.emit()
 	elif ARMOR_DEFS.has(reward_id):
-		var armor: Dictionary = ARMOR_DEFS[reward_id].duplicate(true)
-		if not forged_armors.any(func(item: Dictionary) -> bool: return str(item.get("id", "")) == reward_id):
-			forged_armors.append(armor)
-		inventory_changed.emit()
+		reward_kind = "armor"
+		reward_name = str(ARMOR_DEFS[reward_id].get("name", reward_id))
+		duplicate = forged_armors.any(func(item: Dictionary) -> bool:
+			return str(item.get("id", "")) == reward_id)
+		if not duplicate:
+			forged_armors.append(ARMOR_DEFS[reward_id].duplicate(true))
+			inventory_changed.emit()
 	else:
 		return {"success": false, "reason": "missing_definition"}
+	var compensation := 0
+	if duplicate:
+		compensation = gear_sell_value(reward_id, reward_kind)
+		add_gold(compensation, "%s already carried — %d gold instead." % [
+			reward_name, compensation])
 	boss_reward_selections[boss_id] = reward_id
-	record_activity("BOSS REWARD · %s" % reward_id)
+	record_activity("BOSS REWARD · %s%s" % [reward_id,
+		" (duplicate +%d gold)" % compensation if compensation > 0 else ""])
 	save_game()
-	return {"success": true, "boss_id": boss_id, "reward_id": reward_id}
+	return {"success": true, "boss_id": boss_id, "reward_id": reward_id,
+		"duplicate": duplicate, "compensation": compensation, "name": reward_name}
 
 # === Realm travel ===
 @export var current_realm: String = "bramblewood"
 var unlocked_realms: Array[String] = ["bramblewood", "mistfen", "heartwood"]
+const KNOWN_REALMS: Array[String] = ["bramblewood", "mistfen", "heartwood", "moonfen"]
 
 ## Old saves used "whispergrove" for the starting grove.
 func _normalize_realm(realm_id: String) -> String:
-	realm_id = "bramblewood" if realm_id == "whispergrove" else realm_id
+	realm_id = _canonical_realm_id(realm_id)
 	# Save/UI only ever reference known realms; anything else on load is a
 	# corrupt or hand-edited save and must not drive dynamic scene loads.
-	return realm_id if realm_id in ["bramblewood", "mistfen", "heartwood", "moonfen"] \
+	return realm_id if realm_id in KNOWN_REALMS \
 		else "bramblewood"
+
+func _canonical_realm_id(realm_id: String) -> String:
+	var normalized := realm_id.strip_edges().to_lower()
+	return "bramblewood" if normalized == "whispergrove" else normalized
+
+func is_valid_realm_id(realm_id: String) -> bool:
+	return _canonical_realm_id(realm_id) in KNOWN_REALMS
 
 ## Returns true only when this call creates a new unlock. Existing call sites
 ## may continue ignoring the result.
 func unlock_realm(realm_id: String) -> bool:
-	if realm_id in unlocked_realms:
+	var normalized := _canonical_realm_id(realm_id)
+	if normalized not in KNOWN_REALMS or normalized in unlocked_realms:
 		return false
-	unlocked_realms.append(realm_id)
+	unlocked_realms.append(normalized)
 	save_game()
+	flush_save()
 	return true
 
 func set_current_realm(realm_id: String) -> void:
-	if current_realm == realm_id:
+	var normalized := _canonical_realm_id(realm_id)
+	if normalized not in KNOWN_REALMS:
+		push_warning("GameState: rejected unknown realm '%s'." % realm_id)
 		return
-	current_realm = realm_id
-	realm_changed.emit(realm_id)
+	if current_realm == normalized:
+		return
+	current_realm = normalized
+	realm_changed.emit(normalized)
 	save_game()
+	flush_save()
 
 # === Diamond cosmetics (purely visual — zero stats) ===
 var cosmetics_owned: Array[String] = []
@@ -1374,7 +2038,7 @@ func has_aura() -> bool:
 	return Color(active_aura_color).a > 0.05
 
 func spend_gold(amount: int) -> bool:
-	if gold < amount:
+	if amount <= 0 or gold < amount:
 		return false
 	gold -= amount
 	gold_changed.emit(gold)
@@ -1401,9 +2065,12 @@ func buy_shop_item(id: String) -> Dictionary:
 		return {"success": false, "message": "The trader does not stock that."}
 	if owns_shop_item(id):
 		return {"success": false, "message": "That piece already travels with you."}
-	if not spend_gold(int(entry.price)):
+	var asking := gear_buy_price(id, str(entry.get("kind", "")))
+	if asking <= 0:
+		return {"success": false, "message": "That piece has no price."}
+	if not spend_gold(asking):
 		return {"success": false,
-			"message": "Not enough gold — the trader wants %d GOLD." % int(entry.price)}
+			"message": "Not enough gold — the trader wants %d GOLD." % asking}
 	
 	if entry.kind == "weapon":
 		add_weapon(WEAPON_DEFS[id].duplicate(true), true,
@@ -1417,17 +2084,67 @@ func buy_shop_item(id: String) -> Dictionary:
 		loot_received.emit(loot_notice, 1)
 	else:
 		add_loot(id, 1, "%s purchased from the trader." % get_item(id).get("name", id))
-	purchase_ledger.append({"id": id, "kind": str(entry.kind), "price": int(entry.price),
+	purchase_ledger.append({"id": id, "kind": str(entry.get("kind", "")), "price": asking,
 		"currency": "gold"})
 	record_activity("PURCHASE · %s" % id)
 	cloud_sync_queue.enqueue("purchase-shop-%d" % purchase_ledger.size(),
-		"buy_shop_item", {"item_id": id, "kind": str(entry.kind),
-			"price": int(entry.price), "currency": "gold"})
+		"buy_shop_item", {"item_id": id, "kind": str(entry.get("kind", "")),
+			"price": asking, "currency": "gold"})
 	save_game()
 	return {"success": true, "id": id}
 
 func get_purchase_ledger() -> Array[Dictionary]:
 	return purchase_ledger.duplicate(true)
+
+# === Provider-confirmed ownership (RevenueCat web packs) ===
+# Optional fields carried on provider ledger rows. The save loader preserves
+# them, so a claim stays idempotent across save/load cycles instead of being
+# granted again on the next entitlement refresh.
+const PROVIDER_LEDGER_KEYS: Array[String] = ["provider", "provider_record_id",
+	"provider_entitlement", "provider_expires_at"]
+
+func is_provider_claim_recorded(record_id: String) -> bool:
+	var wanted := record_id.strip_edges()
+	if wanted.is_empty():
+		return false
+	for entry in purchase_ledger:
+		if str(entry.get("provider_record_id", "")) == wanted:
+			return true
+	return false
+
+## Applies provider-confirmed grants, each exactly once. Provider state is
+## recorded in the gameplay ledger as ownership; it never overwrites gameplay
+## progress, and no grant is inferred from a balance the client owns.
+## Returns {"granted": int, "skipped": int, "diamonds": int}.
+func grant_provider_entitlements(grants: Array[Dictionary]) -> Dictionary:
+	var accepted: Array[Dictionary] = []
+	var diamonds_total := 0
+	for grant in grants:
+		var record_id := str(grant.get("provider_record_id", "")).strip_edges()
+		var grant_diamonds := int(grant.get("diamonds", 0))
+		if record_id.is_empty() or grant_diamonds <= 0:
+			continue
+		if is_provider_claim_recorded(record_id):
+			continue
+		accepted.append(grant)
+		diamonds_total += grant_diamonds
+	var skipped := grants.size() - accepted.size()
+	if accepted.is_empty():
+		return {"granted": 0, "skipped": skipped, "diamonds": 0}
+	for grant in accepted:
+		var row := {
+			"id": str(grant.get("id", "")),
+			"kind": str(grant.get("kind", "provider_embermarks")),
+			"price": int(grant.get("diamonds", 0)),
+			"currency": "diamonds",
+		}
+		for key in PROVIDER_LEDGER_KEYS:
+			if grant.has(key):
+				row[key] = grant[key]
+		purchase_ledger.append(row)
+	add_diamonds(diamonds_total, "Ember marks delivered — thank you for the support.")
+	save_game()
+	return {"granted": accepted.size(), "skipped": skipped, "diamonds": diamonds_total}
 
 func queue_cloud_intent(action_id: String, action: String, payload: Dictionary) -> bool:
 	var queued := cloud_sync_queue.enqueue(action_id, action, payload)
@@ -1451,6 +2168,31 @@ func acknowledge_cloud_intent(action_id: String) -> bool:
 	return acknowledged
 
 # === Inventory ===
+## The trader's asking price for an item, read from the item's own def. This is
+## the single pricing source: stock listings, buy buttons, affordability hints
+## and resale all derive from it.
+static func gear_buy_price(id: String, kind: String) -> int:
+	match kind:
+		"weapon":
+			return maxi(0, int(WEAPON_DEFS.get(id, {}).get("price", 0)))
+		"armor":
+			return maxi(0, int(ARMOR_DEFS.get(id, {}).get("price", 0)))
+		"potion", "consumable", "item":
+			return maxi(0, int(CONSUMABLE_DEFS.get(id, {}).get("price", 0)))
+	return 0
+
+## What a trader pays for goods: half their asking price, floored at one coin
+## for anything genuinely owned. Both the sale and the shop's displayed offer
+## read this, so an item can never be advertised at one price and sold at
+## another.
+const CONSUMABLE_SELL_VALUE := 6
+
+static func gear_sell_value(id: String, kind: String) -> int:
+	var asking := gear_buy_price(id, kind)
+	if asking > 0:
+		return maxi(1, asking / 2)
+	return CONSUMABLE_SELL_VALUE
+
 func sell_shop_item(id: String, kind: String) -> Dictionary:
 	var value := 0
 	if kind == "weapon":
@@ -1458,7 +2200,7 @@ func sell_shop_item(id: String, kind: String) -> Dictionary:
 			return {"success": false, "message": "Equip another weapon before selling this one."}
 		for i in forged_weapons.size():
 			if forged_weapons[i].get("id", "") == id:
-				value = maxi(1, int(WEAPON_DEFS.get(id, {}).get("price", 1)) / 2)
+				value = gear_sell_value(id, kind)
 				forged_weapons.remove_at(i)
 				break
 	elif kind == "armor":
@@ -1466,14 +2208,14 @@ func sell_shop_item(id: String, kind: String) -> Dictionary:
 			return {"success": false, "message": "Equip another armor piece before selling this one."}
 		for i in forged_armors.size():
 			if forged_armors[i].get("id", "") == id:
-				value = maxi(1, int(ARMOR_DEFS.get(id, {}).get("price", 1)) / 2)
+				value = gear_sell_value(id, kind)
 				forged_armors.remove_at(i)
 				break
 	else:
 		var item := get_item(id)
 		if item.is_empty() or int(item.get("quantity", 0)) <= 0:
 			return {"success": false, "message": "You have none of that to sell."}
-		value = 6
+		value = gear_sell_value(id, kind)
 		item.quantity -= 1
 	if value <= 0:
 		return {"success": false, "message": "The trader cannot buy that."}
@@ -1490,10 +2232,18 @@ func get_item(item_id: String) -> Dictionary:
 	return {}
 
 func add_loot(item_id: String, amount: int, notice: String = "", display_count: int = -1) -> void:
+	if amount <= 0:
+		return
 	var item = get_item(item_id)
 	if not item:
-		return
-	item.quantity += amount
+		# A picked-up consumable the player has never owned must still land in
+		# the satchel instead of silently vanishing through the empty lookup.
+		item = _make_consumable(item_id)
+		if item.is_empty():
+			return
+		item["quantity"] = 0
+		inventory.append(item)
+	item.quantity = int(item.get("quantity", 0)) + amount
 	inventory_changed.emit()
 	if notice:
 		loot_notice = notice
@@ -1505,13 +2255,15 @@ func add_loot(item_id: String, amount: int, notice: String = "", display_count: 
 
 # === Raw materials ===
 func add_material(material_id: String, qty: int = 1) -> void:
-	if not MATERIAL_DEFS.has(material_id):
+	if not MATERIAL_DEFS.has(material_id) or qty <= 0:
 		return
-	raw_materials[material_id] = int(raw_materials.get(material_id, 0)) + maxi(1, qty)
+	raw_materials[material_id] = int(raw_materials.get(material_id, 0)) + qty
 	materials_changed.emit()
 	save_game()
 
 func remove_material(material_id: String, qty: int = 1) -> bool:
+	if not MATERIAL_DEFS.has(material_id) or qty <= 0:
+		return false
 	var current: int = int(raw_materials.get(material_id, 0))
 	if current < qty:
 		return false
@@ -1523,7 +2275,8 @@ func remove_material(material_id: String, qty: int = 1) -> bool:
 	return true
 
 func has_material(material_id: String, qty: int = 1) -> bool:
-	return int(raw_materials.get(material_id, 0)) >= qty
+	return MATERIAL_DEFS.has(material_id) and qty >= 0 \
+		and int(raw_materials.get(material_id, 0)) >= qty
 
 func get_material_qty(material_id: String) -> int:
 	return int(raw_materials.get(material_id, 0))
@@ -1558,8 +2311,14 @@ func craft_transaction(category: String, output_id: String, output_qty: int,
 			gear_def = WEAPON_DEFS.get(output_id, {}).duplicate(true)
 		"armor":
 			gear_def = ARMOR_DEFS.get(output_id, {}).duplicate(true)
-		"potion", "utility":
+		"potion":
 			inventory_item = get_item(output_id)
+			if inventory_item.is_empty():
+				inventory_item = _make_consumable(output_id)
+		"utility":
+			inventory_item = get_item(output_id)
+			if inventory_item.is_empty():
+				inventory_item = _make_consumable(output_id)
 		_:
 			return {"success": false, "message": "Unsupported recipe category."}
 	if gear_def.is_empty() and inventory_item.is_empty():
@@ -1595,7 +2354,15 @@ func craft_transaction(category: String, output_id: String, output_qty: int,
 		gear_def["crafted"] = true
 		_upsert_crafted_gear(forged_armors, gear_def)
 	else:
-		inventory_item.quantity = int(inventory_item.get("quantity", 0)) + qty
+		var existing := get_item(output_id)
+		if existing.is_empty():
+			if inventory_item.is_empty():
+				return {"success": false, "message": "Crafting output is not defined."}
+			existing = inventory_item
+			inventory.append(existing)
+			existing.quantity = maxi(int(existing.get("quantity", 0)), qty)
+		else:
+			existing.quantity = int(existing.get("quantity", 0)) + qty
 
 	gold_changed.emit(gold)
 	materials_changed.emit()
@@ -1614,10 +2381,37 @@ func craft_transaction(category: String, output_id: String, output_qty: int,
 	return {"success": true, "name": crafted_name, "qty": qty,
 		"category": category, "output_id": output_id}
 
+## Replay the per-level compounding the forge uses, so a replaced piece keeps
+## the exact stat its upgrades had earned.
+static func upgraded_stat(base_stat: int, upgrade_level: int) -> int:
+	var value := base_stat
+	for level in maxi(upgrade_level, 0):
+		value += upgrade_stat_gain(value, level)
+	return value
+
+## Preserve forge work when an owned piece is replaced by a fresh copy of the
+## same gear id — a duplicate drop, a boss reward, or a recrafted recipe. The
+## incoming record is authoritative for everything except invested upgrades,
+## which it can only ever gain.
+static func merge_upgrade_progress(existing: Dictionary, incoming: Dictionary,
+		stat_key: String) -> Dictionary:
+	var existing_level := int(existing.get("upgrade_level", 0))
+	if existing_level <= 0:
+		return incoming
+	var merged := incoming.duplicate(true)
+	if int(merged.get("upgrade_level", 0)) >= existing_level:
+		return merged
+	merged["upgrade_level"] = existing_level
+	merged[stat_key] = upgraded_stat(int(merged.get(stat_key, 0)), existing_level)
+	if bool(existing.get("crafted", false)):
+		merged["crafted"] = true
+	return merged
+
 func _upsert_crafted_gear(collection: Array[Dictionary], gear: Dictionary) -> void:
+	var stat_key := "defense" if gear.has("defense") else "atk"
 	for i in collection.size():
 		if collection[i].get("id", "") == gear.get("id", ""):
-			collection[i] = gear.duplicate(true)
+			collection[i] = merge_upgrade_progress(collection[i], gear, stat_key)
 			return
 	collection.append(gear.duplicate(true))
 
@@ -1625,12 +2419,15 @@ func add_weapon(weapon: Dictionary, equip: bool = false, notice: String = "") ->
 	weapon = _normalize_weapon_record(weapon)
 	if not weapon.has("id"):
 		return
-	var stored = weapon.duplicate(true)
+	var stored: Dictionary = weapon.duplicate(true)
+	var merged := false
 	for i in forged_weapons.size():
-		if forged_weapons[i].get("id", "") == stored.id:
+		if forged_weapons[i].get("id", "") == str(stored.id):
+			stored = merge_upgrade_progress(forged_weapons[i], stored, "atk")
 			forged_weapons[i] = stored
+			merged = true
 			break
-	if not forged_weapons.any(func(item): return item.get("id", "") == stored.id):
+	if not merged:
 		forged_weapons.append(stored)
 	if equip:
 		equipped_weapon = stored.duplicate(true)
@@ -1739,9 +2536,17 @@ func upgrade_weapon(weapon_id: String) -> Dictionary:
 	var gold_cost: int = cost.get("gold_cost", 0)
 	if not has_material(mat_id, mat_cost):
 		return {"success": false, "message": "Need %d %s." % [mat_cost, MATERIAL_DEFS.get(mat_id, {}).get("name", mat_id)]}
-	if not spend_gold(gold_cost):
+	if gold_cost <= 0 or gold < gold_cost:
 		return {"success": false, "message": "Need %d gold." % gold_cost}
-	remove_material(mat_id, mat_cost)
+	# Apply both costs together. The public spend/remove helpers intentionally
+	# remain save-aware for normal shop and gathering calls, but an upgrade must
+	# not persist a half-completed debit between its two resource mutations.
+	gold -= gold_cost
+	raw_materials[mat_id] = get_material_qty(mat_id) - mat_cost
+	if raw_materials[mat_id] <= 0:
+		raw_materials.erase(mat_id)
+	gold_changed.emit(gold)
+	materials_changed.emit()
 	var new_level: int = int(weapon.get("upgrade_level", 0)) + 1
 	weapon["upgrade_level"] = new_level
 	weapon["atk"] = int(weapon.get("atk", 8)) + cost.get("stat_gain", 0)
@@ -1803,9 +2608,14 @@ func upgrade_armor(armor_id: String) -> Dictionary:
 	var gold_cost: int = cost.get("gold_cost", 0)
 	if not has_material(mat_id, mat_cost):
 		return {"success": false, "message": "Need %d %s." % [mat_cost, MATERIAL_DEFS.get(mat_id, {}).get("name", mat_id)]}
-	if not spend_gold(gold_cost):
+	if gold_cost <= 0 or gold < gold_cost:
 		return {"success": false, "message": "Need %d gold." % gold_cost}
-	remove_material(mat_id, mat_cost)
+	gold -= gold_cost
+	raw_materials[mat_id] = get_material_qty(mat_id) - mat_cost
+	if raw_materials[mat_id] <= 0:
+		raw_materials.erase(mat_id)
+	gold_changed.emit(gold)
+	materials_changed.emit()
 	var new_level: int = int(armor.get("upgrade_level", 0)) + 1
 	armor["upgrade_level"] = new_level
 	armor["defense"] = int(armor.get("defense", 3)) + cost.get("stat_gain", 0)
@@ -1828,6 +2638,74 @@ func upgrade_armor(armor_id: String) -> Dictionary:
 			"gold": gold_cost, "material_id": mat_id, "material": mat_cost})
 	save_game()
 	return {"success": true, "level": new_level, "defense": armor.get("defense", 0)}
+
+# === Salvage ===
+## Gear can be broken back down into the iron it was built from. The satchel
+## has always promised this on the item sheet ("SALVAGE n IRON") while no such
+## action existed; these are the authoritative values both surfaces read.
+func get_weapon_salvage_value(weapon: Dictionary) -> int:
+	return maxi(1, int(weapon.get("atk", 0)) / 3)
+
+func get_armor_salvage_value(armor: Dictionary) -> int:
+	return maxi(1, int(armor.get("defense", 0)))
+
+## Why salvage is unavailable, or an empty string when it is allowed.
+func salvage_blocker(item_id: String, kind: String) -> String:
+	if kind == "weapon":
+		if equipped_weapon.get("id", "") == item_id:
+			return "Equip another weapon before salvaging this one."
+		# The starting weapon lives only in the equipped slot, so a lone forged
+		# weapon is still salvageable while something is held.
+		if forged_weapons.size() <= 1 and equipped_weapon.is_empty():
+			return "You would be left with no weapon."
+	elif kind == "armor":
+		if equipped_armor.get("id", "") == item_id:
+			return "Equip another armor piece before salvaging this one."
+	else:
+		return "Only gear can be salvaged."
+	return ""
+
+func salvage_gear(item_id: String, kind: String) -> Dictionary:
+	var blocker := salvage_blocker(item_id, kind)
+	if not blocker.is_empty():
+		return {"success": false, "message": blocker}
+	var value := 0
+	var display := item_id
+	if kind == "weapon":
+		for i in forged_weapons.size():
+			var weapon: Dictionary = forged_weapons[i]
+			if str(weapon.get("id", "")) != item_id:
+				continue
+			value = get_weapon_salvage_value(weapon)
+			display = str(weapon.get("name", item_id))
+			forged_weapons.remove_at(i)
+			break
+	else:
+		for i in forged_armors.size():
+			var armor: Dictionary = forged_armors[i]
+			if str(armor.get("id", "")) != item_id:
+				continue
+			value = get_armor_salvage_value(armor)
+			display = str(armor.get("name", item_id))
+			forged_armors.remove_at(i)
+			break
+	if value <= 0:
+		return {"success": false, "message": "Nothing usable can be recovered."}
+	var material_id := "iron_shard"
+	raw_materials[material_id] = int(raw_materials.get(material_id, 0)) + value
+	materials_changed.emit()
+	inventory_changed.emit()
+	loot_notice = "Salvaged %s for %d %s." % [display, value,
+		MATERIAL_DEFS.get(material_id, {}).get("name", material_id)]
+	loot_count = value
+	loot_pulse += 1
+	loot_received.emit(loot_notice, value)
+	record_activity("SALVAGE %s · %d" % [item_id, value])
+	cloud_sync_queue.enqueue("salvage-%s-%d" % [item_id, loot_pulse], "salvage_gear",
+		{"item_id": item_id, "kind": kind, "material_id": material_id, "quantity": value})
+	save_game()
+	return {"success": true, "message": "Salvaged %s." % display,
+		"material_id": material_id, "quantity": value, "name": display}
 
 const ELEMENT_SWITCH_COST := 24
 const ELEMENT_SWITCHES := ["fire", "frost", "shock", "nature"]
@@ -1916,17 +2794,18 @@ func use_item(item_id: String) -> String:
 	var item = get_item(item_id)
 	if not item or item.kind != ItemKind.CONSUMABLE or item.quantity < 1:
 		return "That satchel pocket holds nothing usable right now."
-	
-	var restored = heal(MOSS_TONIC_HEAL)
+	var item_name := str(item.get("name", "consumable"))
+	var heal_amount := int(item.get("heal", MOSS_TONIC_HEAL))
+	var restored = heal(heal_amount)
 	if restored <= 0:
-		return "You save the Moss Tonic; your lantern is already at full warmth."
+		return "You save the %s; your lantern is already at full warmth." % item_name
 	
 	item.quantity -= 1
 	loot_notice = ""
 	loot_count = 0
 	inventory_changed.emit()
 	save_game()
-	return "You drink a Moss Tonic and recover %d warmth." % restored
+	return "You drink %s and recover %d warmth." % [item_name, restored]
 
 # === XP / Leveling ===
 # grant_xp lives in the Progression block (full curve + multi-level-ups).
@@ -1946,7 +2825,7 @@ const SAVE_PATH := "user://embervale_save.cfg"
 const CORRUPT_SAVE_PATH := "user://embervale_save.corrupt.cfg"
 ## Bump when the on-disk save layout changes. Loads refuse a file whose schema
 ## is NEWER than this build supports (it may contain fields we cannot honor).
-const SAVE_SCHEMA_VERSION := 3
+const SAVE_SCHEMA_VERSION := 5
 ## Hard ceilings applied on load so a torn or hand-edited save cannot push the
 ## player into absurd values (e.g. a negative wallet or 64-bit stat overflow).
 const MAX_LEVEL := 99
@@ -1954,6 +2833,10 @@ const MAX_CURRENCY := 999_999
 const MAX_STAT_VALUE := 999
 const MAX_STAT_POINTS := 999
 var save_path: String = SAVE_PATH
+const SAVE_DEBOUNCE_SECONDS: float = 0.35
+var _save_service: SaveService = null
+var _save_flush_timer: Timer = null
+var _save_dirty: bool = false
 
 ## Read-only support export. Local progression is portable diagnostic data;
 ## paid ownership is deliberately represented as non-authoritative records and
@@ -1985,6 +2868,7 @@ func build_data_export() -> Dictionary:
 			"equipped_armor": equipped_armor.get("id", ""),
 			"unlocked_realms": unlocked_realms.duplicate(),
 			"activity_history": activity_history.duplicate(),
+			"world_activity_state": world_activity_state.duplicate(true),
 			"camp": get_node_or_null("/root/CampProgression").to_dict() if get_node_or_null("/root/CampProgression") != null else {},
 		},
 		"entitlements": {
@@ -1996,9 +2880,54 @@ func build_data_export() -> Dictionary:
 	}
 
 func has_save() -> bool:
-	return FileAccess.file_exists(save_path)
+	_ensure_save_service()
+	return _save_service.has_recoverable_save(save_path)
 
+## Compatibility entry point for existing gameplay callers. Mutations request a
+## save here; the timer coalesces bursts such as reward batches and UI actions.
+## Critical lifecycle and progression paths call flush_save() explicitly.
 func save_game() -> void:
+	_ensure_save_service()
+	_save_dirty = true
+	if _save_flush_timer != null and is_inside_tree():
+		_save_flush_timer.start(SAVE_DEBOUNCE_SECONDS)
+
+func flush_save() -> bool:
+	_ensure_save_service()
+	if _save_flush_timer != null and _save_flush_timer.is_inside_tree():
+		_save_flush_timer.stop()
+	if not _save_dirty and _save_service.has_recoverable_save(save_path):
+		return true
+	var success := _save_service.write_config(_build_save_config(), save_path)
+	if success:
+		_save_dirty = false
+	else:
+		push_error("GameState: failed to persist save at '%s'." % save_path)
+	return success
+
+func is_save_dirty() -> bool:
+	return _save_dirty
+
+func _on_save_flush_timeout() -> void:
+	flush_save()
+
+func _corrupt_save_path() -> String:
+	return CORRUPT_SAVE_PATH if save_path == SAVE_PATH \
+		else _save_service.corrupt_path(save_path)
+
+func _ensure_save_service() -> void:
+	if _save_service == null:
+		_save_service = SAVE_SERVICE_SCRIPT.new()
+	if _save_flush_timer != null:
+		return
+	_save_flush_timer = Timer.new()
+	_save_flush_timer.name = "SaveFlushTimer"
+	_save_flush_timer.one_shot = true
+	_save_flush_timer.process_mode = Node.PROCESS_MODE_ALWAYS
+	_save_flush_timer.timeout.connect(_on_save_flush_timeout)
+	add_child(_save_flush_timer)
+
+func _build_save_config() -> ConfigFile:
 	var cfg := ConfigFile.new()
 	cfg.set_value("meta", "schema_version", SAVE_SCHEMA_VERSION)
 	cfg.set_value("meta", "content_schema", CONTENT_SCHEMA.CURRENT_VERSION)
@@ -2007,6 +2936,8 @@ func save_game() -> void:
 	cfg.set_value("progress", "expedition_run_id", expedition_run_id)
 	cfg.set_value("progress", "activity_recovery", activity_recovery)
 	cfg.set_value("progress", "route_respawn_position", route_respawn_position)
+	cfg.set_value("progress", "bramblewood_expansion", bramblewood_expansion)
+	cfg.set_value("progress", "world_activity_state", world_activity_state)
 	cfg.set_value("progress", "xp", xp)
 	cfg.set_value("progress", "level", level)
 	cfg.set_value("progress", "hp", hp)
@@ -2045,6 +2976,7 @@ func save_game() -> void:
 	cfg.set_value("progress", "boss_reward_selections", boss_reward_selections)
 	cfg.set_value("progress", "quest_reward_claims", quest_reward_claims)
 	cfg.set_value("progress", "opened_chests", opened_chests)
+	cfg.set_value("progress", "pending_chest_drops", pending_chest_drops)
 	cfg.set_value("progress", "active_cosmetic_ids", active_cosmetic_ids)
 	cfg.set_value("progress", "raw_materials", raw_materials)
 	cfg.set_value("progress", "gathered_nodes", gathered_nodes)
@@ -2055,23 +2987,32 @@ func save_game() -> void:
 	cfg.set_value("progress", "pinned_objective_id", pinned_objective_id)
 	cfg.set_value("progress", "completed_quizzes", completed_quizzes)
 	cfg.set_value("progress", "activity_history", activity_history)
+	cfg.set_value("daily", "last_daily_bonus", last_daily_bonus)
+	cfg.set_value("daily", "daily_streak", daily_streak)
 	var camp := get_node_or_null("/root/CampProgression")
 	if camp != null and camp.has_method("to_dict"):
 		cfg.set_value("progress", "camp", camp.to_dict())
 	var sm := get_node_or_null("/root/StoryManager")
 	if sm != null and sm.has_method("save_payload"):
 		cfg.set_value("story", "payload", sm.save_payload())
-	cfg.save(save_path)
+	return cfg
 
 func load_game() -> bool:
+	_ensure_save_service()
+	if _save_dirty and not flush_save():
+		return false
 	if not has_save():
 		return false
-	var cfg := ConfigFile.new()
-	if cfg.load(save_path) != OK:
-		# Preserve the unreadable source for recovery/support; never overwrite an
-		# earlier forensic copy during repeated startup attempts.
-		if not FileAccess.file_exists(CORRUPT_SAVE_PATH):
-			DirAccess.copy_absolute(save_path, CORRUPT_SAVE_PATH)
+	# Older saves predate the meta section. They remain valid inputs and use the
+	# default schema version below; newer schemas are still rejected explicitly.
+	var load_result := _save_service.load_config(save_path, _corrupt_save_path(), [], ["progress"])
+	var cfg := load_result.get("config") as ConfigFile
+	if cfg == null:
+		return false
+	# ConfigFile can parse a garbage string as an empty document. Reject that
+	# shape so SaveService can recover the last known-good backup, while still
+	# accepting schema-less legacy saves that contain real progression sections.
+	if cfg.get_sections().is_empty() or not cfg.has_section("progress"):
 		return false
 	# Refuse a save written by a NEWER schema: fields it carries could not be
 	# interpreted as this build expects, and honoring them would corrupt state.
@@ -2095,14 +3036,13 @@ func load_game() -> bool:
 		if saved_respawn is Vector2 else _respawn_for_checkpoint(route_checkpoint_id)
 	xp = clampi(int(cfg.get_value("progress", "xp", 0)), 0, 100_000_000)
 	level = clampi(int(cfg.get_value("progress", "level", 1)), 1, MAX_LEVEL)
-	hp = cfg.get_value("progress", "hp", MAX_HP_BASE)
+	var saved_hp := maxi(0, int(cfg.get_value("progress", "hp", MAX_HP_BASE)))
 	shard_collected = cfg.get_value("progress", "shard_collected", false)
 	beacon_lit = cfg.get_value("progress", "beacon_lit", false)
 	var world_state := get_node_or_null("/root/WorldState")
 	if world_state != null:
 		world_state.set("weather_locked",
 			bool(cfg.get_value("progress", "weather_locked", false)))
-	hp = clampi(hp, 0, max_hp)
 	var items: Dictionary = CONTENT_SCHEMA.migrate_inventory(
 		cfg.get_value("progress", "inventory", {}))
 	for item in inventory:
@@ -2119,11 +3059,16 @@ func load_game() -> bool:
 		equipped_weapon = CONTENT_SCHEMA.migrate_gear(saved_equipped, "weapon")
 	else:
 		equipped_weapon = _get_default_weapon()
+	# Older saves stored the starter weapon only in the equipped slot; adopt it
+	# so upgrades, comparison and salvage work for veteran saves too.
+	_ensure_equipped_weapon_in_ledger()
 	_refresh_skill_slots()
 	gold = clampi(int(cfg.get_value("progress", "gold",
 		int(cfg.get_value("progress", "embers", gold)))), 0, MAX_CURRENCY)
 	diamonds = clampi(int(cfg.get_value("progress", "diamonds", diamonds)),
 		0, MAX_CURRENCY)
+	last_daily_bonus = maxi(0, int(cfg.get_value("daily", "last_daily_bonus", 0)))
+	daily_streak = clampi(int(cfg.get_value("daily", "daily_streak", 0)), 0, 3650)
 	gold_changed.emit(gold)
 	diamonds_changed.emit(diamonds)
 	forged_armors.clear()
@@ -2149,12 +3094,28 @@ func load_game() -> bool:
 	purchase_ledger.clear()
 	var saved_purchases = cfg.get_value("progress", "purchase_ledger", [])
 	if saved_purchases is Array:
-		for purchase in saved_purchases:
-			if purchase is Dictionary and not str(purchase.get("id", "")).is_empty():
-				purchase_ledger.append({"id": str(purchase.get("id", "")),
-					"kind": str(purchase.get("kind", "")),
-					"price": maxi(0, int(purchase.get("price", 0))),
-					"currency": str(purchase.get("currency", "gold"))})
+		for raw_purchase in saved_purchases:
+			if not raw_purchase is Dictionary:
+				continue
+			var purchase: Dictionary = raw_purchase
+			if str(purchase.get("id", "")).is_empty():
+				continue
+			var row := {"id": str(purchase.get("id", "")),
+				"kind": str(purchase.get("kind", "")),
+				"price": maxi(0, int(purchase.get("price", 0))),
+				"currency": str(purchase.get("currency", "gold"))}
+			# Provider rows are only trusted when they are internally consistent
+			# with the catalog. A hand-edited record id or amount is stripped, so
+			# a forged claim cannot block or fabricate a real one.
+			var is_provider_row := purchase.has("provider_record_id") \
+				or purchase.has("provider_entitlement")
+			var provider_ok := not is_provider_row \
+				or STORE_SECURITY.validate_provider_row(purchase).is_empty()
+			if provider_ok:
+				for key in PROVIDER_LEDGER_KEYS:
+					if purchase.has(key):
+						row[key] = purchase[key]
+			purchase_ledger.append(row)
 	cloud_sync_queue.restore(cfg.get_value("progress", "cloud_sync_queue", []))
 	var scan_state: Dictionary = CONTENT_SCHEMA.migrate_scan_state(
 		cfg.get_value("progress", "scans_remaining", FREE_SCANS),
@@ -2176,10 +3137,9 @@ func load_game() -> bool:
 		stat_luk = clampi(int(saved_stats.get("luk", 0)), 0, MAX_STAT_VALUE)
 		stat_end = clampi(int(saved_stats.get("end", 0)), 0, MAX_STAT_VALUE)
 	max_hp = max_hp_total()
-	# Rebalance heal: bring HP up to the (possibly larger) capacity so the
-	# bigger health pool reads immediately after the base-HP change.
-	hp = max_hp
-	hp_changed.emit(0, hp)
+	# Apply the saved damage after stat-derived capacity is known. Loading must
+	# preserve a damaged player instead of silently healing to full.
+	hp = clampi(saved_hp, 0, max_hp)
 	current_realm = _normalize_realm(str(cfg.get_value("progress", "current_realm", "bramblewood")))
 	unlocked_realms.clear()
 	var saved_realms = cfg.get_value("progress", "unlocked_realms", [])
@@ -2213,6 +3173,9 @@ func load_game() -> bool:
 		if saved_quest_claims is Dictionary else {}
 	var saved_chests = cfg.get_value("progress", "opened_chests", {})
 	opened_chests = saved_chests.duplicate(true) if saved_chests is Dictionary else {}
+	var saved_pending = cfg.get_value("progress", "pending_chest_drops", {})
+	pending_chest_drops = saved_pending.duplicate(true) \
+		if saved_pending is Dictionary else {}
 	var saved_ids = cfg.get_value("progress", "active_cosmetic_ids", {})
 	active_cosmetic_ids = saved_ids.duplicate(true) if saved_ids is Dictionary else {}
 	var saved_mats = cfg.get_value("progress", "raw_materials", {})
@@ -2221,6 +3184,8 @@ func load_game() -> bool:
 	gathered_nodes = saved_gn.duplicate(true) if saved_gn is Dictionary else {}
 	var saved_lm = cfg.get_value("progress", "discovered_landmarks", {})
 	discovered_landmarks = saved_lm.duplicate(true) if saved_lm is Dictionary else {}
+	world_activity_state = _normalize_world_activity_state(
+		cfg.get_value("progress", "world_activity_state", {}))
 	onboarding_completed = bool(cfg.get_value("progress", "onboarding_completed", false))
 	onboarding_step = clampi(int(cfg.get_value("progress", "onboarding_step", 0)),
 		0, ONBOARDING_STEPS.size())
@@ -2239,6 +3204,21 @@ func load_game() -> bool:
 				activity_history.append(str(entry).strip_edges())
 		while activity_history.size() > ACTIVITY_HISTORY_CAP:
 			activity_history.pop_back()
+	var saved_expansion = cfg.get_value("progress", "bramblewood_expansion", {})
+	if saved_expansion is Dictionary:
+		var discovered_expansion: Array = saved_expansion.get("discovered_pockets", []) \
+			if saved_expansion.get("discovered_pockets", []) is Array else []
+		var normalized_discovered: Array[String] = []
+		for pocket_id in discovered_expansion:
+			var normalized_pocket := str(pocket_id).strip_edges().to_lower()
+			if not normalized_pocket.is_empty() and normalized_pocket not in normalized_discovered:
+				normalized_discovered.append(normalized_pocket)
+		bramblewood_expansion = {
+			"version": 1,
+			"started": bool(saved_expansion.get("started", false)),
+			"completed": bool(saved_expansion.get("completed", false)),
+			"discovered_pockets": normalized_discovered,
+		}
 	var camp := get_node_or_null("/root/CampProgression")
 	if camp != null and camp.has_method("from_dict"):
 		camp.from_dict(cfg.get_value("progress", "camp", {}))
@@ -2252,6 +3232,7 @@ func load_game() -> bool:
 	route_checkpoint_changed.emit(route_checkpoint_id)
 	inventory_changed.emit()
 	weapon_changed.emit(equipped_weapon)
+	_save_dirty = false
 	return true
 
 func _sanitize_quest_objectives(saved) -> Array[Dictionary]:
@@ -2279,8 +3260,11 @@ func _sanitize_quest_objectives(saved) -> Array[Dictionary]:
 	return result
 
 func delete_save() -> void:
-	if has_save():
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(save_path))
+	_ensure_save_service()
+	if _save_flush_timer != null and _save_flush_timer.is_inside_tree():
+		_save_flush_timer.stop()
+	_save_service.delete_files(save_path, _corrupt_save_path())
+	_save_dirty = false
 
 
 # === Interface world-freeze (ref-counted) ===

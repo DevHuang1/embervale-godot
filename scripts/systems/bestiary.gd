@@ -2,6 +2,7 @@ extends Node
 class_name Bestiary
 
 const REALM_IDENTITY := preload("res://scripts/systems/realm_identity_catalog.gd")
+const BOSS_ROSTER := preload("res://scripts/systems/boss_roster_catalog.gd")
 
 ## === Bestiary — Realm + Wave + Enemy Variant Registry ===
 ## Single source of truth for:
@@ -22,7 +23,7 @@ const REALMS := {
 		"enemy_tint":    Color(0.22, 0.40, 0.28, 1.0),
 		"eye_glow":      Color(0.20, 1.00, 0.44, 1.0),
 		"archetype":     "hushling",
-		"boss_key":      "hushling_matriarch",
+		"boss_key":      "bramblewood_thorn_regent",
 		"grade":         { "saturation": 1.0, "temperature": 0.0 },
 	},
 	"mistfen": {
@@ -33,7 +34,7 @@ const REALMS := {
 		"enemy_tint":    Color(0.15, 0.27, 0.34, 1.0),
 		"eye_glow":      Color(0.30, 0.82, 0.94, 1.0),
 		"archetype":     "fenling",
-		"boss_key":      "moonfen_broodmother",
+		"boss_key":      "mistfen_fogmaw",
 		"grade":         { "saturation": 0.80, "temperature": -0.15 },
 	},
 	"heartwood": {
@@ -44,7 +45,7 @@ const REALMS := {
 		"enemy_tint":    Color(0.25, 0.10, 0.07, 1.0),
 		"eye_glow":      Color(1.00, 0.30, 0.08, 1.0),
 		"archetype":     "ember_warden",
-		"boss_key":      "heartwood_sentinel",
+		"boss_key":      "heartwood_cinderhart",
 		"grade":         { "saturation": 1.10, "temperature": 0.20 },
 	},
 	"moonfen": {
@@ -55,7 +56,7 @@ const REALMS := {
 		"enemy_tint":    Color(0.18, 0.20, 0.38, 1.0),
 		"eye_glow":      Color(0.32, 0.90, 1.00, 1.0),
 		"archetype":     "moonfen_fenling",
-		"boss_key":      "moonfen_matriarch",
+		"boss_key":      "moonfen_tide_oracle",
 		"grade":         { "saturation": 0.65, "temperature": -0.25 },
 	},
 }
@@ -213,6 +214,24 @@ const BOSS_DEFS := {
 					"radius": 14.0, "dmg_mult": 1.8}, "rarity": 3},
 		},
 	},
+	"rootbound_warden": {
+		"name": "ROOTBOUND WARDEN",
+		"title": "the Court's Last Sentinel",
+		"scene": "res://scenes/entities/boss_biome.tscn",
+		"hp": 640, "atk": 13, "speed": 4.2, "scale": 1.08,
+		"palette": [Color(0.10, 0.22, 0.12), Color(0.95, 0.58, 0.18)],
+		"silhouette": "rootbound_crown", "model_profile": "boss_bramblewood_rootbound",
+		"diamond_reward": 4,
+		"special_1": {"kind": "root_lattice", "cooldown": 10.0, "damage": 11},
+		"special_2": {"kind": "root_guard", "cooldown": 17.0, "count": 2},
+		"ultimate": {"kind": "spiral", "cooldown": 22.0, "eruptions": 18, "damage": 21},
+		"intro": "The broken beacon answers. A rootbound sentinel rises to seal the court.",
+		"rewards": {
+			"xp": 300,
+			"loot": {"hushling_thorn": 5},
+			"first_kill_materials": {"bramble_wood": 4, "iron_shard": 3},
+		},
+	},
 	"fenmaw": {
 		"name": "FENMAW",
 		"title": "the Drowned Choir",
@@ -280,7 +299,14 @@ const BOSS_DEFS := {
 }
 
 static func boss_def(boss_id: String) -> Dictionary:
+	# Keep the legacy catalog available to existing altar/tests/save payloads,
+	# while new canonical IDs resolve to the articulated roster.
+	if BOSS_ROSTER.CANONICAL_IDS.has(boss_id):
+		return BOSS_ROSTER.definition_for(boss_id)
 	return BOSS_DEFS.get(boss_id, {})
+
+static func boss_roster_ids() -> Array[String]:
+	return BOSS_ROSTER.CANONICAL_IDS.duplicate()
 
 static func skill_pool(boss_id: String) -> Array:
 	return boss_def(boss_id).get("skill_pool", [])
@@ -331,7 +357,7 @@ const WORLD_REALMS := {
 const BIOMES := {
 	REALM_BRAMBLEWOOD: {
 		"title": "Bramblewood",
-		"boss_id": "thornhide_alpha",
+		"boss_id": "bramblewood_thorn_regent",
 		"final_boss_biome": false,
 		"pack": {"normal": 2, "hard": 1},
 		"pack_cap": 5,
@@ -340,7 +366,7 @@ const BIOMES := {
 	},
 	REALM_MISTFEN: {
 		"title": "Mistfen",
-		"boss_id": "fenmaw",
+		"boss_id": "mistfen_fogmaw",
 		"final_boss_biome": false,
 		"pack": {"normal": 2, "hard": 1},
 		"pack_cap": 5,
@@ -350,7 +376,7 @@ const BIOMES := {
 	},
 	REALM_HEARTWOOD: {
 		"title": "Heartwood",
-		"boss_id": "cinderhart_colossus",
+		"boss_id": "heartwood_cinderhart",
 		"final_boss_biome": true,
 		"pack": {"normal": 1, "hard": 2},
 		"pack_cap": 4,
@@ -359,7 +385,7 @@ const BIOMES := {
 	},
 	REALM_MOONFEN: {
 		"title": "Moonfen",
-		"boss_id": "moonfen_oracle",
+		"boss_id": "moonfen_tide_oracle",
 		"final_boss_biome": false,
 		"pack": {"normal": 2, "hard": 1},
 		"pack_cap": 5,

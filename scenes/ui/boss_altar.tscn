@@ -59,6 +59,12 @@ text = ""
 autowrap_mode = 2
 horizontal_alignment = 1
 
+[node name="ExitButton" type="Button" parent="Root/VBox"]
+custom_minimum_size = Vector2(0, 52)
+layout_mode = 2
+text = "EXIT"
+tooltip_text = "Leave without customizing the boss"
+
 [node name="CustomBox" type="VBoxContainer" parent="Root/VBox"]
 visible = false
 layout_mode = 2

@@ -2,6 +2,7 @@ extends CharacterBody3D
 class_name BossBase
 
 const BOSS_LESSONS := preload("res://scripts/systems/boss_lesson_catalog.gd")
+const GAME_STATE_SCRIPT := preload("res://scripts/autoload/game_state.gd")
 
 ## === Boss Base Class ===
 ## Multi-phase, mechanics, arena control, unique rewards
@@ -13,8 +14,11 @@ signal attack_telegraphed(kind: String, radius: float, delay: float)
 signal encounter_reset
 signal phase_guidance_changed(phase: int, pattern: String, safe_zone: String)
 
-@onready var game_state: GameState = GameState
-@onready var audio: AudioManager = AudioManager
+## Autoload scripts are not class_name types in this project. Keep these
+## handles dynamically resolved so standalone boss tests compile while the
+## singleton call sites remain backward compatible.
+@onready var game_state: Variant = get_node_or_null("/root/GameState")
+@onready var audio: Variant = get_node_or_null("/root/AudioManager")
 @onready var body: MeshInstance3D = $Visual/Body
 @onready var animator: EntityAnimator = $Animator
 @onready var hitbox: Area3D = $Hitbox
@@ -126,6 +130,7 @@ var action_lock_timer := 0.0
 var encounter_origin := Vector3.ZERO
 var encounter_generation: int = 1
 var _death_finalized := false
+var _death_tween: Tween = null
 
 # Player personalization (idol mesh, palette, one pool skill, SFX preset).
 # Null = the untouched default boss.
@@ -183,9 +188,10 @@ func _ready() -> void:
 	_build_boss_details()
 
 	# Authored-model drop-in. Whispergrove Matriarchs now have two authored
-	# silhouettes; every other boss keeps its explicit profile or fallback.
-	if authored_model_profile == "boss_matriarch" \
-			and str(game_state.current_realm) == "whispergrove":
+	# silhouettes; the save layer canonicalizes the historical whispergrove
+	# alias to bramblewood, so the dedicated Matriarch scene is the stable
+	# selection boundary rather than a realm-string comparison.
+	if authored_model_profile == "boss_matriarch":
 		var grove_variants := ["boss_whispergrove_rootwarden", "boss_whispergrove_dewseer"]
 		authored_model_profile = grove_variants[clampi(authored_visual_variant, 0, 1)]
 	authored_model_mounted = CharacterRigLoader.try_if_wire(self, authored_model_profile)
@@ -265,6 +271,11 @@ func _process(delta: float) -> void:
 		var breathe := 0.86 + 0.14 * sin(_menace_t * rate) \
 			+ 0.06 * sin(_menace_t * rate * 2.7)
 		_boss_core_mat.emission_energy_multiplier = breathe * 2.4
+		# The authored rig's glow family breathes on the same clock, so the
+		# visible model keeps the procedural menace pulse.
+		if not _authored_surfaces.is_empty():
+			_surface_pulse = breathe
+			_refresh_authored_surfaces()
 	if _enrage_ring != null:
 		var show := enrage_active and not is_defeated
 		if _enrage_ring.visible != show:
@@ -606,6 +617,116 @@ func _on_hitbox_entered(area: Area3D) -> void:
 			dmg = 10
 		take_damage(dmg, area.global_position.direction_to(global_position))
 
+## === Visible-surface feedback ===
+## The authored V2 GLBs replace the procedural body, so damage flash, stage
+## tint, wear, and customization must land on the imported materials the
+## player actually sees. Surfaces are duplicated per boss instance so one
+## encounter can never re-theme another instance's shared GLB resource, and
+## the count is capped so a future asset cannot grow this loop without bound.
+const MAX_AUTHORED_SURFACES := 8
+const SURFACE_FLASH_COLOR := Color(1.0, 0.84, 0.47)
+var _authored_surfaces: Array[StandardMaterial3D] = []
+var _surface_is_glow: Dictionary = {}
+var _surface_base_albedo: Dictionary = {}
+var _surface_base_emission: Dictionary = {}
+var _surface_base_energy: Dictionary = {}
+var _surface_tint := Color.WHITE
+var _surface_flash := 0.0
+var _surface_wear := 0.0
+var _surface_pulse := 1.0
+var _surface_flash_tween: Tween = null
+
+## Adopt the mounted model's materials as the visible feedback targets.
+## Returns the number of material families adopted (0 when the procedural
+## silhouette is still the visible body, which keeps that path untouched).
+func adopt_authored_surfaces(rig: Node3D) -> int:
+	if rig == null:
+		return 0
+	var copies: Dictionary = {}
+	for mesh_value in rig.find_children("*", "MeshInstance3D", true, false):
+		var mesh_instance := mesh_value as MeshInstance3D
+		if mesh_instance == null or mesh_instance.mesh == null:
+			continue
+		for surface in mesh_instance.mesh.get_surface_count():
+			if copies.size() >= MAX_AUTHORED_SURFACES:
+				break
+			var source := mesh_instance.get_active_material(surface) as StandardMaterial3D
+			if source == null:
+				continue
+			if not copies.has(source):
+				var copy := source.duplicate() as StandardMaterial3D
+				if copy == null:
+					continue
+				# Emission is enabled once, here, so the per-hit flash never
+				# toggles a shader define (which would trigger a mobile shader
+				# recompile mid-fight). Resting energy stays at the imported
+				# value, which is zero for every non-glow family.
+				if not copy.emission_enabled:
+					copy.emission_enabled = true
+					copy.emission = Color.BLACK
+					copy.emission_energy_multiplier = 0.0
+				copies[source] = copy
+				_authored_surfaces.append(copy)
+				_surface_is_glow[copy] = source.emission_enabled
+				_surface_base_albedo[copy] = copy.albedo_color
+				_surface_base_emission[copy] = copy.emission
+				_surface_base_energy[copy] = copy.emission_energy_multiplier
+			mesh_instance.set_surface_override_material(surface, copies[source])
+	_refresh_authored_surfaces()
+	return _authored_surfaces.size()
+
+func _refresh_authored_surfaces() -> void:
+	if _authored_surfaces.is_empty():
+		return
+	for material in _authored_surfaces:
+		if not is_instance_valid(material):
+			continue
+		var base_albedo: Color = _surface_base_albedo.get(material, material.albedo_color)
+		var albedo := base_albedo.lerp(_surface_tint, _surface_wear * 0.45)
+		albedo = albedo.darkened(_surface_wear * 0.45).lerp(
+			SURFACE_FLASH_COLOR, _surface_flash * 0.85)
+		material.albedo_color = albedo
+		var is_glow := bool(_surface_is_glow.get(material, false))
+		var base_emission: Color = _surface_base_emission.get(material, Color.BLACK)
+		var emission := base_emission.lerp(_surface_tint, 0.65) if is_glow else base_emission
+		material.emission = emission.lerp(SURFACE_FLASH_COLOR, _surface_flash)
+		var energy: float = float(_surface_base_energy.get(material, 0.0))
+		if is_glow:
+			energy *= _surface_pulse
+		material.emission_energy_multiplier = energy + 1.8 * _surface_flash
+
+func set_surface_flash(value: float) -> void:
+	_surface_flash = clampf(value, 0.0, 1.0)
+	_refresh_authored_surfaces()
+
+func set_surface_tint(color: Color) -> void:
+	if color == Color.BLACK:
+		return
+	_surface_tint = color
+	_refresh_authored_surfaces()
+
+## Battle wear dulls the authored surfaces as the boss breaks down, matching
+## the procedural body's hp_wear band.
+func set_surface_wear(value: float) -> void:
+	_surface_wear = clampf(value, 0.0, 1.0)
+	_refresh_authored_surfaces()
+
+func _flash_authored_surfaces() -> void:
+	if _authored_surfaces.is_empty():
+		return
+	if _surface_flash_tween != null and _surface_flash_tween.is_valid():
+		_surface_flash_tween.kill()
+	_surface_flash_tween = create_tween()
+	_surface_flash_tween.tween_method(set_surface_flash, 0.0, 1.0, 0.05)
+	_surface_flash_tween.tween_method(set_surface_flash, 1.0, 0.0, 0.2)
+
+func _reset_authored_surfaces() -> void:
+	_surface_flash = 0.0
+	_surface_wear = 0.0
+	_surface_pulse = 1.0
+	_surface_tint = Color.WHITE
+	_refresh_authored_surfaces()
+
 func take_damage(amount: int, knockback_dir: Vector3, critical: bool = false) -> void:
 	if is_defeated:
 		return
@@ -627,11 +748,15 @@ func take_damage(amount: int, knockback_dir: Vector3, critical: bool = false) ->
 	var tween = create_tween()
 	tween.tween_property(body, "material_override:shader_parameter/flash_intensity", 1.0, 0.05)
 	tween.tween_property(body, "material_override:shader_parameter/flash_intensity", 0.0, 0.2)
+	_flash_authored_surfaces()
 	# Battle wear: bark dulls and darkens as the boss breaks down
 	if body.material_override is ShaderMaterial:
 		var ratio := clampf(float(hp) / float(maxi(max_hp, 1)), 0.0, 1.0)
 		body.material_override.set_shader_parameter("hp_wear",
 			clampf((0.45 - ratio) / 0.45, 0.0, 1.0) * 0.75)
+	if not _authored_surfaces.is_empty():
+		set_surface_wear(clampf((0.45 - float(hp) / float(maxi(max_hp, 1))) / 0.45,
+			0.0, 1.0) * 0.75)
 	
 	if boss_hp_bar:
 		boss_hp_bar.value = max(hp, 0)
@@ -655,6 +780,7 @@ func _evolve_for_phase(phase: int) -> void:
 	if body != null and body.material_override is ShaderMaterial:
 		var body_mat: ShaderMaterial = body.material_override
 		body_mat.set_shader_parameter("emissive_color", tint)
+	set_surface_tint(tint)
 	# The whole frame swells a little each stage
 	var vroot := visual_root_or_body_parent()
 	if vroot != null:
@@ -724,9 +850,10 @@ func die() -> void:
 		animator.trigger_death(-1.0)
 	else:
 		_launch_death_physics.call_deferred()
-	var tween = create_tween()
-	tween.tween_interval(2.6)
-	tween.tween_callback(_on_death_finished)
+	var death_generation := encounter_generation
+	_death_tween = create_tween()
+	_death_tween.tween_interval(2.6)
+	_death_tween.tween_callback(_on_death_finished.bind(death_generation))
 	
 	# Crumbling bark groan under the locked victory sting
 	audio.play_boss_death()
@@ -758,7 +885,14 @@ func _corpse_budget() -> int:
 	var qs := get_node_or_null("/root/WorldState/QualityScaler")
 	return qs.corpse_pool_size if qs != null else 6
 
-func _on_death_finished() -> void:
+func _on_death_finished(expected_generation: int = -1) -> void:
+	# A retry can reset the same boss while its death presentation is still
+	# winding down. The generation token makes any stale callback harmless even
+	# if the tween was already queued by the engine; reset_encounter() also kills
+	# the active tween below.
+	if expected_generation >= 0 and expected_generation != encounter_generation:
+		return
+	_death_tween = null
 	if _death_finalized:
 		return
 	_death_finalized = true
@@ -774,6 +908,10 @@ func _on_death_finished() -> void:
 				"+%d DIAMONDS — a glint from the old world remains." % amount)
 	_spawn_rewards()
 	_announce_repeat_reward_choice()
+	# Boss victory is a critical progression boundary: persist the complete
+	# reward/checkpoint state before the defeated entity leaves the scene.
+	if game_state != null and game_state.has_method("flush_save"):
+		game_state.flush_save()
 	died.emit()
 	queue_free()
 
@@ -809,11 +947,11 @@ func _spawn_rewards() -> void:
 		game_state.add_gold(result.gold, " +%d gold from the boss hoard." % result.gold)
 	for mat in result.materials:
 		game_state.add_material(mat.id, mat.qty)
-		FloatingText.spawn_on_entity(self, "+%d %s" % [mat.qty, GameState.MATERIAL_DEFS.get(mat.id, {}).get("name", mat.id)],
+		FloatingText.spawn_on_entity(self, "+%d %s" % [mat.qty, GAME_STATE_SCRIPT.MATERIAL_DEFS.get(mat.id, {}).get("name", mat.id)],
 			Color(0.52, 0.90, 1.0), 1.2)
 	if result.gear != null:
 		var gear: Dictionary = result.gear
-		var item_id := "moss_tonic"
+		var item_id: String = str(gear.get("id", "")) if not str(gear.get("id", "")).is_empty() else "moss_tonic"
 		LootDrop.spawn_item(self, global_position + Vector3(0, 0.5, 0), item_id, 1, gear.rarity)
 
 func set_encounter_origin(origin: Vector3) -> void:
@@ -825,6 +963,9 @@ func reset_encounter() -> void:
 	var state := get_node_or_null("/root/GameState")
 	if state != null and state.has_method("record_activity"):
 		state.call("record_activity", "BOSS RESET · %s" % name)
+	if _death_tween != null:
+		_death_tween.kill()
+		_death_tween = null
 	encounter_generation += 1
 	_death_finalized = false
 	is_defeated = false
@@ -853,6 +994,9 @@ func reset_encounter() -> void:
 	if body and body.material_override is ShaderMaterial:
 		body.material_override.set_shader_parameter("flash_intensity", 0.0)
 		body.material_override.set_shader_parameter("hp_wear", 0.0)
+	if _surface_flash_tween != null and _surface_flash_tween.is_valid():
+		_surface_flash_tween.kill()
+	_reset_authored_surfaces()
 	if boss_hp_bar:
 		boss_hp_bar.max_value = max_hp
 		boss_hp_bar.value = hp
@@ -931,6 +1075,8 @@ func apply_customization(c: BossCustomization) -> void:
 	_spawn_idol_crown(c)
 
 func _apply_palette(c: BossCustomization) -> void:
+	if c.palette.size() >= 2:
+		set_surface_tint(c.palette[1])
 	if body == null or not (body.material_override is ShaderMaterial):
 		return
 	var mat: ShaderMaterial = body.material_override

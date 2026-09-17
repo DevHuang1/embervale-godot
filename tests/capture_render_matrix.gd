@@ -17,6 +17,8 @@ extends SceneTree
 ##
 ## tiers:  low | medium | high          (--tier ignored when --all)
 ## focus:  scene | light | heavy | elemental | boss | telegraph | crowd
+## --boss-id <canonical_id> optionally replaces the realm's legacy boss with
+## the V2 articulated roster scene; --skill-id triggers one existing skill.
 ## --all loops every focus x every tier, reloading the realm scene per combo
 ## so each still is deterministic and cleans up after itself.
 
@@ -26,6 +28,11 @@ var _focus := "scene"
 var _out := "/tmp/embervale_capture.png"
 var _all := false
 var _keep_ui := false
+var _expansion := false
+var _boss_id := ""
+var _skill_id := ""
+var _boss_frozen := false
+var _orbit := 1
 var _failed := 0
 
 var GS: Node = null
@@ -56,6 +63,21 @@ func _initialize() -> void:
 			"--keep-ui":
 				_keep_ui = true
 				i += 1
+			"--expansion":
+				_expansion = true
+				i += 1
+			"--boss-id":
+				_boss_id = args[i + 1]
+				i += 2
+			"--skill-id":
+				_skill_id = args[i + 1]
+				i += 2
+			"--boss-frozen":
+				_boss_frozen = true
+				i += 1
+			"--orbit":
+				_orbit = maxi(1, int(args[i + 1]))
+				i += 2
 			_:
 				i += 1
 	_set_tier_level(_tier)
@@ -152,6 +174,8 @@ func _load_realm(scene_path: String) -> bool:
 		return false
 	GS.call("reset")
 	GS.set_current_realm(_realm)
+	if _expansion and _realm == "bramblewood":
+		GS.set("onboarding_completed", true)
 	change_scene_to_file(scene_path)
 	await _frames(10)
 	_force_tier()
@@ -165,6 +189,13 @@ func _run() -> void:
 	GS = root.get_node("/root/GameState")
 	_input = root.get_node("/root/InputManager")
 	GS.set("save_path", "/private/tmp/embervale_capture_save.cfg")
+	if not _boss_id.is_empty():
+		var boss_profile := BossAssetManifest.profile_for(_boss_id)
+		if boss_profile.is_empty():
+			print("FAIL: unknown canonical boss id ", _boss_id)
+			quit(1)
+			return
+		_realm = str(boss_profile.get("realm", _realm))
 
 	var scene_path := "res://scenes/world/grove.tscn"
 	if _realm != "whispergrove":
@@ -221,6 +252,10 @@ func _focus_scene() -> bool:
 	if hero == null:
 		print("FAIL: no hero for scene focus")
 		return false
+	if _expansion and _realm == "bramblewood":
+		var oak := current_scene.find_child("ExpansionPocket_split_road_oak", true, false) as Node3D
+		if oak != null:
+			hero.global_position = oak.global_position + Vector3(0.0, 0.05, 6.8)
 	var base := hero.global_position
 	await _camera_at(base, Vector3(1.5, 3.0, 7.5), base + Vector3(0, 0.9, 0), 42.0)
 	await _frames(8)
@@ -306,8 +341,40 @@ func _focus_boss(telegraph: bool) -> bool:
 		print("FAIL: no hero for boss focus")
 		return false
 	var manager := current_scene
-	manager.call("_engage_arena_boss")
+	var expedition := current_scene.get_node_or_null("BramblewoodExpedition")
+	var frozen_boss: Node3D = null
+	if not _boss_id.is_empty():
+		var packed := load("res://scenes/entities/boss_articulated.tscn") as PackedScene
+		if packed == null:
+			print("FAIL: canonical boss scene failed to load")
+			return false
+		var authored_boss := packed.instantiate() as ArticulatedBoss
+		authored_boss.def_id = _boss_id
+		authored_boss.is_practice = true
+		current_scene.add_child(authored_boss)
+		authored_boss.global_position = hero.global_position + (-hero.global_transform.basis.z) * 4.5
+		authored_boss.set_encounter_origin(authored_boss.global_position)
+		if _boss_frozen:
+			# Boss portrait mode: freeze the encounter AI so the silhouette
+			# cannot walk into the lens mid-capture, then frame from the
+			# mounted model's measured bounds. The portrait is lifted clear of
+			# the realm's instanced foliage (which cannot be hidden per-instance)
+			# so every boss is judged against the same clean sky/fog backdrop.
+			authored_boss.set_physics_process(false)
+			authored_boss.velocity = Vector3.ZERO
+			authored_boss.global_position += Vector3(0.0, 18.0, 0.0)
+			authored_boss.set_encounter_origin(authored_boss.global_position)
+			frozen_boss = authored_boss
+	elif _expansion and _realm == "bramblewood" and expedition != null:
+		var court := current_scene.find_child("ExpansionPocket_rootbound_court", true, false) as Node3D
+		if court != null:
+			hero.global_position = court.global_position + Vector3(0.0, 0.05, 2.8)
+		expedition.call("_engage_boss")
+	else:
+		manager.call("_engage_arena_boss")
 	await _frames(40)
+	if frozen_boss != null:
+		return await _snap_frozen_boss(frozen_boss)
 	var boss: Node3D = null
 	for node in get_nodes_in_group("boss"):
 		if node is Node3D:
@@ -321,12 +388,152 @@ func _focus_boss(telegraph: bool) -> bool:
 	# and arena readably inside the portrait mobile frame.
 	await _camera_at(boss_pos, Vector3(-3.8, 3.6, 15.5),
 		boss_pos + Vector3(0, 1.8, 0), 48.0)
+	var skill_to_show: Dictionary = {}
+	if not _boss_id.is_empty() and not _skill_id.is_empty():
+		var boss_def: Dictionary = (boss as ArticulatedBoss)._def
+		for skill_value in boss_def.get("skills", []):
+			if skill_value is Dictionary and str((skill_value as Dictionary).get("id", "")) == _skill_id:
+				skill_to_show = (skill_value as Dictionary).duplicate(true)
+				break
+		if skill_to_show.is_empty():
+			print("FAIL: skill ", _skill_id, " not found on ", _boss_id)
+			return false
+		boss.call("_perform_skill", skill_to_show, hero)
 	if telegraph:
 		# Deterministic telegraph on our camera's schedule: pin the action
 		# lock so the boss's own AI cannot overwrite it during the frame.
 		boss.call("lock_action", 2.0)
-		boss.call("_perform_basic_attack", hero)
+		if not _boss_id.is_empty():
+			await _frames(12)
+		elif _expansion and _realm == "bramblewood":
+			boss.call("_perform_special_1", hero)
+		else:
+			boss.call("_perform_basic_attack", hero)
 		await _frames(12)
 	else:
-		await _frames(10)
+		if not _skill_id.is_empty():
+			var impact_wait := float(skill_to_show.get("anticipation", 0.6)) + 0.18
+			await _frames(maxi(10, int(impact_wait * 60.0)))
+		else:
+			await _frames(10)
 	return _snap()
+
+
+## Deterministic boss portrait: the frozen encounter is framed from the
+## silhouette's own world bounds, so every canonical boss is judged at the
+## same relative size instead of at whatever distance its AI happened to pick.
+## `--orbit N` walks N evenly spaced yaw angles around the model.
+func _snap_frozen_boss(boss: Node3D) -> bool:
+	# The world-space enemy health plate is 3D geometry above the boss, and the
+	# hero stands between the lens and the silhouette at close orbits.
+	var hero := _hero()
+	if hero != null:
+		# Parked far enough that the hero never occludes a close orbit but is
+		# still available as scale context.
+		hero.global_position = boss.global_position + Vector3(0.0, 0.0, -30.0)
+	var bounds := _visible_bounds(boss)
+	_clear_portrait_occluders(boss, maxf(25.0, bounds.size.length() * 2.5))
+	var focus := bounds.get_center()
+	var radius := maxf(bounds.size.length() * 0.5, 1.5)
+	var fov := 42.0
+	var distance := radius / tan(deg_to_rad(fov * 0.5)) * 1.4
+	var base_out := _out.get_basename()
+	var angles := maxi(1, _orbit)
+	var ok := true
+	for index in angles:
+		var yaw := TAU * float(index) / float(angles) if angles > 1 else deg_to_rad(35.0)
+		var offset := Vector3(sin(yaw), 0.0, cos(yaw)) * distance \
+			+ Vector3(0.0, radius * 0.42, 0.0)
+		await _camera_at(boss.global_position, offset, focus, fov)
+		_out = base_out + (".png" if angles == 1 else "_a%d.png" % index)
+		_hide_capture_ui()
+		if not _snap():
+			ok = false
+	print("BOSS PORTRAIT ", base_out, " size=", bounds.size, " radius=%.2f distance=%.2f" % [radius, distance])
+	return ok
+
+
+## Hide every UI layer the portrait would otherwise capture. `_hide_ui` only
+## reaches CanvasLayers under the current scene, while the HUD, objective
+## prompt, and boss bar are persistent siblings of the scene root.
+func _hide_capture_ui() -> void:
+	var hidden := 0
+	for node in root.find_children("*", "CanvasLayer", true, false):
+		var layer := node as CanvasLayer
+		if layer != null:
+			layer.visible = false
+			hidden += 1
+	for node in root.find_children("*", "Control", true, false):
+		var control := node as Control
+		if control != null:
+			control.visible = false
+			hidden += 1
+	# World-space enemy plates are 3D geometry that re-shows itself every
+	# frame, so their processing is stopped before they are hidden.
+	for node in root.find_children("*", "Label3D", true, false):
+		var label := node as Label3D
+		if label != null:
+			label.visible = false
+			hidden += 1
+	for node in root.find_children("EnemyHealthBar", "Node3D", true, false):
+		var bar := node as Node3D
+		if bar == null:
+			continue
+		bar.set_process(false)
+		bar.set_physics_process(false)
+		for child in bar.find_children("*", "VisualInstance3D", true, false):
+			(child as VisualInstance3D).visible = false
+		bar.visible = false
+		hidden += 1
+	print("HIDDEN_UI ", hidden)
+
+
+## Hide props that stand between the portrait camera and the model. Terrain and
+## foliage survive (they are large or instanced), but realm landmarks, trunks,
+## and stumps near the spawn would otherwise hide the very silhouette the
+## portrait exists to show.
+func _clear_portrait_occluders(boss: Node3D, radius: float) -> void:
+	if current_scene == null:
+		return
+	const KEEP_TOKENS := ["terrain", "ground", "water", "sky", "cloud", "moon", "sun"]
+	for node in current_scene.find_children("*", "MeshInstance3D", true, false):
+		var mesh := node as MeshInstance3D
+		if mesh == null or not mesh.is_visible_in_tree() or boss.is_ancestor_of(mesh):
+			continue
+		var mesh_name := str(mesh.name).to_lower()
+		if KEEP_TOKENS.any(func(token: String) -> bool: return mesh_name.contains(token)):
+			continue
+		# Terrain is flat and vast; everything else near the spawn is a prop that
+		# would hide the silhouette the portrait exists to show.
+		if mesh.mesh != null:
+			var mesh_size := mesh.mesh.get_aabb().size
+			if mesh_size.y < 3.0 and mesh_size.length() > 40.0:
+				continue
+		if mesh.global_position.distance_to(boss.global_position) <= radius:
+			mesh.visible = false
+	for node in current_scene.find_children("*", "MultiMeshInstance3D", true, false):
+		var grass := node as MultiMeshInstance3D
+		if grass == null or not grass.is_visible_in_tree():
+			continue
+		if grass.global_position.distance_to(boss.global_position) <= radius * 0.6:
+			grass.visible = false
+
+
+## World-space AABB over every visible mesh under `root`, used to frame the
+## portrait camera against the actual mounted silhouette.
+func _visible_bounds(root_node: Node3D) -> AABB:
+	var result := AABB()
+	var started := false
+	for mesh_value in root_node.find_children("*", "MeshInstance3D", true, false):
+		var mesh_instance := mesh_value as MeshInstance3D
+		if mesh_instance == null or mesh_instance.mesh == null or not mesh_instance.is_visible_in_tree():
+			continue
+		var mesh_bounds := mesh_instance.get_aabb()
+		for index in 8:
+			var point := mesh_instance.global_transform * mesh_bounds.get_endpoint(index)
+			if not started:
+				result = AABB(point, Vector3.ZERO)
+				started = true
+			else:
+				result = result.expand(point)
+	return result

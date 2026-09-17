@@ -1,0 +1,71 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/entities/boss_articulated.gd" id="1_boss"]
+[ext_resource type="Material" path="res://assets/materials/entity_boss.tres" id="2_mat"]
+[ext_resource type="Script" path="res://scripts/entities/articulated_boss_animator.gd" id="3_anim"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
+radius = 1.0
+height = 3.0
+radial_segments = 10
+rings = 5
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape_body"]
+radius = 1.55
+height = 4.2
+
+[sub_resource type="SphereShape3D" id="SphereShape_hitbox"]
+radius = 2.0
+
+[sub_resource type="SphereShape3D" id="SphereShape_attack1"]
+radius = 3.2
+
+[sub_resource type="SphereShape3D" id="SphereShape_attack2"]
+radius = 3.2
+
+[node name="ArticulatedBoss" type="CharacterBody3D" groups=["enemy", "boss"]]
+script = ExtResource("1_boss")
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="Body" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("CapsuleMesh_body")
+material_override = ExtResource("2_mat")
+
+[node name="Animator" type="Node3D" parent="."]
+script = ExtResource("3_anim")
+mode = 0
+attack_style = "slash"
+lod_distance = 30.0
+
+[node name="Hitbox" type="Area3D" parent="."]
+monitoring = true
+monitorable = true
+collision_layer = 2
+collision_mask = 1
+
+[node name="HitboxShape" type="CollisionShape3D" parent="Hitbox"]
+shape = SubResource("SphereShape_hitbox")
+
+[node name="AttackAreas" type="Node3D" parent="."]
+
+[node name="AttackArea1" type="Area3D" parent="AttackAreas" groups=["enemy_attack"]]
+monitoring = true
+monitorable = true
+collision_layer = 0
+collision_mask = 1
+
+[node name="AttackShape1" type="CollisionShape3D" parent="AttackAreas/AttackArea1"]
+shape = SubResource("SphereShape_attack1")
+
+[node name="AttackArea2" type="Area3D" parent="AttackAreas" groups=["enemy_attack"]]
+monitoring = true
+monitorable = true
+collision_layer = 0
+collision_mask = 1
+
+[node name="AttackShape2" type="CollisionShape3D" parent="AttackAreas/AttackArea2"]
+shape = SubResource("SphereShape_attack2")
+
+[node name="CollisionShape" type="CollisionShape3D" parent="."]
+shape = SubResource("CapsuleShape_body")

@@ -3,7 +3,7 @@ extends SceneTree
 func _init() -> void:
 	var streamer := FileAccess.get_file_as_string("res://scripts/systems/world_chunk_streamer.gd")
 	var foliage := FileAccess.get_file_as_string("res://scripts/systems/ambient_foliage_patch.gd")
-	for tier in ["[0.0, 105.0, 70.0, 175.0, 150.0, 260.0]", "[0.0, 135.0, 90.0, 245.0, 210.0, 330.0]", "[0.0, 170.0, 115.0, 330.0, 285.0, 430.0]"]:
+	for tier in ["[0.0, 70.0, 60.0, 115.0, 105.0, 155.0]", "[0.0, 105.0, 85.0, 180.0, 165.0, 250.0]", "[0.0, 170.0, 115.0, 330.0, 285.0, 430.0]"]:
 		_assert_true(streamer.contains(tier), "tier range exists %s" % tier)
 	_assert_true(streamer.contains("visibility_range_begin"), "grass begin ranges exist")
 	_assert_true(streamer.contains("coverage_min"), "grass coverage metadata exists")

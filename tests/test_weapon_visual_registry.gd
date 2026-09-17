@@ -4,7 +4,9 @@ func _init() -> void:
 	var registry := preload("res://scripts/systems/weapon_visual_registry.gd")
 	var required := ["ember_sword", "arcane_staff", "mug_mace", "matriarch_scepter",
 		"pocket_blade", "snip_twins", "slab_hammer", "thorn_mace", "iron_axe",
-		"grove_spear", "hunter_bow", "round_shield"]
+		"grove_spear", "hunter_bow", "round_shield", "siltcarver_blade",
+		"cinderbound_maul", "tideward_staff", "rootbound_cleaver", "moonpact_staff",
+		"thornbite_cleaver", "tidecall_brand", "cinderhart_maul", "oracle_crescent"]
 	for weapon_id in required:
 		var path: String = registry.path_for(weapon_id)
 		if path.is_empty():

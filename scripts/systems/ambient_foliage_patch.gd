@@ -4,7 +4,10 @@ class_name AmbientFoliagePatch
 ## Lightweight realm dressing for streamed chunks.
 ## One MultiMesh keeps the foliage detail to a single draw call per chunk.
 
-const FOLIAGE_TEXTURE: Texture2D = preload("res://assets/ambient/kenney_foliage_sprites/Vector/foliageSprites_flat.svg")
+# Use one transparent foliage silhouette per billboard.  The old full-sheet
+# atlas was rendered as a single card, so its rectangular atlas bounds showed
+# up as beige squares scattered across the ground at distance.
+const FOLIAGE_TEXTURE: Texture2D = preload("res://assets/ambient/kenney_foliage_sprites/PNG/Flat/sprite_0001.png")
 const REALM_TINTS: Dictionary = {
 	"whispergrove": Color(0.78, 1.0, 0.70, 1.0),
 	"bramblewood": Color(0.63, 0.82, 0.43, 1.0),

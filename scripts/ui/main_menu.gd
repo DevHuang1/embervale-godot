@@ -96,18 +96,23 @@ func _on_continue() -> void:
 	game_start_requested.emit()
 	load_game_requested.emit()
 	GameState.load_game()
+	RewardManager.check_daily_bonus()
 	_fade_to_game()
 
 func _on_settings() -> void:
 	settings_requested.emit()
 
 func _on_quit() -> void:
+	GameState.flush_save()
+	if AudioManager != null and AudioManager.has_method("shutdown_for_exit"):
+		AudioManager.shutdown_for_exit()
 	get_tree().quit()
 
 # ─── Internal ─────────────────────────────────────────────────────────────────
 
 func _start_new_game() -> void:
 	GameState.reset()
+	RewardManager.check_daily_bonus()
 	game_start_requested.emit()
 	_fade_to_game()
 

@@ -20,11 +20,16 @@ class_name ChestNode
 
 signal chest_opened(position: Vector3, tier: String)
 signal chest_reset(position: Vector3)
+signal chest_locked(message: String)
 
 enum ChestTier { COMMON, RARE, BOSS }
 
 @export_enum("common", "rare", "boss") var chest_tier  : String = "common"
 @export var realm_id          : String = "bramblewood"
+@export var chest_id          : String = ""
+@export var chest_label       : String = ""
+@export var required_boss_key : String = ""
+@export_enum("persistent", "respawnable") var persistence_mode: String = "persistent"
 @export var respawn_time_sec  : float  = 120.0
 @export var interact_radius   : float  = 2.5
 
@@ -37,6 +42,14 @@ var _particles     : GPUParticles3D = null
 var _prompt_label  : Label3D = null
 var _hero_nearby   : bool = false
 var _hero_ref      : Node3D = null
+var _respawn_timer : Timer = null
+
+## Public interaction contract used by Hero's nearby-interactable router.
+## The backing state remains private so callers cannot consume a reward by
+## changing the presentation flag.
+var opened: bool:
+	get:
+		return _is_open
 
 # Tier palette
 const TIER_COLORS := {
@@ -49,6 +62,10 @@ const TIER_GLOW := {
 	"rare":   1.8,
 	"boss":   3.2,
 }
+const LOOT_DROP_SCRIPT := preload("res://scripts/systems/loot_drop.gd")
+## Drop types delivered as physical walk-over pickups. Everything else
+## (xp / diamonds / materials) is granted instantly at open, mirroring enemies.
+const PHYSICAL_DROP_TYPES: Array[String] = ["gold", "item", "weapon", "armor"]
 
 func _ready() -> void:
 	add_to_group("interactable")
@@ -56,8 +73,10 @@ func _ready() -> void:
 	add_to_group("structure")
 	_build_geometry()
 	_build_interact_area()
+	_build_target_body()
 	_build_prompt()
 	_build_particles()
+	_check_persistence()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Geometry
@@ -132,7 +151,7 @@ func _build_geometry() -> void:
 	add_child(_glow_light)
 
 	# Idle pulse tween
-	var tw: Tween = _latch_mat.create_tween().set_loops()
+	var tw: Tween = create_tween().set_loops()
 	tw.tween_property(_latch_mat, "emission_energy_multiplier",
 		TIER_GLOW.get(chest_tier, 0.8) * 1.6, 1.2).set_trans(Tween.TRANS_SINE)
 	tw.tween_property(_latch_mat, "emission_energy_multiplier",
@@ -155,6 +174,21 @@ func _build_interact_area() -> void:
 	area.body_entered.connect(_on_body_entered)
 	area.body_exited.connect(_on_body_exited)
 	add_child(area)
+
+## A ray-targetable body so the hero's facing ray can select the chest they are
+## aiming at. It sits on the pickup layer plus the default layer so it is
+## visible to interaction queries without joining the hero's movement mask
+## (which excludes both), so it never blocks walking.
+func _build_target_body() -> void:
+	collision_layer = (1 << 0) | (1 << 3)
+	collision_mask  = 0
+	var cs := CollisionShape3D.new()
+	cs.name = "InteractTarget"
+	var box := BoxShape3D.new()
+	box.size = Vector3(0.78, 0.70, 0.58)
+	cs.shape = box
+	cs.position.y = 0.35
+	add_child(cs)
 
 func _on_body_entered(body: Node3D) -> void:
 	if not body.is_in_group("player"):
@@ -224,6 +258,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("interact") or event.is_action_pressed("ui_accept"):
 		_open_chest()
 
+## WorldManager and mobile controls use the same interaction contract as
+## landmarks and gathering nodes. Keyboard input still reaches the legacy
+## unhandled-input path above, while touch/controller activation calls this.
+func interact() -> void:
+	_open_chest()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Open
 # ─────────────────────────────────────────────────────────────────────────────
@@ -231,6 +271,53 @@ func _unhandled_input(event: InputEvent) -> void:
 func _open_chest() -> void:
 	if _is_open:
 		return
+	var lock_message := _lock_message()
+	if not lock_message.is_empty():
+		chest_locked.emit(lock_message)
+		var gs_locked := get_node_or_null("/root/GameState")
+		if gs_locked != null and gs_locked.has_signal("quest_progress"):
+			gs_locked.quest_progress.emit(lock_message)
+		return
+
+	# Roll first, then claim. RewardManager only rolls here; the physical loot is
+	# granted on pickup. A persistent chest records its claim and its exact
+	# remaining drops in one save before anything is spawned, so a reload can
+	# neither lose uncollected loot nor let the chest pay out twice.
+	var rm := get_node_or_null("/root/RewardManager")
+	if rm == null or not rm.has_method("roll_chest_drops"):
+		push_warning("ChestNode: RewardManager unavailable; chest remains unopened")
+		return
+	var drops: Array = rm.call("roll_chest_drops", chest_tier, realm_id)
+	if drops.is_empty():
+		return
+
+	var physical: Array = []
+	var instant: Array = []
+	for raw in drops:
+		if not raw is Dictionary:
+			continue
+		var drop: Dictionary = raw
+		if str(drop.get("type", "")) in PHYSICAL_DROP_TYPES:
+			physical.append(drop)
+		else:
+			instant.append(drop)
+
+	var persistent := _uses_persistent_claim()
+	if persistent:
+		var gs_claim := get_node_or_null("/root/GameState")
+		if gs_claim == null or not gs_claim.has_method("begin_chest_claim"):
+			push_warning("ChestNode: claim API unavailable; chest remains unopened")
+			return
+		if not bool(gs_claim.call("begin_chest_claim", chest_id, physical)):
+			return  # already claimed (or rejected)
+
+	# Instant rewards (xp / diamonds / materials) land immediately.
+	if not instant.is_empty():
+		rm.call("grant_drops", instant, {
+			"source": "chest", "source_id": chest_id,
+			"source_label": chest_label, "persistent": false,
+		})
+
 	_is_open = true
 	if _prompt_label != null:
 		_prompt_label.visible = false
@@ -262,40 +349,67 @@ func _open_chest() -> void:
 	CombatFx.spawn_ring(self, global_position, 1.2,
 		TIER_COLORS.get(chest_tier, TIER_COLORS["common"]), 0.45)
 
-	# Grant rewards
-	var rm := get_node_or_null("/root/RewardManager")
-	if rm != null:
-		rm.call("grant_chest", chest_tier, realm_id)
-		rm.reward_granted.connect(_on_reward_granted, CONNECT_ONE_SHOT)
-	else:
-		# Fallback if not AutoLoaded — direct grant
-		RewardManager.new().grant_chest(chest_tier, realm_id)
+	# One reveal listing the rolled contents; grants happen as drops are picked up.
+	rm.call("announce_chest_roll", chest_tier, realm_id, chest_id, chest_label,
+		drops, persistent)
+
+	_spawn_loot_drops(physical, persistent)
+
+	var gs := get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("update_objective"):
+		gs.call("update_objective", "open_chest", chest_id, 1)
 
 	chest_opened.emit(global_position, chest_tier)
 
-	# Schedule respawn
-	if respawn_time_sec > 0.0:
-		var timer := get_tree().create_timer(respawn_time_sec, false)
-		timer.timeout.connect(_reset_chest)
+	_schedule_respawn()
 
-func _on_reward_granted(summary: Dictionary) -> void:
-	# Show FloatingText pops for each drop type
-	var y_offset := 0.0
-	var pos := global_position + Vector3(0, 0.9, 0)
-	var gold := int(summary.get("gold", 0))
-	if gold > 0:
-		FloatingText.spawn_on_entity(self, "+%d GOLD" % gold, Color(1.0, 0.85, 0.30))
-		y_offset += 0.28
-	var xp := int(summary.get("xp", 0))
-	if xp > 0:
-		FloatingText.spawn_on_entity(self, "+%d XP" % xp, Color(0.42, 0.85, 0.55))
-		y_offset += 0.28
-	var diamonds := int(summary.get("diamonds", 0))
-	if diamonds > 0:
-		FloatingText.spawn_on_entity(self, "+%d DIAMONDS" % diamonds, Color(0.55, 0.75, 1.00))
+func _lock_message() -> String:
+	if required_boss_key.is_empty():
+		return ""
+	var gs := get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("has_boss_killed") \
+			and bool(gs.call("has_boss_killed", required_boss_key)):
+		return ""
+	var boss_label := required_boss_key.replace("biome_", "").replace("_", " ").capitalize()
+	return "Locked · Defeat %s first." % boss_label
+
+func _uses_persistent_claim() -> bool:
+	return not chest_id.is_empty() and persistence_mode == "persistent"
+
+func _schedule_respawn() -> void:
+	if _uses_persistent_claim() or respawn_time_sec <= 0.0:
+		return
+	if _respawn_timer == null:
+		_respawn_timer = Timer.new()
+		_respawn_timer.name = "RespawnTimer"
+		_respawn_timer.one_shot = true
+		_respawn_timer.timeout.connect(_on_respawn_timer_timeout)
+		add_child(_respawn_timer)
+	_respawn_timer.wait_time = clampf(respawn_time_sec, 0.1, 3600.0)
+	_respawn_timer.start()
+
+func _on_respawn_timer_timeout() -> void:
+	_reset_chest()
+
+func _loot_offset(index: int, total: int) -> Vector3:
+	var count := maxi(total, 1)
+	var angle := TAU * float(index) / float(count)
+	var radius := 0.35 + 0.06 * float(index % 3)
+	return Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+
+## Spawn one physical pickup per rolled drop. Chest id + slot index are carried
+## so the pickup can clear its persisted pending slot on collection.
+func _spawn_loot_drops(physical: Array, persistent: bool) -> void:
+	var origin := global_position + Vector3(0, 0.55, 0)
+	var claim_id := chest_id if persistent else ""
+	for i in physical.size():
+		LOOT_DROP_SCRIPT.spawn_drop(self, origin + _loot_offset(i, physical.size()),
+			physical[i], claim_id, i)
 
 func _reset_chest() -> void:
 	_is_open = false
+	if _respawn_timer != null:
+		_respawn_timer.stop()
 	# Close lid
 	var tw := _lid_node.create_tween()
 	tw.tween_property(_lid_node, "rotation:x", 0.0, 0.35).set_trans(Tween.TRANS_SPRING)
@@ -310,12 +424,82 @@ func _reset_chest() -> void:
 			TIER_GLOW.get(chest_tier, 0.8) * 0.5, 0.5)
 	chest_reset.emit(global_position)
 
+func _check_persistence() -> void:
+	if not _uses_persistent_claim():
+		return
+	var gs := get_node_or_null("/root/GameState")
+	if gs == null:
+		return
+	var opened_chests: Dictionary = gs.get("opened_chests") \
+		if gs.get("opened_chests") is Dictionary else {}
+	if not bool(opened_chests.get(chest_id, false)):
+		return
+	_is_open = true
+	if _prompt_label != null:
+		_prompt_label.visible = false
+	if _lid_node != null:
+		_lid_node.rotation.x = -PI * 0.62
+	if _glow_light != null:
+		_glow_light.light_energy = 0.1
+	if _latch_mat != null:
+		_latch_mat.emission_energy_multiplier = 0.1
+	# Restore any loot that was rolled but not yet picked up. Deferred so a
+	# runtime-built chest has its final world position before drops spawn.
+	call_deferred("_restore_pending_drops")
+
+## Respawn the persisted remainder of a claimed chest's roll. Consumed slots are
+## stored as null and skipped, so a reload mid-collection restores only what was
+## never picked up.
+func _restore_pending_drops() -> void:
+	if not _uses_persistent_claim() or not is_inside_tree():
+		return
+	var gs := get_node_or_null("/root/GameState")
+	if gs == null or not gs.has_method("get_pending_chest_drops"):
+		return
+	var drops: Array = gs.call("get_pending_chest_drops", chest_id)
+	if drops.is_empty():
+		return
+	var origin := global_position + Vector3(0, 0.55, 0)
+	for i in drops.size():
+		if drops[i] == null:
+			continue
+		LOOT_DROP_SCRIPT.spawn_drop(self, origin + _loot_offset(i, drops.size()),
+			drops[i], chest_id, i)
+
+## Apply a realm-layout chest definition before adding the node to the scene.
+## Returns false for malformed definitions so bad content cannot create an
+## anonymous reward source.
+func configure_from_definition(definition: Dictionary) -> bool:
+	var id := str(definition.get("id", "")).strip_edges()
+	if id.is_empty():
+		return false
+	chest_id = id
+	chest_label = str(definition.get("label", id.replace("_", " ").capitalize()))
+	realm_id = str(definition.get("realm", realm_id))
+	required_boss_key = str(definition.get("boss_key", "")) \
+		if str(definition.get("type", "")) == "boss_gated" else ""
+	persistence_mode = str(definition.get("persistence", "persistent")).to_lower()
+	if persistence_mode not in ["persistent", "respawnable"]:
+		persistence_mode = "persistent"
+	respawn_time_sec = maxf(0.0, float(definition.get("respawn_time_sec", 0.0)))
+	chest_tier = tier_for_rarity(int(definition.get("rarity", 0)))
+	return true
+
+static func tier_for_rarity(rarity: int) -> String:
+	if rarity >= 4:
+		return "boss"
+	if rarity >= 2:
+		return "rare"
+	return "common"
+
 ## Static factory: spawn a chest in the world at the given position.
 static func spawn_at(parent: Node3D, pos: Vector3,
-		tier: String = "common", realm: String = "bramblewood") -> ChestNode:
+		tier: String = "common", realm: String = "bramblewood", id: String = "") -> ChestNode:
 	var chest := ChestNode.new()
 	chest.chest_tier = tier
 	chest.realm_id   = realm
+	chest.chest_id   = id
+	chest.persistence_mode = "persistent" if not id.is_empty() else "respawnable"
 	parent.add_child(chest)
 	chest.global_position = pos
 	return chest

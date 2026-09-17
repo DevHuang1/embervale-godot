@@ -7,9 +7,11 @@ extends Node
 ## Persisted into the shared settings cfg ("quality" section).
 
 signal level_changed(level: int)
+signal world_view_changed(mode: int)
 
 enum Mode { LOW, AUTO, HIGH }
 enum Level { LOW, MEDIUM, HIGH }
+enum WorldView { FULL, REDUCED }
 
 const DEGRADE_FPS := 48.0
 const RESTORE_FPS := 58.0
@@ -21,6 +23,8 @@ const SETTINGS_SECTION := "quality"
 const SETTINGS_KEY := "mode"
 const SETTINGS_KEY_FPS := "frame_rate"
 const SETTINGS_KEY_DEV_OVERLAY := "dev_overlay"
+const SETTINGS_KEY_WORLD_VIEW := "world_view"
+const REDUCED_CAMERA_FAR := 150.0
 
 ## Overridable for isolated validation; production keeps the shared settings.
 var settings_path: String = AudioManager.SETTINGS_PATH
@@ -30,6 +34,10 @@ var level: int = Level.HIGH          # applied degradation level (auto-managed)
 var particle_scale: float = 1.0      # read by DayNightCycle via WorldState
 var frame_rate_mode: int = 0         # 0 = Default (vsync), 1 = 60 FPS, 2 = 30 FPS
 var dev_overlay: bool = false        # on-screen FPS/quality/time-scale readout
+## Presentation-only distance control. REDUCED hides distant world geometry
+## and shrinks streamed presentation rings; gameplay ranges and collision are
+## intentionally unaffected.
+var world_view_mode: int = WorldView.FULL
 
 ## Authored (project) anti-aliasing stance, captured once at boot so HIGH can
 ## restore exactly what the project shipped instead of guessing per-platform.
@@ -57,6 +65,8 @@ var _low_time := 0.0
 var _high_time := 0.0
 var _env_cache: Environment = null
 var _env_scene: Node = null
+var _world_view_scene: Node = null
+var _authored_camera_fars: Dictionary = {}
 
 
 func _ready() -> void:
@@ -84,6 +94,7 @@ func _process(delta: float) -> void:
 		_apply_render_pipeline()
 		_apply_terrain_pom()
 		_apply_environment()
+		_apply_world_view()
 	if mode != Mode.AUTO:
 		return
 	_sample_clock += delta
@@ -140,6 +151,8 @@ func budget_report() -> Dictionary:
 		"vegetation_pushers": vegetation_pushers,
 		"grass_density": grass_density_scale,
 		"material_detail": material_detail_level,
+		"world_view": world_view_mode,
+		"world_view_scale": get_world_view_scale(),
 	}
 
 func budget_is_bounded() -> bool:
@@ -188,6 +201,7 @@ func _apply_level(new_level: int) -> void:
 	_apply_environment()
 	_apply_terrain_pom()
 	_apply_light_tiers()
+	_apply_world_view()
 	level_changed.emit(level)
 
 ## Apply render-resolution scaling and the anti-aliasing floor for the
@@ -248,19 +262,67 @@ func toggle_dev_overlay(visible_overlay: bool) -> void:
 	dev_overlay = visible_overlay
 	_save_extra_settings()
 
+## Set the presentation-only world distance. The option is available on every
+## platform so it can be tested consistently; mobile defaults to REDUCED when
+## no prior choice exists.
+func set_world_view_mode(new_mode: int) -> void:
+	var clamped := clampi(new_mode, int(WorldView.FULL), int(WorldView.REDUCED))
+	if world_view_mode == clamped:
+		_apply_world_view()
+		return
+	world_view_mode = clamped
+	_apply_world_view()
+	_save_extra_settings()
+	world_view_changed.emit(world_view_mode)
+
+func get_world_view_scale() -> float:
+	return 0.45 if world_view_mode == int(WorldView.REDUCED) else 1.0
+
 func _load_extra_settings() -> void:
+	world_view_mode = _default_world_view_mode()
 	var cfg := ConfigFile.new()
 	if cfg.load(settings_path) != OK:
 		return
 	frame_rate_mode = clampi(int(cfg.get_value(SETTINGS_SECTION, SETTINGS_KEY_FPS, 0)), 0, 2)
 	dev_overlay = bool(cfg.get_value(SETTINGS_SECTION, SETTINGS_KEY_DEV_OVERLAY, false))
+	world_view_mode = clampi(int(cfg.get_value(SETTINGS_SECTION, SETTINGS_KEY_WORLD_VIEW,
+		world_view_mode)), int(WorldView.FULL), int(WorldView.REDUCED))
 
 func _save_extra_settings() -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(settings_path)
 	cfg.set_value(SETTINGS_SECTION, SETTINGS_KEY_FPS, frame_rate_mode)
 	cfg.set_value(SETTINGS_SECTION, SETTINGS_KEY_DEV_OVERLAY, dev_overlay)
+	cfg.set_value(SETTINGS_SECTION, SETTINGS_KEY_WORLD_VIEW, world_view_mode)
 	cfg.save(settings_path)
+
+func _default_world_view_mode() -> int:
+	return int(WorldView.REDUCED) if _is_mobile_runtime() else int(WorldView.FULL)
+
+func _is_mobile_runtime() -> bool:
+	return OS.has_feature("mobile") or OS.get_name() in ["Android", "iOS"]
+
+## Apply the user distance choice to authored cameras. The original far clip is
+## cached per scene so toggling back to FULL restores each scene's own value.
+## This is presentation culling only; physics bodies, navigation, and quest
+## logic remain resident and unchanged.
+func _apply_world_view() -> void:
+	var scene := get_tree().current_scene if get_tree() != null else null
+	if scene != _world_view_scene:
+		_world_view_scene = scene
+		_authored_camera_fars.clear()
+	if scene == null:
+		return
+	for node in scene.find_children("*", "Camera3D", true, false):
+		var camera := node as Camera3D
+		if camera == null:
+			continue
+		var camera_id := camera.get_instance_id()
+		if not _authored_camera_fars.has(camera_id):
+			_authored_camera_fars[camera_id] = camera.far
+		var authored_far := float(_authored_camera_fars[camera_id])
+		camera.far = authored_far if world_view_mode == int(WorldView.FULL) \
+			else minf(authored_far, REDUCED_CAMERA_FAR)
 
 ## Apply 3D render resolution scaling on the active viewport (safe no-op when
 ## the viewport is not ready yet, e.g. during autoload boot before a scene).

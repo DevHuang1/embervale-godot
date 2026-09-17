@@ -37,6 +37,23 @@ added only in the release environment.
 ## RevenueCat gate
 
 - [ ] Configure RevenueCat only in the release environment.
+- [ ] Confirm RevenueCat secret keys never ship in the client: no `sk_` key in
+      the repository, the export, or any committed config. The shipping
+      authority is the backend proxy; the direct-secret path is editor/debug
+      only and refuses release exports.
 - [ ] Validate Android purchase, restore, refund, and entitlement expiration.
 - [ ] Grant scans only after provider confirmation and reconcile idempotently.
 - [ ] Confirm RevenueCat entitlements never replace the gameplay database.
+- [ ] Verify the web funnel purchase end to end on a device: buy, return to the
+      app, restore, and confirm ember marks land exactly once.
+- [ ] Run `tools/verify_revenuecat_setup.gd` against the release project and
+      confirm it reports SETUP CHECK PASSED before recording or shipping.
+- [ ] Verify a provider grant survives save/load without granting twice.
+- [ ] Verify HTTP redirects are refused on every provider request, so the
+      Authorization header is never replayed to another host.
+- [ ] Confirm a tampered provider ledger row cannot block a legitimate claim.
+- [ ] Confirm no secret-shaped value appears in any tracked file
+      (`tests/test_store_security_contract.gd` scans the repository).
+- [ ] Confirm the Android build enables the `INTERNET` permission and still
+      blocks cleartext traffic, and that the support export carries no secret.
+- [ ] Re-run `tests/test_revenuecat_entitlements.gd` on the release commit.

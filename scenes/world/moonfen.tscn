@@ -1,53 +1,52 @@
-[gd_scene load_steps=44 format=3]
+[gd_scene format=3 uid="uid://05cqyfgg64fq"]
 
-[ext_resource type="Script" path="res://scripts/systems/moonfen_manager.gd" id="1_wm"]
+[ext_resource type="Script" uid="uid://ngrusjy64ks0" path="res://scripts/systems/moonfen_manager.gd" id="1_wm"]
 [ext_resource type="Environment" path="res://assets/environments/moonfen_env.tres" id="2_env"]
 [ext_resource type="Material" path="res://assets/materials/terrain_moonfen.tres" id="3_ter"]
-[ext_resource type="Script" path="res://scripts/systems/camera_rig.gd" id="4_rig"]
+[ext_resource type="Script" uid="uid://c7pvigutpcodt" path="res://scripts/systems/camera_rig.gd" id="4_rig"]
 [ext_resource type="PackedScene" path="res://scenes/entities/hero.tscn" id="5_hero"]
 [ext_resource type="PackedScene" path="res://scenes/entities/hushling.tscn" id="6_hush"]
 [ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="7_hud"]
 [ext_resource type="PackedScene" path="res://scenes/ui/satchel.tscn" id="8_sat"]
 [ext_resource type="PackedScene" path="res://scenes/ui/forge_menu.tscn" id="9_forge"]
-[ext_resource type="Script" path="res://scripts/systems/grove_dressing.gd" id="10_dress"]
-[ext_resource type="Script" path="res://scripts/systems/terrain_relief.gd" id="11_relief"]
-[ext_resource type="Shader" path="res://assets/shaders/water_fen.gdshader" id="12_water"]
-[ext_resource type="Shader" path="res://assets/shaders/rock.gdshader" id="13_stone"]
-[ext_resource type="Texture2D" path="res://assets/textures/stylized/rock/albedo.png" id="stone_albedo"]
-[ext_resource type="Texture2D" path="res://assets/textures/stylized/rock/normal.png" id="stone_normal"]
-[ext_resource type="Texture2D" path="res://assets/textures/stylized/rock/roughness.png" id="stone_rough"]
+[ext_resource type="Script" uid="uid://c16o2m5484sii" path="res://scripts/systems/grove_dressing.gd" id="10_dress"]
+[ext_resource type="Script" uid="uid://bjeuj1ohfpveu" path="res://scripts/systems/terrain_relief.gd" id="11_relief"]
+[ext_resource type="Shader" uid="uid://cjvrs5bwj1wem" path="res://assets/shaders/water_fen.gdshader" id="12_water"]
+[ext_resource type="Shader" uid="uid://x3tw37ay442x" path="res://assets/shaders/rock.gdshader" id="13_stone"]
 [ext_resource type="PackedScene" path="res://scenes/ui/shop_menu.tscn" id="14_shop"]
 [ext_resource type="PackedScene" path="res://scenes/world/fog_bank.tscn" id="15_fog"]
-[ext_resource type="Script" path="res://scripts/systems/world_chunk_streamer.gd" id="16_stream"]
-
-[sub_resource type="ShaderMaterial" id="Mat_water"]
-shader = ExtResource("12_water")
-
-[sub_resource type="PlaneMesh" id="PlaneMesh_water"]
-size = Vector2(64, 64)
-subdivide_width = 48
-subdivide_height = 48
-
-[sub_resource type="PlaneMesh" id="PlaneMesh_terrain"]
-size = Vector2(64, 64)
-subdivide_width = 48
-subdivide_height = 48
+[ext_resource type="Script" uid="uid://c02glycecwca" path="res://scripts/systems/world_chunk_streamer.gd" id="16_stream"]
+[ext_resource type="PackedScene" path="res://scenes/ui/diamond_shop.tscn" id="20_fd6dl"]
+[ext_resource type="Texture2D" uid="uid://d3k3gvae5vc31" path="res://assets/textures/stylized/rock/albedo.png" id="stone_albedo"]
+[ext_resource type="Texture2D" uid="uid://cl783j2g3eomw" path="res://assets/textures/stylized/rock/normal.png" id="stone_normal"]
+[ext_resource type="Texture2D" uid="uid://ns2nqjm2iean" path="res://assets/textures/stylized/rock/roughness.png" id="stone_rough"]
 
 [sub_resource type="BoxShape3D" id="BoxShape_terrain"]
 size = Vector3(64, 1, 64)
 
-[sub_resource type="SphereShape3D" id="SphereShape_shard"]
-radius = 1.2
+[sub_resource type="PlaneMesh" id="PlaneMesh_terrain"]
+size = Vector2(64, 64)
+subdivide_width = 48
 
-[sub_resource type="SphereShape3D" id="SphereShape_beacon"]
-radius = 1.6
+[sub_resource type="ShaderMaterial" id="Mat_water"]
+render_priority = 0
+shader = ExtResource("12_water")
+shader_parameter/deep_color = null
+shader_parameter/shallow_color = null
+shader_parameter/glint_color = null
+shader_parameter/wave_height = null
+shader_parameter/wave_speed = null
+shader_parameter/glint_intensity = null
+shader_parameter/alpha_amount = null
+shader_parameter/detail_chop = null
+shader_parameter/caustic_color = null
+shader_parameter/caustic_intensity = null
+shader_parameter/foam_color = null
+shader_parameter/foam_width = null
 
-[sub_resource type="BoxMesh" id="BoxMesh_board"]
-size = Vector3(2.2, 1.4, 0.14)
-
-[sub_resource type="StandardMaterial3D" id="Mat_board"]
-albedo_color = Color(0.3, 0.22, 0.13, 1)
-roughness = 0.85
+[sub_resource type="PlaneMesh" id="PlaneMesh_water"]
+size = Vector2(64, 64)
+subdivide_width = 48
 
 [sub_resource type="Gradient" id="Grad_fireflies"]
 offsets = PackedFloat32Array(0, 0.55, 1)
@@ -74,12 +73,15 @@ transparency = 1
 blend_mode = 1
 shading_mode = 0
 vertex_color_use_as_albedo = true
-billboard_mode = 3
 disable_receive_shadows = true
+billboard_mode = 3
+particles_anim_h_frames = 1
+particles_anim_v_frames = 1
+particles_anim_loop = false
 
 [sub_resource type="QuadMesh" id="Quad_firefly"]
-size = Vector2(0.14, 0.14)
 material = SubResource("Mat_firefly")
+size = Vector2(0.14, 0.14)
 
 [sub_resource type="Gradient" id="Grad_mist"]
 offsets = PackedFloat32Array(0, 0.4, 1)
@@ -105,22 +107,56 @@ color_ramp = SubResource("GradTex_mist")
 transparency = 1
 shading_mode = 0
 vertex_color_use_as_albedo = true
-billboard_mode = 3
 disable_receive_shadows = true
+billboard_mode = 3
+particles_anim_h_frames = 1
+particles_anim_v_frames = 1
+particles_anim_loop = false
 
 [sub_resource type="QuadMesh" id="Quad_mist"]
-size = Vector2(2.4, 2.4)
 material = SubResource("Mat_mist")
+size = Vector2(2.4, 2.4)
 
-[sub_resource type="PrismMesh" id="PrismMesh_shard"]
-size = Vector3(0.42, 0.72, 0.42)
+[sub_resource type="BoxShape3D" id="BoxShape_wall_ns"]
+size = Vector3(2, 4, 62)
+
+[sub_resource type="BoxShape3D" id="BoxShape_wall_ew"]
+size = Vector3(62, 4, 2)
+
+[sub_resource type="SphereShape3D" id="SphereShape_shard"]
+radius = 1.2
 
 [sub_resource type="StandardMaterial3D" id="Mat_shard"]
 shading_mode = 0
 albedo_color = Color(1, 0.84, 0.47, 1)
-emission_enabled = true
-emission = Color(1, 0.84, 0.47, 1)
-emission_energy_multiplier = 2.6
+
+[sub_resource type="PrismMesh" id="PrismMesh_shard"]
+size = Vector3(0.42, 0.72, 0.42)
+
+[sub_resource type="SphereShape3D" id="SphereShape_beacon"]
+radius = 1.6
+
+[sub_resource type="ShaderMaterial" id="Mat_stone"]
+render_priority = 0
+shader = ExtResource("13_stone")
+shader_parameter/rock_color = Color(0.18, 0.15, 0.28, 1)
+shader_parameter/moss_color = Color(0.16, 0.1, 0.3, 1)
+shader_parameter/mottle_scale = 4.5
+shader_parameter/mottle_strength = 0.35
+shader_parameter/moss_amount = 0.45
+shader_parameter/moss_threshold = 0.62
+shader_parameter/roughness_min = null
+shader_parameter/roughness_max = null
+shader_parameter/emission_color = null
+shader_parameter/emission_energy = null
+shader_parameter/bump_strength = null
+shader_parameter/rock_albedo_tex = ExtResource("stone_albedo")
+shader_parameter/rock_normal_tex = ExtResource("stone_normal")
+shader_parameter/rock_rough_tex = ExtResource("stone_rough")
+shader_parameter/tex_world_scale = null
+shader_parameter/scan_albedo_mix = null
+shader_parameter/scan_rough_mix = null
+shader_parameter/scan_bump_strength = null
 
 [sub_resource type="CylinderMesh" id="Cyl_altar_base"]
 top_radius = 1.15
@@ -137,308 +173,294 @@ top_radius = 0.85
 bottom_radius = 0.45
 height = 0.45
 
-[sub_resource type="ShaderMaterial" id="Mat_stone"]
-shader = ExtResource("13_stone")
-shader_parameter/rock_color = Color(0.18, 0.15, 0.28, 1)
-shader_parameter/moss_color = Color(0.16, 0.10, 0.30, 1)
-shader_parameter/mottle_scale = 4.5
-shader_parameter/mottle_strength = 0.35
-shader_parameter/moss_amount = 0.45
-shader_parameter/moss_threshold = 0.62
-shader_parameter/rock_albedo_tex = ExtResource("stone_albedo")
-shader_parameter/rock_normal_tex = ExtResource("stone_normal")
-shader_parameter/rock_rough_tex = ExtResource("stone_rough")
+[sub_resource type="StandardMaterial3D" id="Mat_board"]
+albedo_color = Color(0.3, 0.22, 0.13, 1)
+roughness = 0.85
 
-[sub_resource type="BoxShape3D" id="BoxShape_wall_ew"]
-size = Vector3(62, 4, 2)
+[sub_resource type="BoxMesh" id="BoxMesh_board"]
+size = Vector3(2.2, 1.4, 0.14)
 
-[sub_resource type="BoxShape3D" id="BoxShape_wall_ns"]
-size = Vector3(2, 4, 62)
-
-[node name="Moonfen" type="Node3D"]
+[node name="Moonfen" type="Node3D" unique_id=117429244]
 script = ExtResource("1_wm")
 biome_id = "moonfen"
-lantern_active = true
 starting_time_of_day = 0.78
 
-[node name="Environment" type="WorldEnvironment" parent="."]
+[node name="Environment" type="WorldEnvironment" parent="." unique_id=743423192]
 environment = ExtResource("2_env")
 
-[node name="Terrain" type="StaticBody3D" parent="."]
-script = ExtResource("11_relief")
+[node name="Terrain" type="StaticBody3D" parent="." unique_id=245052445]
 collision_layer = 32
 collision_mask = 0
+script = ExtResource("11_relief")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Terrain"]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Terrain" unique_id=908016121]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
 shape = SubResource("BoxShape_terrain")
 
-[node name="TerrainMesh" type="MeshInstance3D" parent="Terrain"]
-mesh = SubResource("PlaneMesh_terrain")
+[node name="TerrainMesh" type="MeshInstance3D" parent="Terrain" unique_id=1235389040]
 material_override = ExtResource("3_ter")
+mesh = SubResource("PlaneMesh_terrain")
 
-[node name="WaterPlane" type="MeshInstance3D" parent="."]
+[node name="WaterPlane" type="MeshInstance3D" parent="." unique_id=2142551429]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.55, 0)
-mesh = SubResource("PlaneMesh_water")
 material_override = SubResource("Mat_water")
 cast_shadow = 0
+mesh = SubResource("PlaneMesh_water")
 
-[node name="FenReflection" type="ReflectionProbe" parent="."]
-position = Vector3(0, 3, 0)
+[node name="FenReflection" type="ReflectionProbe" parent="." unique_id=1474762030]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 0)
+max_distance = 72.0
 size = Vector3(60, 12, 60)
 origin_offset = Vector3(0, 1, 0)
 box_projection = true
-max_distance = 72.0
 
-[node name="MoonLight" type="DirectionalLight3D" parent="."]
+[node name="MoonLight" type="DirectionalLight3D" parent="." unique_id=115454630]
 transform = Transform3D(0.707, 0, -0.707, 0, 1, 0, 0.707, 0, 0.707, 30, 60, 20)
 light_color = Color(0.64, 0.58, 0.96, 1)
 light_energy = 1.45
 light_angular_distance = 0.5
 shadow_enabled = true
-directional_shadow_max_distance = 96.0
 shadow_bias = 0.05
 shadow_normal_bias = 0.3
 shadow_blur = 0.8
+directional_shadow_max_distance = 96.0
 
-[node name="WarmLights" type="Node3D" parent="."]
+[node name="WarmLights" type="Node3D" parent="." unique_id=827294303]
 
-[node name="WarmLight1" type="OmniLight3D" parent="WarmLights"]
+[node name="WarmLight1" type="OmniLight3D" parent="WarmLights" unique_id=602069515]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 4, -20)
 light_color = Color(0.96, 0.72, 0.29, 1)
 light_energy = 0.6
 omni_range = 25.0
 omni_attenuation = 2.0
 
-[node name="WarmLight2" type="OmniLight3D" parent="WarmLights"]
+[node name="WarmLight2" type="OmniLight3D" parent="WarmLights" unique_id=1228181336]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, -20)
 light_color = Color(0.96, 0.72, 0.29, 1)
 light_energy = 0.6
 omni_range = 25.0
 omni_attenuation = 2.0
 
-[node name="WarmLight3" type="OmniLight3D" parent="WarmLights"]
+[node name="WarmLight3" type="OmniLight3D" parent="WarmLights" unique_id=813060213]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 4, -20)
 light_color = Color(0.96, 0.72, 0.29, 1)
 light_energy = 0.6
 omni_range = 25.0
 omni_attenuation = 2.0
 
-[node name="WarmLight4" type="OmniLight3D" parent="WarmLights"]
+[node name="WarmLight4" type="OmniLight3D" parent="WarmLights" unique_id=1552359400]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 4, 0)
 light_color = Color(0.96, 0.72, 0.29, 1)
 light_energy = 0.6
 omni_range = 25.0
 omni_attenuation = 2.0
 
-[node name="WarmLight5" type="OmniLight3D" parent="WarmLights"]
+[node name="WarmLight5" type="OmniLight3D" parent="WarmLights" unique_id=891064824]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 0)
 light_color = Color(0.96, 0.72, 0.29, 1)
 light_energy = 0.6
 omni_range = 25.0
 omni_attenuation = 2.0
 
-[node name="WarmLight6" type="OmniLight3D" parent="WarmLights"]
+[node name="WarmLight6" type="OmniLight3D" parent="WarmLights" unique_id=237182485]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 4, 0)
 light_color = Color(0.96, 0.72, 0.29, 1)
 light_energy = 0.6
 omni_range = 25.0
 omni_attenuation = 2.0
 
-[node name="WarmLight7" type="OmniLight3D" parent="WarmLights"]
+[node name="WarmLight7" type="OmniLight3D" parent="WarmLights" unique_id=1303340199]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 4, 20)
 light_color = Color(0.96, 0.72, 0.29, 1)
 light_energy = 0.6
 omni_range = 25.0
 omni_attenuation = 2.0
 
-[node name="WarmLight8" type="OmniLight3D" parent="WarmLights"]
+[node name="WarmLight8" type="OmniLight3D" parent="WarmLights" unique_id=913025272]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 20)
 light_color = Color(0.96, 0.72, 0.29, 1)
 light_energy = 0.6
 omni_range = 25.0
 omni_attenuation = 2.0
 
-[node name="WarmLight9" type="OmniLight3D" parent="WarmLights"]
+[node name="WarmLight9" type="OmniLight3D" parent="WarmLights" unique_id=1327544260]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 4, 20)
 light_color = Color(0.96, 0.72, 0.29, 1)
 light_energy = 0.6
 omni_range = 25.0
 omni_attenuation = 2.0
 
-[node name="Fireflies" type="GPUParticles3D" parent="."]
+[node name="Fireflies" type="GPUParticles3D" parent="." unique_id=1879162844]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 0)
-emitting = true
-amount = 120
+emitting = false
+amount = 1
 lifetime = 10.0
 preprocess = 2.0
 speed_scale = 0.5
-local_coords = false
 visibility_aabb = AABB(-32, -4, -32, 64, 16, 64)
 process_material = SubResource("Proc_fireflies")
 draw_pass_1 = SubResource("Quad_firefly")
+metadata/ground_effect_disabled = true
 
-[node name="MistParticles" type="GPUParticles3D" parent="."]
+[node name="MistParticles" type="GPUParticles3D" parent="." unique_id=1784542976]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
-emitting = true
 amount = 80
 lifetime = 8.0
 preprocess = 1.0
 speed_scale = 0.3
-local_coords = false
 visibility_aabb = AABB(-32, -2, -32, 64, 12, 64)
 process_material = SubResource("Proc_mist")
 draw_pass_1 = SubResource("Quad_mist")
 
-[node name="FogBankWest" parent="." instance=ExtResource("15_fog")]
+[node name="FogBankWest" parent="." unique_id=1989271085 instance=ExtResource("15_fog")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 0.4, -8)
 
-[node name="FogBankEast" parent="." instance=ExtResource("15_fog")]
+[node name="FogBankEast" parent="." unique_id=435748901 instance=ExtResource("15_fog")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 0.4, 10)
 
-[node name="ForestBorder" type="Node3D" parent="."]
+[node name="ForestBorder" type="Node3D" parent="." unique_id=1893329736]
 script = ExtResource("10_dress")
 seed_value = 94612026
 tree_count = 112
 rock_count = 58
 tuft_count = 320
-tree_trunk_color = Color(0.10, 0.055, 0.16, 1)
+tree_trunk_color = Color(0.1, 0.055, 0.16, 1)
 tree_canopy_color = Color(0.11, 0.075, 0.27, 1)
 rock_color = Color(0.18, 0.15, 0.28, 1)
-tuft_color = Color(0.16, 0.10, 0.30, 1)
+tuft_color = Color(0.16, 0.1, 0.3, 1)
 mushroom_cap_color = Color(0.28, 0.18, 0.48, 1)
 
-[node name="WorldBounds" type="StaticBody3D" parent="."]
+[node name="WorldBounds" type="StaticBody3D" parent="." unique_id=311593118]
 collision_layer = 32
 collision_mask = 0
 
-[node name="WallEast" type="CollisionShape3D" parent="WorldBounds"]
+[node name="WallEast" type="CollisionShape3D" parent="WorldBounds" unique_id=1339817624]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, 2, 0)
 shape = SubResource("BoxShape_wall_ns")
 
-[node name="WallWest" type="CollisionShape3D" parent="WorldBounds"]
+[node name="WallWest" type="CollisionShape3D" parent="WorldBounds" unique_id=326670894]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 2, 0)
 shape = SubResource("BoxShape_wall_ns")
 
-[node name="WallNorth" type="CollisionShape3D" parent="WorldBounds"]
+[node name="WallNorth" type="CollisionShape3D" parent="WorldBounds" unique_id=991679774]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, -30)
 shape = SubResource("BoxShape_wall_ew")
 
-[node name="WallSouth" type="CollisionShape3D" parent="WorldBounds"]
+[node name="WallSouth" type="CollisionShape3D" parent="WorldBounds" unique_id=1848703413]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 30)
 shape = SubResource("BoxShape_wall_ew")
 
-[node name="SummonPoint1" type="Marker3D" parent="."]
+[node name="SummonPoint1" type="Marker3D" parent="." unique_id=1155356381]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 1, -6)
 
-[node name="SummonPoint2" type="Marker3D" parent="."]
+[node name="SummonPoint2" type="Marker3D" parent="." unique_id=2054292371]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 1, -14)
 
-[node name="SummonPoint3" type="Marker3D" parent="."]
+[node name="SummonPoint3" type="Marker3D" parent="." unique_id=1464204745]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 17, 1, -3)
 
-[node name="SummonPoint4" type="Marker3D" parent="."]
+[node name="SummonPoint4" type="Marker3D" parent="." unique_id=1743066108]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 1, -16)
 
-[node name="CameraRig" type="Node3D" parent="."]
+[node name="CameraRig" type="Node3D" parent="." unique_id=1834179106]
 script = ExtResource("4_rig")
 
-[node name="SpringArm" type="SpringArm3D" parent="CameraRig"]
+[node name="SpringArm" type="SpringArm3D" parent="CameraRig" unique_id=1078400533]
 collision_mask = 32
 spring_length = 16.0
 margin = 0.5
 
-[node name="Camera3D" type="Camera3D" parent="CameraRig/SpringArm"]
+[node name="Camera3D" type="Camera3D" parent="CameraRig/SpringArm" unique_id=1057347501]
+current = true
 fov = 55.0
 near = 0.1
 far = 220.0
-current = true
 
-[node name="PlayerSpawn" type="Marker3D" parent="."]
+[node name="PlayerSpawn" type="Marker3D" parent="." unique_id=1803545644]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -16, 0.5, 10)
 
-[node name="HushlingSpawn" type="Marker3D" parent="."]
+[node name="HushlingSpawn" type="Marker3D" parent="." unique_id=1283987729]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.4, 0.5, 3.15)
 
-[node name="ShardSpawn" type="Area3D" parent="."]
+[node name="ShardSpawn" type="Area3D" parent="." unique_id=454860309]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.25, 0.5, -4.1)
 visible = false
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="ShardSpawn"]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="ShardSpawn" unique_id=813425718]
 shape = SubResource("SphereShape_shard")
 
-[node name="ShardCrystal" type="MeshInstance3D" parent="ShardSpawn"]
+[node name="ShardCrystal" type="MeshInstance3D" parent="ShardSpawn" unique_id=441499578]
 transform = Transform3D(1, 0, 0, 0, 0.94, -0.342, 0, 0.342, 0.94, 0, 0.65, 0)
-mesh = SubResource("PrismMesh_shard")
 material_override = SubResource("Mat_shard")
+mesh = SubResource("PrismMesh_shard")
 
-[node name="ShardGlow" type="OmniLight3D" parent="ShardSpawn"]
+[node name="ShardGlow" type="OmniLight3D" parent="ShardSpawn" unique_id=622613994]
 light_color = Color(1, 0.84, 0.47, 1)
 light_energy = 1.4
 omni_range = 7.0
 omni_attenuation = 1.8
 
-[node name="BeaconSpawn" type="Area3D" parent="."]
+[node name="BeaconSpawn" type="Area3D" parent="." unique_id=1668513015]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14.2, 0.5, -10.4)
 visible = false
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="BeaconSpawn"]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="BeaconSpawn" unique_id=880454960]
 shape = SubResource("SphereShape_beacon")
 
-[node name="AltarBase" type="MeshInstance3D" parent="BeaconSpawn"]
+[node name="AltarBase" type="MeshInstance3D" parent="BeaconSpawn" unique_id=1312718036]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.35, 0)
+material_override = SubResource("Mat_stone")
 mesh = SubResource("Cyl_altar_base")
-material_override = SubResource("Mat_stone")
 
-[node name="AltarColumn" type="MeshInstance3D" parent="BeaconSpawn"]
+[node name="AltarColumn" type="MeshInstance3D" parent="BeaconSpawn" unique_id=2064981415]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.35, 0)
+material_override = SubResource("Mat_stone")
 mesh = SubResource("Cyl_altar_column")
-material_override = SubResource("Mat_stone")
 
-[node name="BrazierBowl" type="MeshInstance3D" parent="BeaconSpawn"]
+[node name="BrazierBowl" type="MeshInstance3D" parent="BeaconSpawn" unique_id=1629944484]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 0)
-mesh = SubResource("Cyl_altar_bowl")
 material_override = SubResource("Mat_stone")
+mesh = SubResource("Cyl_altar_bowl")
 
-[node name="QuestBoard" type="MeshInstance3D" parent="."]
+[node name="QuestBoard" type="MeshInstance3D" parent="." unique_id=1763195158]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, -18)
-mesh = SubResource("BoxMesh_board")
 material_override = SubResource("Mat_board")
+mesh = SubResource("BoxMesh_board")
 
-[node name="ReturnGate" type="Node3D" parent="."]
-position = Vector3(-22, 0.5, -20)
+[node name="ReturnGate" type="Node3D" parent="." unique_id=1813014480]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -22, 0.5, -20)
 
-[node name="GateLeft" type="MeshInstance3D" parent="ReturnGate"]
-position = Vector3(-0.8, 1.0, 0)
-scale = Vector3(0.8, 1.5, 0.8)
-mesh = SubResource("PrismMesh_shard")
+[node name="GateLeft" type="MeshInstance3D" parent="ReturnGate" unique_id=1172264665]
+transform = Transform3D(0.8, 0, 0, 0, 1.5, 0, 0, 0, 0.8, -0.8, 1, 0)
 material_override = SubResource("Mat_shard")
-
-[node name="GateRight" type="MeshInstance3D" parent="ReturnGate"]
-position = Vector3(0.8, 1.0, 0)
-scale = Vector3(0.8, 1.5, 0.8)
 mesh = SubResource("PrismMesh_shard")
-material_override = SubResource("Mat_shard")
 
-[node name="GateLight" type="OmniLight3D" parent="ReturnGate"]
-position = Vector3(0, 1.8, 0)
+[node name="GateRight" type="MeshInstance3D" parent="ReturnGate" unique_id=834975227]
+transform = Transform3D(0.8, 0, 0, 0, 1.5, 0, 0, 0, 0.8, 0.8, 1, 0)
+material_override = SubResource("Mat_shard")
+mesh = SubResource("PrismMesh_shard")
+
+[node name="GateLight" type="OmniLight3D" parent="ReturnGate" unique_id=1792212283]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.8, 0)
 light_color = Color(0.34, 0.22, 1, 1)
 light_energy = 2.4
 omni_range = 8.0
 
-[node name="Hero" parent="." instance=ExtResource("5_hero")]
+[node name="Hero" parent="." unique_id=755616481 instance=ExtResource("5_hero")]
 
-[node name="Hushling" parent="." instance=ExtResource("6_hush")]
+[node name="Hushling" parent="." unique_id=299289463 instance=ExtResource("6_hush")]
 
-[node name="HUD" parent="." instance=ExtResource("7_hud")]
+[node name="HUD" parent="." unique_id=1639682892 instance=ExtResource("7_hud")]
 
-[node name="SatchelUI" parent="." instance=ExtResource("8_sat")]
+[node name="SatchelUI" parent="." unique_id=1156899591 instance=ExtResource("8_sat")]
+
+[node name="ForgeMenu" parent="." unique_id=1111694726 instance=ExtResource("9_forge")]
 visible = false
 
-[node name="ForgeMenu" parent="." instance=ExtResource("9_forge")]
-visible = false
+[node name="ShopMenu" parent="." unique_id=934278447 instance=ExtResource("14_shop")]
 
-[node name="ShopMenu" parent="." instance=ExtResource("14_shop")]
-
-[node name="WorldStreamer" type="Node3D" parent="."]
+[node name="WorldStreamer" type="Node3D" parent="." unique_id=847057105]
 script = ExtResource("16_stream")
+
+[node name="DiamondShop" parent="." unique_id=590732347 instance=ExtResource("20_fd6dl")]
+visible = false

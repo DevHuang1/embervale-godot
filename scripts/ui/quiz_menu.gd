@@ -16,6 +16,14 @@ func _ready() -> void:
 	UiKit.apply_glass($Root)
 	UiKit.style_button(close_button, UiKit.SAGE)
 	close_button.pressed.connect(close)
+	_apply_responsive_frame()
+	get_viewport().size_changed.connect(_apply_responsive_frame)
+
+## Phone frame: the lesson sheet authored 180px vertical margins, which eats a
+## short portrait screen. Tighten with the shared safe-area-aware helper.
+func _apply_responsive_frame() -> void:
+	UiKit.apply_menu_frame(get_node_or_null("Root") as Control,
+		get_viewport().get_visible_rect().size, 80.0, 180.0)
 
 func _process(_delta: float) -> void:
 	if visible != _freeze_was_visible:

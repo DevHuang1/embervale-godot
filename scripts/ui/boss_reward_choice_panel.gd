@@ -38,16 +38,45 @@ func _build() -> void:
 	_body.add_child(subtitle)
 	for choice in _choices:
 		var button := Button.new()
-		var action := UiKit.action_state("available", "Preview only until confirmed")
-		button.text = "%s\n%s\n%s" % [str(choice.get("title", "Reward")),
-			str(choice.get("build_tag", "Build option")),
-			"[%s] %s" % [str(action.get("label", "AVAILABLE")),
-			str(choice.get("summary", ""))]]
+		var reward_id := str(choice.get("id", ""))
+		var granted := _granted_line(reward_id)
+		var action := UiKit.action_state("owned" if granted.ends_with("OWNED") \
+			else "available", "Preview only until confirmed")
+		var lines: Array[String] = [str(choice.get("title", "Reward")),
+			str(choice.get("build_tag", "Build option"))]
+		if not granted.is_empty():
+			lines.append(granted)
+		lines.append("[%s] %s" % [str(action.get("label", "AVAILABLE")),
+			str(choice.get("summary", ""))])
+		button.text = "\n".join(lines)
 		button.tooltip_text = "%s. %s." % [str(action.get("label", "AVAILABLE")),
 			str(action.get("detail", "Preview only until confirmed"))]
-		button.custom_minimum_size = Vector2(0, 78)
-		button.pressed.connect(_on_choice_pressed.bind(str(choice.get("id", ""))))
+		button.custom_minimum_size = Vector2(0, 96 if not granted.is_empty() else 78)
+		button.pressed.connect(_on_choice_pressed.bind(reward_id))
 		_body.add_child(button)
+
+## The item this direction actually grants, named from its own def, plus a
+## clear marker when the player already carries it (a duplicate pays gold).
+func _granted_line(reward_id: String) -> String:
+	var gs := get_node_or_null("/root/GameState")
+	if gs == null or reward_id.is_empty():
+		return ""
+	var definitions := gs.get("WEAPON_DEFS") as Dictionary
+	var kind := "weapon"
+	var definition: Dictionary = definitions.get(reward_id, {})
+	if definition.is_empty():
+		definitions = gs.get("ARMOR_DEFS") as Dictionary
+		kind = "armor"
+		definition = definitions.get(reward_id, {})
+	if definition.is_empty():
+		return ""
+	var stat := "ATK %d" % int(definition.get("atk", 0)) if kind == "weapon" \
+		else "DEF %d · SPEED ×%.2f" % [int(definition.get("defense", 0)),
+			float(definition.get("speed_mult", 1.0))]
+	var line := "GRANTS %s · %s" % [str(definition.get("name", reward_id)), stat]
+	if bool(gs.call("owns_shop_item", reward_id)):
+		line += " · OWNED"
+	return line
 
 func _on_choice_pressed(reward_id: String) -> void:
 	if reward_id.is_empty() or _choices.is_empty():

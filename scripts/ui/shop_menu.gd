@@ -5,8 +5,8 @@ class_name ShopMenu
 @onready var game_state: GameState = GameState
 @onready var audio: AudioManager = AudioManager
 @onready var items_vbox: VBoxContainer = $Root/VBox/ItemsScroll/ItemsVBox
-@onready var gold_label: Label = $Root/VBox/Header/GoldLabel
-@onready var close_button: Button = $Root/VBox/Header/CloseButton
+@onready var gold_label: Label = $Root/Header/GoldLabel
+@onready var close_button: Button = $Root/Header/CloseButton
 @onready var message_label: Label = $Root/VBox/MessageLabel
 
 var _freeze_was_visible := false
@@ -25,7 +25,7 @@ const RARITY_COLORS: Array[Color] = [
 	Color(0.38, 0.72, 0.86), Color(0.70, 0.48, 0.88), UiKit.EMBER]
 
 func _ready() -> void:
-	UiKit.apply_glass($Root)
+	$Root.add_theme_stylebox_override("panel", UiKit.glass_stylebox())
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_freeze_was_visible = visible
 	UiKit.style_button(close_button, UiKit.SAGE)
@@ -40,7 +40,7 @@ func _ready() -> void:
 
 func _apply_responsive_layout() -> void:
 	var viewport_size := get_viewport().get_visible_rect().size
-	var root_panel := $Root as PanelContainer
+	var root_panel := $Root as Control
 	var metrics := UiKit.responsive_metrics(viewport_size)
 	var margin := float(metrics.get("safe_margin", UiKit.SAFE_MARGIN_COMPACT))
 	var width := minf(1120.0, viewport_size.x - margin * 2.0)
@@ -203,7 +203,9 @@ func _sorted_stock() -> Array[Dictionary]:
 			stock.append(candidate)
 	if _sort_mode == "price":
 		stock.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-			return int(a.get("price", 0)) < int(b.get("price", 0)))
+			return GameState.gear_buy_price(str(a.get("id", "")),
+				str(a.get("kind", ""))) < GameState.gear_buy_price(str(b.get("id", "")),
+				str(b.get("kind", ""))))
 	elif _sort_mode == "power":
 		stock.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 			return _stock_power(a) > _stock_power(b))
@@ -270,7 +272,7 @@ func _build_buy_row(stock: Dictionary) -> Control:
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	UiKit.style_label(desc, &"Caption", 14)
 	info.add_child(desc)
-	var price := int(stock.get("price", def.get("price", 1)))
+	var price := GameState.gear_buy_price(id, kind)
 	if kind == "weapon" or kind == "armor":
 		var preview := Button.new()
 		preview.text = "PREVIEW"
@@ -379,11 +381,7 @@ func _build_sell_row(kind: String, item: Dictionary) -> Control:
 	return panel
 
 func _sell_value(kind: String, id: String) -> int:
-	if kind == "weapon":
-		return maxi(1, int(GameState.WEAPON_DEFS.get(id, {}).get("price", 1)) / 2)
-	if kind == "armor":
-		return maxi(1, int(GameState.ARMOR_DEFS.get(id, {}).get("price", 1)) / 2)
-	return 6
+	return GameState.gear_sell_value(id, kind)
 
 func _stat_line(kind: String, def: Dictionary) -> String:
 	if kind == "weapon":

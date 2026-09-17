@@ -1,6 +1,7 @@
 extends Node
 
 var _failures: Array[String] = []
+var _stale_death_events := 0
 
 func _ready() -> void:
 	var game_state := get_node("/root/GameState")
@@ -68,6 +69,24 @@ func _ready() -> void:
 	_assert_true(_visible_growths(boss) == 0,
 		"reset removes all phase-transformation silhouettes")
 
+	# A player defeat can reset the encounter while the boss is still in its
+	# 2.6-second death presentation. That old callback must not complete the
+	# reward transaction or emit a second death event for the retry.
+	_stale_death_events = 0
+	boss.is_practice = false
+	var boss_key := boss._boss_key()
+	boss.died.connect(_on_stale_boss_died)
+	boss.die()
+	await get_tree().create_timer(0.1).timeout
+	boss.reset_encounter()
+	await get_tree().create_timer(2.8).timeout
+	_assert_true(not boss.is_defeated and not boss._death_finalized \
+			and _stale_death_events == 0 \
+			and not game_state.has_boss_killed(boss_key),
+		"reset cancels stale death finalization during a retry")
+	boss.died.disconnect(_on_stale_boss_died)
+	boss.is_practice = true
+
 	var death_sequence_events := {"count": 0}
 	var death_events := {"count": 0}
 	boss.death_sequence_started.connect(func(_dead_boss: Node3D) -> void:
@@ -126,8 +145,14 @@ func _assert_true(condition: bool, message: String) -> void:
 		_failures.append(message)
 		print("FAILURE: ", message)
 
+func _on_stale_boss_died() -> void:
+	_stale_death_events += 1
+
 func _finish(game_state: Node) -> void:
 	game_state.delete_save()
+	var audio_manager := get_node_or_null("/root/AudioManager")
+	if audio_manager != null and audio_manager.has_method("shutdown_for_exit"):
+		audio_manager.call("shutdown_for_exit")
 	if _failures.is_empty():
 		print("RESULT: PASS")
 		get_tree().quit(0)

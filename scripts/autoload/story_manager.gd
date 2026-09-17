@@ -94,7 +94,7 @@ func trigger_event(event_id: String) -> bool:
 func has_triggered(event_id: String) -> bool:
 	return bool(_flags.get(event_id, false))
 
-## Force-set a flag without firing the signal (used by SaveLoadManager on load).
+## Force-set a flag without firing the signal during save restoration.
 func set_flag(event_id: String, value: bool) -> void:
 	_flags[event_id] = value
 

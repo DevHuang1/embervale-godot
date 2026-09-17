@@ -7,6 +7,8 @@ class_name ArmorVisualRegistry
 const ARMOR_VISUALS: Dictionary = {
 	"warden_plate": {"kind": "procedural", "visual": "warden_plate"},
 	"emberweave_cloak": {"kind": "procedural", "visual": "emberweave_cloak"},
+	"spore_wrap": {"kind": "procedural", "visual": "spore_wrap"},
+	"moonfen_cloak": {"kind": "procedural", "visual": "moonfen_cloak"},
 	"round_shield": {"kind": "model", "path": "res://assets/models/weapons/quaternius/Shield_Round.fbx"},
 }
 

@@ -1,6 +1,8 @@
 extends CanvasLayer
 class_name BossAltar
 
+var _resolved := false
+
 ## === Shape Your Foe — Boss Altar ===
 ## Pre-boss customization gate. Scan an object (or reuse the last capture),
 ## extract its palette, pick ONE skill from the boss's realm pool and an
@@ -23,6 +25,7 @@ signal resolved(customized: bool)
 @onready var scan_button: Button = $Root/VBox/ActionRow/ScanButton
 @onready var default_button: Button = $Root/VBox/ActionRow/DefaultButton
 @onready var status_label: Label = $Root/VBox/Status
+@onready var exit_button: Button = $Root/VBox/ExitButton
 @onready var custom_box: VBoxContainer = $Root/VBox/CustomBox
 @onready var palette_row: HBoxContainer = $Root/VBox/CustomBox/PaletteRow
 @onready var skill_grid: GridContainer = $Root/VBox/CustomBox/SkillGrid
@@ -49,6 +52,7 @@ var _busy := false
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # the world is paused behind us
 	UiKit.apply_glass($Root)
+	UiKit.style_secondary_button(exit_button)
 	var def := Bestiary.boss_def(BOSS_ID)
 	title_label.text = "SHAPE YOUR FOE"
 	locked_blurb.text = str(def.get("locked_blurb", ""))
@@ -63,8 +67,23 @@ func _ready() -> void:
 	default_button.pressed.connect(func(): _resolve(false))
 	lock_button.pressed.connect(_on_lock_pressed)
 	rescan_button.pressed.connect(_on_scan_pressed)
+	exit_button.pressed.connect(_on_exit_pressed)
 	_build_skill_cards()
 	_build_sfx_buttons()
+	_apply_responsive_frame()
+	get_viewport().size_changed.connect(_apply_responsive_frame)
+
+## Phone frame: the altar panel authored 80/60px margins and a two-column skill
+## grid; tighten the frame so the customize box stays reachable in portrait.
+func _apply_responsive_frame() -> void:
+	UiKit.apply_menu_frame(get_node_or_null("Root") as Control,
+		get_viewport().get_visible_rect().size, 80.0, 60.0)
+
+func _on_exit_pressed() -> void:
+	if _busy:
+		return
+	audio.play_ui_back()
+	_resolve(false)
 
 func _build_skill_cards() -> void:
 	for sk in Bestiary.skill_pool(BOSS_ID):
@@ -184,4 +203,16 @@ func _on_lock_pressed() -> void:
 	_resolve(true)
 
 func _resolve(customized: bool) -> void:
+	if _resolved:
+		return
+	_resolved = true
 	resolved.emit(customized)
+
+## If this altar is destroyed without resolving (realm teardown, reload), it must
+## not leave the world frozen behind it.
+func _exit_tree() -> void:
+	if not _resolved:
+		_resolved = true
+		var gs := get_node_or_null("/root/GameState")
+		if gs != null and gs.has_method("pop_world_freeze"):
+			gs.call("pop_world_freeze")

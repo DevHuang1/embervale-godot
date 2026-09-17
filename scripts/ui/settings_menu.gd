@@ -11,16 +11,16 @@ class_name SettingsMenu
 @onready var sfx_slider: HSlider = $Root/Panel/Margin/VBox/Scroll/Rows/SfxRow/SfxSlider
 @onready var back_button: Button = $Root/Panel/Margin/VBox/Footer/BackButton
 @onready var quit_game_button: Button = $Root/Panel/Margin/VBox/Footer/QuitGameButton
-@onready var settings_panel: PanelContainer = $Root/Panel
+@onready var settings_panel: Control = $Root/Panel
 @onready var rows_box: VBoxContainer = $Root/Panel/Margin/VBox/Scroll/Rows
-@onready var close_button: Button = $Root/Panel/Margin/VBox/Header/CloseButton
+@onready var close_button: Button = $Root/Panel/Header/CloseButton
 var _listening_action: String = ""
 var _binding_status: Label = null
 var _binding_section: VBoxContainer = null
 var _binding_labels: Dictionary = {}
 
 func _ready() -> void:
-	UiKit.apply_glass($Root/Panel)
+	$Root/Panel.add_theme_stylebox_override("panel", UiKit.glass_stylebox())
 	get_viewport().size_changed.connect(_apply_responsive_layout)
 	_apply_responsive_layout()
 	process_mode = Node.PROCESS_MODE_ALWAYS  # stay interactive while the world is frozen
@@ -41,6 +41,7 @@ func _ready() -> void:
 	if InputManager.has_signal("pause_pressed"):
 		InputManager.pause_pressed.connect(_on_pause_pressed)
 	_build_quality_row()
+	_build_world_view_row()
 	_build_frame_rate_row()
 	_build_camera_row()
 	_build_motion_row()
@@ -170,7 +171,7 @@ func _build_camera_row() -> void:
 	option.name = "CameraViewOption"
 	option.add_item("Third Person")
 	option.add_item("First Person")
-	option.tooltip_text = "Tap to move, joystick to steer — drag the screen (mobile) or move the mouse (desktop) to look left/right."
+	option.tooltip_text = "Tap to move; joystick to steer. Mobile: swipe horizontally on the right side to orbit and pinch to zoom. Desktop: right/middle-drag or horizontal-wheel to orbit."
 	var config := ConfigFile.new()
 	config.load(AudioManager.SETTINGS_PATH)
 	var current := str(config.get_value("gameplay", "camera_view", "third_person"))
@@ -208,6 +209,32 @@ func _build_quality_row() -> void:
 	option.selected = clampi(int(scaler.mode), 0, 2)
 	option.item_selected.connect(func(idx: int) -> void:
 		scaler.set_mode(idx)
+		audio.play_ui_blip())
+	row.add_child(option)
+	vbox.add_child(row)
+
+## Presentation-only distance picker. Reduced keeps gameplay and collision
+## intact while hiding distant world geometry and shrinking streamed rings.
+func _build_world_view_row() -> void:
+	var scaler := get_node_or_null("/root/WorldState/QualityScaler")
+	if scaler == null:
+		return
+	var vbox: VBoxContainer = rows_box
+	var row := HBoxContainer.new()
+	row.name = "WorldViewRow"
+	var label := Label.new()
+	label.text = "World View"
+	label.tooltip_text = "Reduced hides far scenery and uses a shorter view distance for older phones. Gameplay, collision, and quest logic are unchanged."
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	row.add_child(label)
+	var option := OptionButton.new()
+	option.name = "WorldViewOption"
+	option.add_item("Full")
+	option.add_item("Reduced")
+	option.selected = clampi(int(scaler.get("world_view_mode")), 0, 1)
+	option.item_selected.connect(func(index: int) -> void:
+		scaler.call("set_world_view_mode", index)
 		audio.play_ui_blip())
 	row.add_child(option)
 	vbox.add_child(row)

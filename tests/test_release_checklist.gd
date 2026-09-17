@@ -9,7 +9,14 @@ func _init() -> void:
 			quit(1)
 			return
 	for gate in ["suspend/resume", "low-memory recovery", "corrupt-save recovery",
-			"RevenueCat entitlements never replace the gameplay database"]:
+			"RevenueCat entitlements never replace the gameplay database",
+			"RevenueCat secret keys never ship in the client",
+			"web funnel purchase end to end",
+			"survives save/load without granting twice",
+			"redirects are refused on every provider request",
+			"tampered provider ledger row cannot block a legitimate claim",
+			"no secret-shaped value appears in any tracked file",
+			"enables the `INTERNET` permission"]:
 		if not checklist.contains(gate):
 			push_error("Release checklist missing gate: %s" % gate)
 			quit(1)

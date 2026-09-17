@@ -115,7 +115,10 @@ func _apply_tod() -> void:
 
 	# Night factor: dim fireflies at noon, bright at night
 	var night := 1.0 - clampf(sin(time_of_day * TAU) + 0.2, 0.0, 1.0)
-	if _fireflies != null and is_instance_valid(_fireflies):
+	# A disabled emitter is an intentional realm presentation opt-out. Keep
+	# the node for compatibility, but do not resurrect its square cards at dusk.
+	if _fireflies != null and is_instance_valid(_fireflies) \
+			and not _fireflies.get_meta("ground_effect_disabled", false):
 		_fireflies.emitting = night > 0.3
 		if _fireflies.process_material is ParticleProcessMaterial:
 			(_fireflies.process_material as ParticleProcessMaterial).color = \

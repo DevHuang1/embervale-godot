@@ -12,12 +12,21 @@ const WEAPON_PATHS: Dictionary = {
 	"snip_twins": "res://assets/models/weapons/quaternius/Dagger_2.fbx",
 	"slab_hammer": "res://assets/models/weapons/quaternius/Hammer_Double.fbx",
 	"matriarch_scepter": "res://assets/models/weapons/quaternius/Spear.fbx",
-	"thorn_mace": "res://assets/models/weapons/quaternius/Hammer_Small.fbx",
+	"thornmace": "res://assets/models/weapons/quaternius/Hammer_Small.fbx",
 	"iron_axe": "res://assets/models/weapons/quaternius/Axe.fbx",
 	"grove_spear": "res://assets/models/weapons/quaternius/Spear.fbx",
 	"hunter_bow": "res://assets/models/weapons/quaternius/Bow_Wooden.fbx",
 	"round_shield": "res://assets/models/weapons/quaternius/Shield_Round.fbx",
 	"soda_cannon": "res://assets/models/weapons/quaternius/Hammer_Small.fbx",
+	"siltcarver_blade": "res://assets/models/weapons/quaternius/Dagger_2.fbx",
+	"cinderbound_maul": "res://assets/models/weapons/quaternius/Hammer_Double.fbx",
+	"tideward_staff": "res://assets/models/weapons/quaternius/Spear.fbx",
+	"rootbound_cleaver": "res://assets/models/weapons/quaternius/Claymore.fbx",
+	"moonpact_staff": "res://assets/models/weapons/quaternius/Spear.fbx",
+	"thornbite_cleaver": "res://assets/models/weapons/quaternius/Axe.fbx",
+	"tidecall_brand": "res://assets/models/weapons/quaternius/Spear.fbx",
+	"cinderhart_maul": "res://assets/models/weapons/quaternius/Hammer_Double.fbx",
+	"oracle_crescent": "res://assets/models/weapons/quaternius/Claymore.fbx",
 }
 
 static func path_for(weapon_id: String) -> String:

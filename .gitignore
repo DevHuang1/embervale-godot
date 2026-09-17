@@ -34,6 +34,12 @@ exports/
 *.local.cfg
 user_*.cfg
 
+# Store credentials — never commit a provider key
+.env
+.env.local
+*.key
+store.local.cfg
+
 # Hackathon plan (keep untracked)
 # Stray local junk (crash dump + downloaded reference image)
 crash_log.txt

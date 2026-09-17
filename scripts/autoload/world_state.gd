@@ -186,7 +186,7 @@ func get_time_of_day() -> float:
 func is_night() -> bool:
 	return _realm_time_of_day > 0.75 or _realm_time_of_day < 0.22
 
-# ─── Serialisation (called by SaveLoadManager) ─────────────────────────────────
+# ─── Serialisation support ────────────────────────────────────────────────────
 
 func to_dict() -> Dictionary:
 	return {

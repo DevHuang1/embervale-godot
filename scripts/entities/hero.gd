@@ -1662,7 +1662,10 @@ func _check_auto_engage() -> void:
 func _on_enemy_killed(enemy: Node3D) -> void:
 	game_state.disengage_enemy()
 	game_state.grant_xp(GameState.FIRST_KILL_XP if game_state.level == 1 else GameState.SUBSEQUENT_KILL_XP)
-	
+	if game_state.has_method("update_objective"):
+		var kill_id := str(enemy.get("archetype")) if "archetype" in enemy else str(enemy.name)
+		game_state.update_objective("kill", kill_id, 1)
+
 	# A kill lifts the gloom: clear any low-warmth vignette so the world
 	# brightens back instead of staying dark after the fight.
 	get_tree().call_group("screen_fx", "comfort")

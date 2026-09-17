@@ -24,7 +24,7 @@ var last_relic: RelicData = null
 var skill_range: SkillRange = null
 
 func _ready() -> void:
-	skill_range = SkillRange.new()
+	skill_range = SkillRange.get_instance()
 
 # Coco-SSD style classes mapped to weapons
 const CLASS_TO_WEAPON: Dictionary = {

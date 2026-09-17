@@ -27,6 +27,7 @@ func _run() -> void:
 	var failures := 0
 	var finals := 0
 	var gs := root.get_node("/root/GameState")
+	gs.save_path = "/tmp/embervale_realm_visuals_%d.cfg" % OS.get_process_id()
 	gs.delete_save()
 	gs.reset()
 
@@ -39,10 +40,67 @@ func _run() -> void:
 			continue
 		# Whispergrove renders through the shared grove (biome bramblewood).
 		gs.set_current_realm(realm)
+		if realm == "bramblewood":
+			# The shared grove is visually Whispergrove until the route unlocks the
+			# Bramblewood expedition; force the latter for this realm pass.
+			gs.current_stage = GameState.QuestStage.COMPLETE
+			gs.scans_remaining = 0
 		var scene: Node = (load(scene_path) as PackedScene).instantiate()
 		root.add_child(scene)
 		for i in 6:
 			await process_frame
+		var profile_realm: String = "whispergrove" if realm == "whispergrove" else realm
+		var profile_chests: Array = RealmLayoutData.profile(profile_realm).get("chests", [])
+		var runtime_chests: Array = []
+		for chest_value in scene.find_children("*", "ChestNode", true, false):
+			if (chest_value as ChestNode).is_in_group("authored_chest"):
+				runtime_chests.append(chest_value)
+		if runtime_chests.size() != profile_chests.size():
+			failures += 1
+			print("FAIL: %s authored chest count mismatch (%d != %d)" \
+				% [realm, runtime_chests.size(), profile_chests.size()])
+		var expected_chests: Dictionary = {}
+		for chest_value in profile_chests:
+			if chest_value is Dictionary:
+				var definition: Dictionary = chest_value
+				expected_chests[str(definition.get("id", ""))] = definition
+		var runtime_ids: Dictionary = {}
+		for chest_value in runtime_chests:
+			var chest := chest_value as ChestNode
+			if chest == null:
+				continue
+			var chest_id := chest.chest_id
+			if runtime_ids.has(chest_id) or not expected_chests.has(chest_id):
+				failures += 1
+				print("FAIL: %s runtime chest id is missing or duplicated: %s" % [realm, chest_id])
+			else:
+				runtime_ids[chest_id] = true
+				var definition: Dictionary = expected_chests[chest_id]
+				if chest.chest_tier != ChestNode.tier_for_rarity(int(definition.get("rarity", 0))):
+					failures += 1
+					print("FAIL: %s chest %s has wrong tier" % [realm, chest_id])
+				if str(definition.get("type", "")) == "boss_gated" \
+						and chest.required_boss_key != str(definition.get("boss_key", "")):
+					failures += 1
+					print("FAIL: %s chest %s has wrong boss gate" % [realm, chest_id])
+		if failures == 0:
+			print("PASS: %s authored chests instantiated with unique ids and correct gates" % realm)
+		var activity_director := scene.find_child("RealmActivityDirector", true, false)
+		if activity_director == null:
+			failures += 1
+			print("FAIL: %s missing shared realm activity director" % realm)
+		else:
+			var activity_report: Dictionary = activity_director.call("get_diagnostics")
+			if int(activity_report.get("marker_count", 0)) != 6:
+				failures += 1
+				print("FAIL: %s activity catalog is not six beats" % realm)
+			if int(activity_report.get("active_combat_count", 0)) > 2:
+				failures += 1
+				print("FAIL: %s activity combat cap exceeded" % realm)
+			for marker in scene.get_tree().get_nodes_in_group("activity_marker"):
+				if is_instance_valid(marker) and not marker.has_meta("terrain_surface_height"):
+					failures += 1
+					print("FAIL: %s activity marker is not terrain-conformed" % realm)
 		var vista := scene.find_child("DistantLandmarkSilhouettes", true, false)
 		if vista == null or vista.get_child_count() == 0 or vista.get_child_count() > 3:
 			failures += 1
@@ -54,7 +112,10 @@ func _run() -> void:
 			print("FAIL: no terrain_ground material in ", realm)
 			scene.queue_free()
 			continue
-		for sampler in STYLIZED_SAMPLERS:
+		var expected_samplers := STYLIZED_SAMPLERS
+		if terrain.shader.resource_path.contains("terrain_ground_mobile"):
+			expected_samplers = ["grass_tex", "dirt_tex", "sand_tex", "rock_tex"]
+		for sampler in expected_samplers:
 			var tex = terrain.get_shader_parameter(sampler)
 			if tex == null or not (tex is Texture2D):
 				failures += 1
@@ -99,11 +160,11 @@ func _run() -> void:
 		# per-chunk "GrassCarpet" batches, so their density is measured by
 		# aggregating every instance inside the 72 m disc around the hero spawn.
 		var grass_batches := scene.find_children("GrassCarpet*", "MultiMeshInstance3D", true, false)
+		var stream_realm: bool = realm in ["bramblewood", "whispergrove"]
 		if grass_batches.is_empty():
 			failures += 1
 			print("FAIL: %s missing continuous GrassCarpet batch" % realm)
 		else:
-			var stream_realm: bool = realm in ["bramblewood", "whispergrove"]
 			if not stream_realm:
 				failures += _check_grass_batch(scene, grass_batches[0] as MultiMeshInstance3D,
 					realm, 28.0 if realm == "moonfen" else 56.0)
@@ -133,7 +194,13 @@ func _run() -> void:
 					for batch in grass_batches:
 						if band_names.has(str((batch as Node).name)):
 							band_names[str((batch as Node).name)] = true
+					var streamer := scene.find_child("WorldStreamer", true, false)
+					var expects_far_band := false
+					if streamer != null and streamer.has_method("get_tier_spec"):
+						expects_far_band = float(streamer.call("get_tier_spec").get("radius", 0.0)) >= 190.0
 					for band_name in band_names:
+						if band_name == "GrassCarpet_far" and not expects_far_band:
+							continue
 						if not band_names[band_name]:
 							failures += 1
 							print("FAIL: %s missing streamed grass band %s" % [realm, band_name])
@@ -151,6 +218,22 @@ func _run() -> void:
 							break
 					if failures > 0 and arena3 != Vector3.ZERO:
 						break
+		var boss_anchors := RealmLayoutData.boss_anchor_points_for_world(scene)
+		var dressing := scene.find_child("ForestBorder", true, false)
+		if dressing != null and dressing.has_method("_grass_clearance"):
+			for boss_anchor in boss_anchors:
+				if not bool(dressing.call("_grass_clearance", boss_anchor)):
+					failures += 1
+					print("FAIL: %s boss anchor lacks static grass clearance: %s" \
+						% [realm, boss_anchor])
+		if stream_realm:
+			var streamer_for_clearance := scene.find_child("WorldStreamer", true, false)
+			if streamer_for_clearance != null and streamer_for_clearance.has_method("_clearance_blocks"):
+				for boss_anchor in boss_anchors:
+					if not bool(streamer_for_clearance.call("_clearance_blocks", boss_anchor)):
+						failures += 1
+						print("FAIL: %s boss anchor lacks streamed clearance: %s" \
+							% [realm, boss_anchor])
 
 		var composition := scene.find_child("WorldGroundComposition", true, false)
 		if composition == null:
@@ -213,6 +296,7 @@ func _run() -> void:
 		audio_final.stop_all_playback()
 	for i in 3:
 		await process_frame
+	gs.delete_save()
 
 	if failures == 0:
 		print("ALL REALM VISUAL TESTS PASSED (booted=%d)" % finals)

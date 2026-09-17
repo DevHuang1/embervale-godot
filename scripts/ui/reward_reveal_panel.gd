@@ -10,7 +10,8 @@ var _body: VBoxContainer
 func _ready() -> void:
 	visible = false
 
-func open_for(entries: Array, source: String = "reward") -> void:
+func open_for(entries: Array, source: String = "reward",
+		title_override: String = "", subtitle: String = "") -> void:
 	var reveal: Dictionary = MODEL.build(entries, source)
 	for child in get_children():
 		child.queue_free()
@@ -18,9 +19,18 @@ func open_for(entries: Array, source: String = "reward") -> void:
 	_body.add_theme_constant_override("separation", 8)
 	add_child(_body)
 	var title := Label.new()
-	title.text = "%s REVEAL" % str(reveal.get("source", "REWARD")).to_upper()
+	title.name = "RewardRevealTitle"
+	title.text = title_override if not title_override.strip_edges().is_empty() \
+		else "%s REVEAL" % str(reveal.get("source", "REWARD")).to_upper()
 	UiKit.style_label(title, &"MenuTitle", 18)
 	_body.add_child(title)
+	if not subtitle.strip_edges().is_empty():
+		var subtitle_label := Label.new()
+		subtitle_label.name = "RewardRevealSubtitle"
+		subtitle_label.text = subtitle
+		subtitle_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		UiKit.style_label(subtitle_label, &"Body", 14)
+		_body.add_child(subtitle_label)
 	for item in reveal.get("entries", []):
 		var row := Label.new()
 		row.text = "%s  ×%d  ·  RARITY %d" % [str(item.get("label", item.get("id", "item"))),

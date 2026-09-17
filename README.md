@@ -104,3 +104,20 @@ embervale-godot/
 4. Polish UI theme with parchment/ink textures
 5. Add save/load system
 6. Export templates for iOS/Android
+
+## Store (RevenueCat)
+
+Ember marks are sold through a hosted RevenueCat Funnel backed by Stripe. The
+app confirms ownership through RevenueCat, then records each pack exactly once
+in the gameplay ledger. Setup, the secret-key policy, device configuration, and
+the demo script live in [`docs/REVENUECAT_SETUP.md`](docs/REVENUECAT_SETUP.md).
+
+```sh
+godot --headless --path . --script tests/test_revenuecat_entitlements.gd
+```
+
+## License
+
+MIT — see [`LICENSE`](LICENSE). Third-party asset packs are **not** covered by
+that license; each keeps its own terms and attribution in
+[`ASSET_CREDITS.md`](ASSET_CREDITS.md).

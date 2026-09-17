@@ -482,6 +482,23 @@ static func spawn_arc_trail(context: Node, pos: Vector3,
 # segments, while still giving bolts and dashes a readable motion silhouette.
 const MAX_TRAIL_RIBBONS := 12
 static var _trail_ribbons: Array = []
+static var _skill_ribbon_tex: ImageTexture = null
+
+static func _skill_ribbon_texture() -> ImageTexture:
+	if _skill_ribbon_tex != null and is_instance_valid(_skill_ribbon_tex):
+		return _skill_ribbon_tex
+	# One tiny cached RGBA mask gives the existing StandardMaterial3D ribbon a
+	# soft side/tip falloff. It is created once, then shared by every ribbon.
+	var image := Image.create(64, 16, false, Image.FORMAT_RGBA8)
+	for y in 16:
+		var v := float(y) / 15.0
+		var side := smoothstep(0.0, 0.18, v) * smoothstep(1.0, 0.82, v)
+		for x in 64:
+			var u := float(x) / 63.0
+			var tip := smoothstep(0.0, 0.12, u) * smoothstep(1.0, 0.78, u)
+			image.set_pixel(x, y, Color(1.0, 1.0, 1.0, side * tip))
+	_skill_ribbon_tex = ImageTexture.create_from_image(image)
+	return _skill_ribbon_tex
 
 static func _track_trail_ribbon(node: Node3D) -> void:
 	_trail_ribbons = _trail_ribbons.filter(func(item): return is_instance_valid(item))
@@ -521,6 +538,9 @@ static func spawn_skill_ribbon(context: Node, from_pos: Vector3, to_pos: Vector3
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array([
+		Vector2(0.0, 0.0), Vector2(0.0, 1.0),
+		Vector2(1.0, 0.0), Vector2(1.0, 1.0)])
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var ribbon_mesh := ArrayMesh.new()
 	ribbon_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
@@ -529,6 +549,7 @@ static func spawn_skill_ribbon(context: Node, from_pos: Vector3, to_pos: Vector3
 	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	material.albedo_texture = _skill_ribbon_texture()
 	material.albedo_color = color
 	material.disable_receive_shadows = true
 	ribbon_mesh.surface_set_material(0, material)

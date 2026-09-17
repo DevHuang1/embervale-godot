@@ -155,6 +155,7 @@ func _run() -> void:
 		"disabled CONTINUE should read NO SAVED TALE, got \"%s\"" % cont.text)
 	gs.gold = 42
 	gs.save_game()
+	gs.flush_save()
 	failures = _check(failures, gs.has_save(), "save_game wrote no file")
 	menu._check_continue_availability()
 	failures = _check(failures, not cont.disabled,

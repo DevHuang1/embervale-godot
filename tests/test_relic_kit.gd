@@ -23,7 +23,9 @@ func _run() -> void:
 	var rite_names := ["Boom Tap", "Spin Storm", "TOTAL MUG"]
 	var def := RelicData.build_weapon_def(base, 2, item_name, rite_names)
 
-	if str(def.name) != item_name:
+	# Player-facing names display uppercase (relic kit styling), matching
+	# the rest of the gear catalog and the forge preview.
+	if str(def.name) != item_name.to_upper():
 		failures += 1
 		print("FAIL: item name not applied -> ", def.name)
 	if not def.get("relic", false):
@@ -100,7 +102,8 @@ func _run() -> void:
 	if gs.use_skill(0).success:
 		failures += 1
 		print("FAIL: same skill fired while cooling down")
-	gs.update_skill_cooldowns(float(cast.skill.cooldown) + 0.1)
+	# Cooldown recovery must honor the game's combat pacing multiplier.
+	gs.update_skill_cooldowns(float(cast.skill.cooldown) * GameState.SKILL_COOLDOWN_PACING + 0.1)
 	if not gs.can_use_skill_slot(0):
 		failures += 1
 		print("FAIL: skill cooldown never recovered")

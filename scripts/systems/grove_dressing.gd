@@ -121,14 +121,7 @@ func _ready() -> void:
 	ecosystem.setup(ecosystem_id, seed_value + 1337, scatter_radius)
 
 func _visual_realm_id() -> String:
-	var gs := get_node_or_null("/root/GameState")
-	var active := str(gs.get("current_realm")) if gs != null else ""
-	if active == "whispergrove":
-		return active
-	var world_root := get_parent()
-	if world_root != null and "biome_id" in world_root:
-		return str(world_root.get("biome_id"))
-	return active if not active.is_empty() else "bramblewood"
+	return RealmLayoutData.visual_realm_for(get_parent())
 
 ## The chunk streamer extends the bramblewood-biome world (whispergrove and
 ## bramblewood); for those realms the streamer replaces all static scatter.
@@ -309,10 +302,26 @@ func _normalize_authored_prop(prop: Node3D, target_height: float) -> void:
 		var mesh := mesh_node as MeshInstance3D
 		if mesh == null or mesh.mesh == null:
 			continue
-		height = maxf(height, mesh.get_aabb().size.y * mesh.global_transform.basis.get_scale().y)
+		# Imported props are normalized before they are attached to the live
+		# dressing node.  global_transform is not valid for an off-tree node;
+		# compose the local Node3D transforms instead, including the prop root's
+		# existing scale so the final normalization preserves the old result.
+		var mesh_scale := _mesh_scale_in_prop_tree(prop, mesh)
+		height = maxf(height, mesh.get_aabb().size.y * absf(mesh_scale.y))
 	if height > 0.001:
 		prop.scale *= Vector3.ONE * (target_height / height)
 	prop.scale *= Vector3.ONE * 1.15
+
+func _mesh_scale_in_prop_tree(prop: Node3D, mesh: MeshInstance3D) -> Vector3:
+	var composed := Transform3D.IDENTITY
+	var current: Node = mesh
+	while current != null:
+		if current is Node3D:
+			composed = (current as Node3D).transform * composed
+		if current == prop:
+			return composed.basis.get_scale()
+		current = current.get_parent()
+	return Vector3.ONE
 
 func _prop_anchors() -> Array[Vector2]:
 	var terrain = get_parent().get_node_or_null("Terrain")
@@ -698,6 +707,9 @@ func _grass_clearance(point: Vector2) -> bool:
 		var radius := 5.0 if key == "arena" else (2.4 if key == "checkpoint" else 2.0)
 		if point.distance_to(Vector2(anchor3.x, anchor3.z)) < radius:
 			return true
+	for boss_anchor in RealmLayoutData.boss_anchor_points_for_world(get_parent()):
+		if point.distance_to(boss_anchor) < RealmLayoutData.BOSS_ARENA_CLEARANCE_RADIUS:
+			return true
 	for chest_value in profile.get("chests", []):
 		var chest := chest_value as Dictionary
 		var chest3 := chest.get("pos", Vector3.ZERO) as Vector3
@@ -844,21 +856,8 @@ func _build_ruins() -> void:
 	_batch(column, marble, standing, true, 310.0)
 	_batch(broken, marble, fallen, true, 310.0)
 
-	# Cracked plaza floor under the columns
-	var slab := BoxMesh.new()
-	slab.size = Vector3(1.6, 0.14, 1.6)
-	slab.material = marble
-	var slabs: Array[Transform3D] = []
-	for gx in range(-2, 3):
-		for gz in range(-2, 3):
-			var p := center + Vector2(gx * 1.75, gz * 1.75)
-			if Vector2(gx, gz).length() > 2.4:
-				continue
-			var gy := _ground_height(p.x, p.y)
-			slabs.append(Transform3D(
-				Basis(Vector3.UP, rng.randf() * TAU),
-				Vector3(p.x, gy + 0.02, p.y)))
-	_batch(slab, slab.material, slabs, false, 310.0)
+	# Let the terrain carry the ruin floor.  A grid of BoxMesh slabs here read
+	# as square holes/tiles from the camera instead of broken ground.
 	_add_authored_ruin_prop(center)
 	_add_authored_pack_prop_set(center)
 

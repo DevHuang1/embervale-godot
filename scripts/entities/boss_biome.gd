@@ -69,7 +69,7 @@ func _apply_biome_palette() -> void:
 
 func _setup_attacks() -> void:
 	super._setup_attacks()
-	_skill_range = SkillRange.new()
+	_skill_range = SkillRange.get_instance()
 
 var _skill_range: SkillRange = null
 
@@ -83,6 +83,8 @@ func _perform_special_1(player: Node3D) -> void:
 			_fissure_line(player, int(sk.get("damage", 10)))
 		"tide_cross":
 			_tide_cross(player, int(sk.get("damage", 10)))
+		"root_lattice":
+			_root_lattice(player, int(sk.get("damage", 10)))
 		_:
 			_ring_volley(player, int(sk.get("damage", 10)))
 
@@ -94,11 +96,15 @@ func _perform_special_2(player: Node3D) -> void:
 	match String(sk.get("kind", "summon")):
 		"heal":
 			_rot_mend(int(sk.get("amount", 14)))
+		"root_guard":
+			_summon_pack(mini(int(sk.get("count", 2)), 2), str(sk.get("scene", "")))
 		_:
 			_summon_pack(int(sk.get("count", 2)), str(sk.get("scene", "")))
 
 func _perform_ultimate(player: Node3D = null) -> void:
-	if not _is_skill_in_range(player, 6):
+	# A null player is an explicit systems/test invocation; live AI always
+	# supplies its target and still keeps the authored range gate.
+	if player != null and not _is_skill_in_range(player, 6):
 		return
 	var sk: Dictionary = _def.get("ultimate", {})
 	var rank := stage_rank()
@@ -196,6 +202,29 @@ func _tide_cross(target: Node3D, damage: int) -> void:
 			var delay := 0.08 * float(abs(offset))
 			var timer := get_tree().create_timer(delay, false)
 			timer.timeout.connect(_erupt_at.bind(pos, 1.25, damage, 0.72))
+
+## Three readable root lanes advance across the player's position in order.
+## Each tile owns the same telegraph-before-damage contract as every other
+## biome boss attack, leaving gaps that can be crossed during the warning.
+func _root_lattice(target: Node3D, damage: int) -> void:
+	if sfx_profile == "vanilla":
+		audio.play_enemy_special()
+	else:
+		audio.play_profile_cue(sfx_profile, "cast")
+	_shake_camera(0.42)
+	var direction := global_position.direction_to(target.global_position)
+	direction.y = 0.0
+	if direction.length_squared() < 0.01:
+		direction = Vector3.FORWARD
+	direction = direction.normalized()
+	var side := direction.cross(Vector3.UP).normalized()
+	for lane in range(-1, 2):
+		for step in range(-3, 4):
+			var pos := target.global_position + side * float(lane) * 3.25 \
+				+ direction * float(step) * 2.15
+			var delay := 0.10 * float(lane + 1) + 0.07 * float(step + 3)
+			var timer := get_tree().create_timer(delay, false)
+			timer.timeout.connect(_erupt_at.bind(pos, 1.35, damage, 0.62))
 
 ## Deterministic expanding spiral: visually cinematic while still learnable
 ## across retries and identical on every quality tier.
@@ -306,6 +335,25 @@ func _build_boss_identity() -> void:
 			halo.rotation.x = PI * 0.5
 			halo.material_override = material
 			visual.add_child(halo)
+		"rootbound_crown":
+			for side in [-1.0, 1.0]:
+				_add_identity_spike(visual, Vector3(0.48 * side, 1.28, 0.08),
+					Vector3(0.08, 0.0, -0.34 * side), 1.15, material)
+				_add_identity_spike(visual, Vector3(0.82 * side, 1.55, 0.02),
+					Vector3(0.16, 0.0, -0.62 * side), 0.92, material)
+			for i in 5:
+				var crown_angle := lerpf(-0.82, 0.82, float(i) / 4.0)
+				_add_identity_spike(visual, Vector3(sin(crown_angle) * 0.62, 1.52,
+					cos(crown_angle) * 0.12), Vector3(0.0, 0.0, -crown_angle * 0.42),
+					0.72, material)
+			var heart := MeshInstance3D.new()
+			var heart_mesh := SphereMesh.new()
+			heart_mesh.radius = 0.20
+			heart_mesh.height = 0.38
+			heart.mesh = heart_mesh
+			heart.position = Vector3(0.0, 0.82, 1.12)
+			heart.material_override = material
+			visual.add_child(heart)
 
 func _add_identity_spike(parent: Node3D, pos: Vector3, rot: Vector3,
 		height: float, material: Material) -> void:
@@ -328,6 +376,11 @@ func _spawn_rewards() -> void:
 	var materials: Dictionary = _def.get("rewards", {}).get("materials", {})
 	for material_id in materials:
 		game_state.add_material(str(material_id), int(materials[material_id]))
+	var first_kill_materials: Dictionary = _def.get("rewards", {}).get(
+		"first_kill_materials", {})
+	if was_first_kill:
+		for material_id in first_kill_materials:
+			game_state.add_material(str(material_id), int(first_kill_materials[material_id]))
 	var loot: Dictionary = _def.get("rewards", {}).get("loot", {})
 	for item_id in loot:
 		game_state.add_loot(str(item_id), int(loot[item_id]),

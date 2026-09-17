@@ -60,6 +60,80 @@ static func responsive_metrics(viewport_size: Vector2) -> Dictionary:
 		"gap": 8.0 if compact else 12.0,
 	}
 
+## True only on a real phone/tablet display. Desktop and headless harnesses keep
+## their authored layout, so no editor/test frame gains phantom insets.
+static func is_mobile_display() -> bool:
+	return OS.has_feature("mobile") or OS.get_name() in ["Android", "iOS"]
+
+## Pure inset math, split out from the platform query so it stays unit-testable:
+## given the OS-reported safe rect and the physical screen size, return the
+## notch / cutout / gesture-bar insets in viewport pixels.
+static func insets_from_rects(safe: Rect2i, screen_size: Vector2,
+		viewport_size: Vector2) -> Dictionary:
+	var zero := {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+	if safe.size.x <= 0 or safe.size.y <= 0:
+		return zero
+	if screen_size.x <= 0.0 or screen_size.y <= 0.0:
+		return zero
+	var scale := Vector2(viewport_size.x / screen_size.x, viewport_size.y / screen_size.y)
+	return {
+		"left": maxf(float(safe.position.x) * scale.x, 0.0),
+		"top": maxf(float(safe.position.y) * scale.y, 0.0),
+		"right": maxf((screen_size.x - float(safe.position.x + safe.size.x)) * scale.x, 0.0),
+		"bottom": maxf((screen_size.y - float(safe.position.y + safe.size.y)) * scale.y, 0.0),
+	}
+
+## Device display insets in viewport pixels. Non-mobile callers get zeros.
+static func safe_area_insets(viewport_size: Vector2) -> Dictionary:
+	if not is_mobile_display():
+		return {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+	var safe := DisplayServer.get_display_safe_area()
+	var screen_size := Vector2(DisplayServer.screen_get_size())
+	return insets_from_rects(safe, screen_size, viewport_size)
+
+## Inset a full-rect Control so its edge-anchored children clear the notch and
+## the gesture/nav bar. A no-op when the device reports no inset.
+static func apply_safe_area(control: Control, viewport_size: Vector2) -> Dictionary:
+	if control == null:
+		return {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+	var insets := safe_area_insets(viewport_size)
+	control.offset_left = float(insets["left"])
+	control.offset_top = float(insets["top"])
+	control.offset_right = -float(insets["right"])
+	control.offset_bottom = -float(insets["bottom"])
+	return insets
+
+## Inset a full-rect menu panel by its authored margin plus the device safe
+## area, tightening the margin only on genuinely small viewports so desktop and
+## tablet layout is untouched.
+##
+## The panel is normalised to full-rect first. Authored menus mix full-rect
+## roots (anchors 0,0,1,1) with top-left-pinned ones (anchors 0,0,0,0) that use
+## absolute pixel offsets; writing inset offsets onto a pinned root yields a
+## negative width and the panel collapses to its minimum size.
+static func apply_menu_frame(control: Control, viewport_size: Vector2,
+		horizontal: float = 60.0, vertical: float = 60.0) -> Dictionary:
+	if control == null:
+		return {"horizontal": 0.0, "vertical": 0.0}
+	control.anchor_left = 0.0
+	control.anchor_top = 0.0
+	control.anchor_right = 1.0
+	control.anchor_bottom = 1.0
+	control.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	control.grow_vertical = Control.GROW_DIRECTION_BOTH
+	var insets := safe_area_insets(viewport_size)
+	var inset_h := horizontal
+	var inset_v := vertical
+	if viewport_size.x < 900.0:
+		inset_h = clampf(viewport_size.x * 0.05, 14.0, horizontal)
+	if viewport_size.y < 1200.0:
+		inset_v = clampf(viewport_size.y * 0.05, 12.0, vertical)
+	control.offset_left = inset_h + float(insets["left"])
+	control.offset_right = -(inset_h + float(insets["right"]))
+	control.offset_top = inset_v + float(insets["top"])
+	control.offset_bottom = -(inset_v + float(insets["bottom"]))
+	return {"horizontal": inset_h, "vertical": inset_v}
+
 ## Shared semantic tokens for code-built screens. Callers should use these
 ## values instead of inventing per-screen spacing, typography, or rarity colors.
 ## Color is never the only status cue: item cards also render text and shape.

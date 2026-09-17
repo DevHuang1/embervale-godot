@@ -3,6 +3,8 @@ class_name WorldManager
 
 const MATRIARCH_BOSS_KEY := "res://scripts/entities/boss_hushling_matriarch.gd"
 const THORN_WARDEN_BOSS_KEY := "res://scripts/entities/boss_bramblewood_thornwarden.gd"
+const ROOT_HARROW_BOSS_KEY := "boss_whispergrove_root_harrow"
+const BOSS_DIRECTOR_SCRIPT := preload("res://scripts/systems/boss_encounter_director.gd")
 const TRAINING_TARGET_SCENE: PackedScene = preload("res://scenes/entities/combat_training_target.tscn")
 const PROFILE_TELEMETRY := preload("res://scripts/systems/android_profile_telemetry.gd")
 
@@ -40,7 +42,7 @@ var matriarch_spawned: bool = false
 # Realm ladder + tiered encounter packs (Bestiary-driven)
 var _pack: Array[Node3D] = []
 var _gate_opened := false
-var _altar: Node3D = null
+var _altar: BossAltar = null
 var _practice_altar: Node3D = null
 var _post_boss_root: Node3D = null
 var _camp_shortcut_marker: Label3D = null
@@ -52,6 +54,7 @@ var _realm_audio_beds: RealmAudioBeds = null
 var golden_route_tracker: GoldenRouteTracker
 var android_profile_telemetry: AndroidProfileTelemetry
 var _route_feedback_events: Dictionary = {}
+var _quest_boss_director: BossEncounterDirector = null
 
 @onready var relic_pedestal: Node3D = get_node_or_null("RelicPedestal")
 
@@ -77,6 +80,8 @@ func _ready() -> void:
 	android_profile_telemetry.name = "AndroidProfileTelemetry"
 	add_child(android_profile_telemetry)
 	android_profile_telemetry.record_route_event("onboarding")
+	_quest_boss_director = BOSS_DIRECTOR_SCRIPT.new()
+	_quest_boss_director.setup(self)
 	_init_signals()
 	_init_day_night()
 	_setup_grove()
@@ -129,9 +134,21 @@ func refresh_route_markers() -> void:
 		android_profile_telemetry.record_route_event("markers_refreshed_%d" % int(game_state.current_stage))
 
 func activate_camp_shortcut(realm: String, shortcut_id: String) -> bool:
-	if realm != "bramblewood" or shortcut_id != "camp_route":
+	if realm != "bramblewood" or not CampProgression.is_shortcut_unlocked(realm, shortcut_id):
 		return false
 	game_state.set_route_checkpoint_for_shortcut(shortcut_id)
+	if shortcut_id == "rootway_shortcut":
+		var expansion := RealmLayoutData.profile("bramblewood").get("expansion_pockets", []) as Array
+		for pocket_value in expansion:
+			var pocket := pocket_value as Dictionary
+			if str(pocket.get("id", "")) != "rootbound_court":
+				continue
+			var destination := pocket.get("position", Vector3.ZERO) as Vector3
+			var terrain := get_node_or_null("Terrain")
+			if terrain != null and terrain.has_method("sample_surface_height"):
+				destination.y = float(terrain.call("sample_surface_height", destination)) + 0.35
+			hero.global_position = destination
+			break
 	_refresh_camp_shortcut_marker()
 	return true
 
@@ -142,6 +159,8 @@ func _build_camp_shortcut_marker() -> void:
 	_camp_shortcut_marker = Label3D.new()
 	_camp_shortcut_marker.name = "CampShortcutMarker"
 	_camp_shortcut_marker.text = "LANTERN SHORTCUT\nCAMP ROUTE"
+	_camp_shortcut_marker.add_to_group("interactable")
+	_camp_shortcut_marker.add_to_group("portal")
 	_camp_shortcut_marker.font_size = 18
 	_camp_shortcut_marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_camp_shortcut_marker.modulate = Color(1.0, 0.78, 0.25)
@@ -150,7 +169,11 @@ func _build_camp_shortcut_marker() -> void:
 
 func _refresh_camp_shortcut_marker() -> void:
 	if _camp_shortcut_marker != null:
-		_camp_shortcut_marker.visible = CampProgression.is_shortcut_unlocked("bramblewood", "camp_route")
+		var rootway_open := CampProgression.is_shortcut_unlocked("bramblewood", "rootway_shortcut")
+		var camp_route_open := CampProgression.is_shortcut_unlocked("bramblewood", "camp_route")
+		_camp_shortcut_marker.visible = rootway_open or camp_route_open
+		_camp_shortcut_marker.text = "ROOTWAY BEACON\nRETURN TO COURT" if rootway_open \
+			else "LANTERN SHORTCUT\nCAMP ROUTE"
 
 func toggle_dungeon() -> void:
 	if _realm_expansion != null:
@@ -219,7 +242,7 @@ func get_runtime_world_audit() -> Dictionary:
 		"armor_visual": ArmorVisualRegistry.record_for(armor_id),
 		"visible_authored_rigs": find_children("AuthoredRig", "Node3D", true, false).size(),
 		"objects_below_surface": below_surface,
-		"boss_id": "bramblewood_thornwarden",
+		"boss_id": "whispergrove_root_harrow",
 		"boss_active": matriarch != null and is_instance_valid(matriarch),
 		"castle_active": _castle_landmark != null and is_instance_valid(_castle_landmark),
 	}
@@ -480,28 +503,38 @@ func _soften_particle_sprites() -> void:
 			mat.albedo_texture = CombatFx.radial_glow_texture()
 			mesh.material = mat
 
+## Cached scene references can be freed before this manager is: a defeated
+## hushling frees itself, and a realm teardown runs ahead of the persistent
+## GameState signals. Every cached node is checked before it is written to.
+static func is_live(node: Object) -> bool:
+	return node != null and is_instance_valid(node)
+
 func _update_grove_for_stage() -> void:
-	if moonfen_gate:
+	if is_live(moonfen_gate):
 		moonfen_gate.visible = current_grove_state == GameState.QuestStage.COMPLETE
-	if return_gate:
+	if is_live(return_gate):
 		return_gate.visible = true
 	match current_grove_state:
 		GameState.QuestStage.SEEK_SPRITE:
-			# Hushling active, shard/beacon hidden
-			hushling.visible = true
-			hushling.set_collision_layer_value(1, true)
-			shard_spawn.visible = false
-			beacon_spawn.visible = false
-			beacon_spawn.set_collision_layer_value(1, false)
+			# Hushling active, shard/beacon hidden. The hushling frees itself on
+			# death, so a later stage change can arrive with it already gone.
+			if is_live(hushling):
+				hushling.visible = true
+				hushling.set_collision_layer_value(1, true)
+			if is_live(shard_spawn):
+				shard_spawn.visible = false
+			if is_live(beacon_spawn):
+				beacon_spawn.visible = false
+				beacon_spawn.set_collision_layer_value(1, false)
 			
 		GameState.QuestStage.CLAIM_SHARD:
 			# Hushling defeated, shard appears
 			hushling_defeated = true
-			if hushling != null and is_instance_valid(hushling):
+			if is_live(hushling):
 				hushling.visible = false
 				hushling.set_collision_layer_value(1, false)
 			
-			if not shard_spawned:
+			if not shard_spawned and is_live(shard_spawn):
 				shard_spawn.visible = true
 				shard_spawn.set_collision_layer_value(4, true)  # Pickup layer
 				shard_spawned = true
@@ -513,19 +546,23 @@ func _update_grove_for_stage() -> void:
 			
 		GameState.QuestStage.LIGHT_BEACON:
 			# Shard collected, beacon activates
-			shard_spawn.visible = false
-			shard_spawn.set_collision_layer_value(4, false)
-			beacon_spawn.visible = true
-			beacon_spawn.set_collision_layer_value(1, true)
+			if is_live(shard_spawn):
+				shard_spawn.visible = false
+				shard_spawn.set_collision_layer_value(4, false)
+			if is_live(beacon_spawn):
+				beacon_spawn.visible = true
+				beacon_spawn.set_collision_layer_value(1, true)
 			beacon_active = true
 			# Beacon light effect
 			_enable_beacon_light()
 			
 		GameState.QuestStage.COMPLETE:
 			# Quest complete - beacon lit permanently
-			beacon_spawn.visible = true
-			_permanent_beacon_light()
+			if is_live(beacon_spawn):
+				beacon_spawn.visible = true
 			_open_boss_gate()
+			if is_live(beacon_spawn):
+				_permanent_beacon_light()
 
 func _update_quest_board() -> void:
 	# Update quest board material with current stage
@@ -534,6 +571,8 @@ func _update_quest_board() -> void:
 	pass
 
 func _enable_beacon_light() -> void:
+	if not is_live(beacon_spawn):
+		return
 	# Add strong light at beacon
 	var beacon_light = OmniLight3D.new()
 	beacon_light.light_color = Color(1.0, 0.84, 0.47)
@@ -553,15 +592,18 @@ func _spawn_matriarch(practice: bool = false) -> void:
 	if matriarch != null and is_instance_valid(matriarch):
 		return  # an earlier Matriarch still stands
 	matriarch_spawned = true
-	var scene: PackedScene = load("res://scenes/entities/boss_bramblewood_thornwarden.tscn")
-	if scene == null:
-		push_error("WorldManager: Thorn Warden scene missing!")
+	if _quest_boss_director == null:
+		push_error("WorldManager: boss encounter director is unavailable")
 		return
-	matriarch = scene.instantiate()
-	add_child(matriarch)
-	if "is_practice" in matriarch:
-		matriarch.is_practice = practice
-	matriarch.global_position = beacon_spawn.global_position + Vector3(0, 0.1, 6)
+	var player_position := hero.global_position if hero != null \
+		and is_instance_valid(hero) else beacon_spawn.global_position
+	var boss_position := BOSS_DIRECTOR_SCRIPT.entry_position_for(
+		beacon_spawn.global_position, player_position)
+	boss_position.y += 0.1
+	matriarch = _quest_boss_director.spawn_boss(ROOT_HARROW_BOSS_KEY, practice,
+		boss_position)
+	if matriarch == null:
+		return
 	var terrain := get_node_or_null("Terrain") as TerrainRelief
 	if terrain != null:
 		terrain.conform_anchor(matriarch, 0.12)
@@ -570,7 +612,7 @@ func _spawn_matriarch(practice: bool = false) -> void:
 	if camera_rig:
 		camera_rig.add_shake(0.6)
 		camera_rig.play_boss_intro(matriarch)
-	audio.start_boss_score("thorn_warden")
+	audio.start_boss_score("root_harrow")
 	if matriarch.has_signal("phase_changed"):
 		matriarch.phase_changed.connect(_on_matriarch_phase_changed)
 	if matriarch.has_signal("encounter_reset"):
@@ -596,7 +638,7 @@ func _on_matriarch_death_sequence_started(boss: Node3D) -> void:
 	CombatFx.spawn_motes(self, boss.global_position + Vector3.UP * 1.6,
 		Color(0.76, 1.0, 0.82, 0.8), 22, 2.6, 1.3, 2.0)
 	if not was_practice:
-		FloatingText.spawn_on_entity(boss, "THE BRAMBLE QUEEN FALLS",
+		FloatingText.spawn_on_entity(boss, "THE ROOT HARROW FALLS",
 			Color(0.82, 1.0, 0.84), 1.25)
 
 func _on_matriarch_died(boss: Node3D) -> void:
@@ -607,10 +649,32 @@ func _on_matriarch_died(boss: Node3D) -> void:
 		_spawn_practice_altar()
 
 func _exit_tree() -> void:
-	# The music autoload outlives this realm, so never leak its fixed boss voices
-	# into travel, reload, or the title screen.
-	if audio != null and audio.boss_score_active:
-		audio.stop_boss_score_immediate()
+	# The audio autoload outlives this realm, so stop both fixed boss voices and
+	# transient world-space one-shots before travel, reload, or title-screen use.
+	if audio != null:
+		audio.stop_all_playback()
+	# Persistent autoloads outlive the realm too: drop their connections so a
+	# reload or realm travel cannot drive a half-torn-down scene.
+	_disconnect_persistent_signals()
+	# Every gameplay scene replacement must also release any interface hold
+	# (boss altar, satchel, settings). A CanvasLayer freed without popping its
+	# push would otherwise leave the next scene paused with no way out.
+	if game_state != null and is_instance_valid(game_state) \
+			and game_state.has_method("clear_ui_freeze"):
+		game_state.clear_ui_freeze()
+
+func _disconnect_persistent_signals() -> void:
+	if game_state != null and is_instance_valid(game_state):
+		for signal_name in ["stage_changed", "defeated", "victory"]:
+			var callable := Callable(self, "_on_stage_changed") if signal_name == "stage_changed" \
+				else (Callable(self, "_on_player_defeated") if signal_name == "defeated" \
+				else Callable(self, "_on_player_victory"))
+			if game_state.has_signal(signal_name) \
+					and game_state.is_connected(signal_name, callable):
+				game_state.disconnect(signal_name, callable)
+	if ScanManager != null and is_instance_valid(ScanManager) \
+			and ScanManager.relic_forged.is_connected(_spawn_relic_trophy):
+		ScanManager.relic_forged.disconnect(_spawn_relic_trophy)
 
 ## === Boss gate: "Shape Your Foe" before the Matriarch wakes ===
 ## Players with scans may spend one to personalize her; everyone else —
@@ -618,7 +682,8 @@ func _exit_tree() -> void:
 func _open_boss_gate() -> void:
 	if _gate_opened:
 		return
-	if game_state.has_boss_killed(THORN_WARDEN_BOSS_KEY) \
+	if game_state.has_boss_killed(ROOT_HARROW_BOSS_KEY) \
+			or game_state.has_boss_killed(THORN_WARDEN_BOSS_KEY) \
 			or game_state.has_boss_killed(MATRIARCH_BOSS_KEY):
 		_apply_post_matriarch_state(false)
 		_spawn_practice_altar()
@@ -638,7 +703,13 @@ func _show_altar(practice: bool) -> void:
 		if not practice:
 			_resolve_boss_gate(false)
 		return
-	_altar = scene.instantiate()
+	var altar := scene.instantiate() as BossAltar
+	if altar == null:
+		push_error("WorldManager: boss altar scene is not a BossAltar")
+		if not practice:
+			_resolve_boss_gate(false)
+		return
+	_altar = altar
 	add_child(_altar)
 	_altar.practice = practice
 	_altar.resolved.connect(_on_altar_resolved.bind(practice))
@@ -757,6 +828,8 @@ func _despawn_practice_altar() -> void:
 	_practice_altar = null
 
 func _permanent_beacon_light() -> void:
+	if not is_live(beacon_spawn):
+		return
 	# Upgrade beacon to permanent warm light
 	var permanent_light = OmniLight3D.new()
 	permanent_light.light_color = Color(1.0, 0.84, 0.47)
@@ -814,6 +887,8 @@ func _collect_shard() -> void:
 
 func _light_beacon() -> void:
 	game_state.beacon_lit = true
+	if game_state.has_method("update_objective"):
+		game_state.update_objective("reach", "chapter3_beacon", 1)
 	game_state.advance_stage(GameState.QuestStage.COMPLETE)
 	audio.play_victory()
 	# The lit beacon calms the sky: weather locks to a warm stillness
@@ -826,7 +901,23 @@ func _on_hero_interact() -> void:
 	# Handle interactions based on nearby objects
 	var nearby = _get_nearby_interactable()
 	if nearby:
-		nearby.interact()
+		if nearby == _camp_shortcut_marker:
+			var camp_progression := get_node_or_null("/root/CampProgression")
+			if camp_progression == null:
+				return
+			var shortcut_id := "rootway_shortcut" \
+				if bool(camp_progression.call("is_shortcut_unlocked", "bramblewood",
+					"rootway_shortcut")) \
+				else "camp_route"
+			camp_progression.call("unlock_shortcut", "bramblewood", shortcut_id)
+			return
+		# Group membership is a discovery hint, not a capability contract: the
+		# quest board, beacon, shard, and realm gates share this group without an
+		# interact() method. Calling through blindly raised a runtime error and
+		# aborted the interaction, so a real chest standing next to them could
+		# never open.
+		if nearby.has_method("interact"):
+			nearby.interact()
 
 func _get_nearby_interactable() -> Node:
 	# Prefer the facing ray for deliberate interaction, but fall back to the
@@ -837,13 +928,19 @@ func _get_nearby_interactable() -> Node:
 		hero.global_position + Vector3(0, 1, 0) + hero.global_transform.basis.z * -2.0
 	)
 	query.collision_mask = 1 << 3 | 1 << 5  # Pickup + Environment
+	query.exclude = [hero]
 	var result = space_state.intersect_ray(query)
-	if result and result.collider and result.collider.is_in_group("interactable"):
+	if result and result.collider and result.collider.is_in_group("interactable") \
+			and result.collider.has_method("interact"):
 		return result.collider
 	var closest: Node = null
 	var closest_dist := 2.8
 	for candidate in get_tree().get_nodes_in_group("interactable"):
 		if not candidate is Node3D or not is_instance_valid(candidate):
+			continue
+		# Skip discovery-only group members so they cannot shadow a real
+		# interactable with no way to respond.
+		if not candidate.has_method("interact"):
 			continue
 		if candidate.get("opened") == true:
 			continue
@@ -862,13 +959,13 @@ func _on_player_defeated() -> void:
 		var saved := game_state.route_respawn_position
 		respawn = Vector3(saved.x, player_spawn.global_position.y, saved.y)
 	hero.global_position = respawn
-	game_state.hp = game_state.max_hp
-	game_state.hp_changed.emit(0, game_state.hp)
-	game_state.combat_state = GameState.CombatState.EXPLORING
-	game_state.disengage_enemy()
+	if game_state.has_method("recover_from_defeat"):
+		game_state.recover_from_defeat()
 	if matriarch != null and is_instance_valid(matriarch) \
 			and matriarch.has_method("reset_encounter"):
 		matriarch.reset_encounter()
+	if has_method("_reset_biome_boss"):
+		call("_reset_biome_boss")
 	get_tree().call_group("screen_fx", "reset")
 	# The starter hushling only returns while its quest stage is live;
 	# it queue-frees on death and later stages keep it gone.
@@ -882,7 +979,8 @@ func _on_player_defeated() -> void:
 
 func _on_player_victory() -> void:
 	# Quest complete - could transition to next area or loop
-	pass
+	if game_state.has_method("flush_save"):
+		game_state.flush_save()
 
 # === Public API ===
 func get_hushling() -> Node3D:

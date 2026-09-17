@@ -27,7 +27,7 @@ class_name ForgeMenu
 @onready var kit_preview: Label = $Root/VBox/Result/ResultVBox/KitPreview
 @onready var equip_button: Button = $Root/VBox/Result/ResultVBox/EquipButton
 @onready var scan_button: Button = $Root/VBox/ScanButton
-@onready var close_button: Button = $Root/VBox/Header/CloseButton
+@onready var close_button: Button = $Root/Header/CloseButton
 @onready var scan_count: Label = $Root/VBox/ScanCount
 
 var is_scanning: bool = false
@@ -63,7 +63,7 @@ func _process(_delta: float) -> void:
 	_poll_world_freeze()
 
 func _ready() -> void:
-	UiKit.apply_glass($Root)
+	$Root.add_theme_stylebox_override("panel", UiKit.glass_stylebox())
 	process_mode = Node.PROCESS_MODE_ALWAYS  # stay interactive while the world is frozen
 	_freeze_was_visible = visible
 	# The revealed relic reads on warm letter stock; actions carry roles.
@@ -88,6 +88,14 @@ func _ready() -> void:
 	item_name_edit.text_changed.connect(_on_name_input_changed)
 	for edit in skill_edits:
 		edit.text_changed.connect(_on_name_input_changed)
+	_apply_responsive_frame()
+	get_viewport().size_changed.connect(_apply_responsive_frame)
+
+## Phone frame: the authored 60px margins plus the device safe area, tightened
+## on small portrait screens so the result panel stays on-screen.
+func _apply_responsive_frame() -> void:
+	UiKit.apply_menu_frame(get_node_or_null("Root") as Control,
+		get_viewport().get_visible_rect().size, 60.0, 60.0)
 
 func _connect_signals() -> void:
 	scan_manager.scan_started.connect(_on_scan_started)

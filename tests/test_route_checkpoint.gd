@@ -39,6 +39,29 @@ func _run() -> void:
 		push_error("checkpoint respawn position mismatch")
 		quit(1)
 		return
+	var expansion_checkpoints := {
+		"bramblewood_expansion_start": Vector2(20, -48),
+		"rootcut_gully": Vector2(46, -86),
+		"hollow_camp": Vector2(82, -124),
+		"beacon_breach": Vector2(124, -164),
+		"rootbound_court": Vector2(172, -208),
+		"rootway_shortcut": Vector2(172, -208),
+	}
+	for checkpoint_id in expansion_checkpoints:
+		if not game_state.set_route_checkpoint(checkpoint_id, false) \
+				and game_state.route_checkpoint_id != checkpoint_id:
+			push_error("expansion checkpoint was rejected: %s" % checkpoint_id)
+			quit(1)
+			return
+		if game_state.route_respawn_position != expansion_checkpoints[checkpoint_id]:
+			push_error("expansion respawn mismatch: %s" % checkpoint_id)
+			quit(1)
+			return
+	if not game_state.set_route_checkpoint_for_shortcut("rootway_shortcut", false) \
+			and game_state.route_checkpoint_id != "rootway_shortcut":
+		push_error("rootway shortcut checkpoint was rejected")
+		quit(1)
+		return
 	game_state.delete_save()
 	print("ALL ROUTE CHECKPOINT TESTS PASSED")
 	quit()

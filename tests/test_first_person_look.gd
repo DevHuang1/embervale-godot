@@ -39,6 +39,7 @@ func _run() -> void:
 	# (persist=false so the test never writes the player's saved choice).
 	rig.set_view_mode("third_person", true, false)
 	rig.set_view_mode("first_person", true, false)
+	rig.cancel_cinematic()
 	_assert_true(str(rig.view_mode) == "first_person", "view_mode switches to first_person")
 	_assert_true(input_man.get("first_person_active"), "InputManager is told first-person free-look is active")
 
@@ -67,6 +68,11 @@ func _run() -> void:
 	rig._handle_screen_drag(_drag(0, Vector2(10.0, 0.0)))
 	_assert_true(float(rig.target_angle_h) < look_before,
 		"one-finger drag right looks right in first person")
+	var drag_stopped_yaw: float = float(rig.target_angle_h)
+	for _i in 6:
+		rig._physics_process(0.1)
+	_assert_true(is_equal_approx(float(rig.target_angle_h), drag_stopped_yaw),
+		"first-person yaw stays fixed after the drag ends")
 	rig._handle_screen_touch(_touch(0, false))
 
 	# While first person is live, a drag must never emit movement steering.
@@ -81,11 +87,41 @@ func _run() -> void:
 
 	# Leaving first person restores drag steering and clears the shared flag.
 	rig.set_view_mode("third_person", true, false)
+	rig.cancel_cinematic()
 	_assert_true(not bool(input_man.get("first_person_active")), "InputManager flag clears in third person")
-	input_man.call("_handle_touch", _touch(11, true))
-	input_man.call("_handle_drag", _drag(11, Vector2(8.0, 0.0)))
-	input_man.call("_handle_touch", _touch(11, false))
+	input_man.call("_handle_touch", _touch_at(11, true, Vector2(800.0, 600.0)))
+	var world_camera_yaw: float = float(rig.target_angle_h)
+	var right_drag := _drag(11, Vector2(24.0, 2.0))
+	input_man.call("_handle_drag", right_drag)
+	_assert_true(float(rig.target_angle_h) < world_camera_yaw,
+		"third-person horizontal drag on the camera side orbits right")
+	input_man.call("_handle_touch", _touch_at(11, false, Vector2(824.0, 602.0)))
+
+	var move_count_before: int = _move_emits
+	input_man.call("_handle_touch", _touch_at(12, true, Vector2(120.0, 600.0)))
+	var movement_drag := _drag(12, Vector2(24.0, 2.0))
+	input_man.call("_handle_drag", movement_drag)
+	input_man.call("_handle_touch", _touch_at(12, false, Vector2(144.0, 602.0)))
 	_assert_true(_move_emits >= 1, "third-person one-finger drag steers again")
+	_assert_true(_move_emits > move_count_before,
+		"left-side third-person drag remains player movement")
+
+	# Horizontal mouse-wheel events are a second desktop fallback for trackpads
+	# and mice that expose left/right scrolling.
+	rig.set_angles(0.0, -0.62)
+	rig._handle_mouse_button(_mouse_button(MOUSE_BUTTON_WHEEL_LEFT, true))
+	var wheel_left_yaw: float = float(rig.target_angle_h)
+	rig._handle_mouse_button(_mouse_button(MOUSE_BUTTON_WHEEL_RIGHT, true))
+	_assert_true(wheel_left_yaw > 0.0 and float(rig.target_angle_h) < wheel_left_yaw,
+		"horizontal mouse-wheel events rotate the camera in both directions")
+
+	# Crossing +/- PI must use the short arc instead of visibly spinning the
+	# camera almost a full revolution.
+	rig.set_angles(PI - 0.01, -0.62)
+	rig.rotation.y = -PI + 0.01
+	rig._update_camera_position(0.1)
+	_assert_true(absf(angle_difference(float(rig.rotation.y), float(rig.target_angle_h))) < 0.1,
+		"camera yaw interpolates across the wrap boundary")
 
 	_finish()
 
@@ -95,15 +131,26 @@ func _motion(x: float, y: float) -> InputEventMouseMotion:
 	return e
 
 func _touch(index: int, pressed: bool) -> InputEventScreenTouch:
+	return _touch_at(index, pressed, Vector2.ZERO)
+
+func _touch_at(index: int, pressed: bool, position: Vector2) -> InputEventScreenTouch:
 	var e := InputEventScreenTouch.new()
 	e.index = index
 	e.pressed = pressed
+	e.position = position
 	return e
 
 func _drag(index: int, rel: Vector2) -> InputEventScreenDrag:
 	var e := InputEventScreenDrag.new()
 	e.index = index
 	e.relative = rel
+	e.position = rel
+	return e
+
+func _mouse_button(button: int, pressed: bool) -> InputEventMouseButton:
+	var e := InputEventMouseButton.new()
+	e.button_index = button
+	e.pressed = pressed
 	return e
 
 func _assert_true(condition: bool, message: String) -> void:

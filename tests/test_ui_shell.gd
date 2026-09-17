@@ -62,7 +62,10 @@ func _run() -> void:
 			print("FAIL: hostile not contained behind menu: ", e.name)
 
 	# --- Save-guarded confirm flow ---
+	# save_game() only marks the save dirty and debounces the write; the
+	# lifecycle/progression paths flush explicitly, so the test must too.
 	gs.save_game()
+	gs.flush_save()
 	menu._check_continue_availability()
 	if menu.get_node("Root/HeroCard/HeroVBox/SecondaryRow/ContinueButton").disabled:
 		failures += 1

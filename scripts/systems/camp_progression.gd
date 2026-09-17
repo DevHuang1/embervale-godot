@@ -10,6 +10,7 @@ const FACILITIES: Dictionary = {
 	"forge": {"name": "FORGE", "cost": {"iron_shard": 5, "crystal_fragment": 1}, "benefit": "Unlocks one weapon improvement tier."},
 	"gatherer_grove": {"name": "GATHERER'S GROVE", "cost": {"moss_fiber": 8, "thorn_vine": 3}, "benefit": "Gathering yields one additional resource."},
 	"lantern_beacon": {"name": "LANTERN BEACON", "cost": {"ember_shard": 1, "iron_shard": 3}, "benefit": "Unlocks the Grove camp shortcut."},
+	"rootway_beacon": {"name": "ROOTWAY BEACON", "cost": {}, "grant_only": true, "benefit": "Opens a persistent shortcut to the Rootbound Court."},
 }
 
 var camp_level: int = 1
@@ -73,7 +74,13 @@ func weapon_upgrade_cap() -> int:
 	return 6 if facility_unlocked("forge") else 5
 
 func is_shortcut_unlocked(realm: String, shortcut_id: String) -> bool:
-	return facility_unlocked("lantern_beacon") and realm == "bramblewood" and shortcut_id == "camp_route"
+	if realm != "bramblewood":
+		return false
+	if shortcut_id == "camp_route":
+		return facility_unlocked("lantern_beacon")
+	if shortcut_id == "rootway_shortcut":
+		return facility_unlocked("rootway_beacon")
+	return false
 
 func camp_material_id() -> String:
 	return "camp_ember"
@@ -100,7 +107,8 @@ func unlock_shortcut(realm: String, shortcut_id: String) -> bool:
 	return true
 
 func purchase_facility(id: String) -> bool:
-	if facility_unlocked(id) or not FACILITIES.has(id):
+	if facility_unlocked(id) or not FACILITIES.has(id) \
+			or bool(FACILITIES[id].get("grant_only", false)):
 		return false
 	var gs := get_node_or_null("/root/GameState")
 	if gs == null:
@@ -120,6 +128,23 @@ func purchase_facility(id: String) -> bool:
 		unlock_shortcut("bramblewood", "camp_route")
 	changed.emit()
 	notice.emit("%s UNLOCKED" % str(FACILITIES[id].name))
+	return true
+
+## Grant-only route features are awarded by validated gameplay milestones, not
+## by a menu purchase. The operation is idempotent so retries and save reloads
+## cannot duplicate the facility or raise the camp level repeatedly.
+func grant_route_feature_once(id: String) -> bool:
+	if not FACILITIES.has(id) or not bool(FACILITIES[id].get("grant_only", false)) \
+			or facility_unlocked(id):
+		return false
+	facilities[id] = true
+	claimed_rewards["facility_%s" % id] = true
+	camp_level = mini(4, camp_level + 1)
+	var gs := get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("save_game"):
+		gs.call("save_game")
+	changed.emit()
+	notice.emit("%s UNLOCKED" % str(FACILITIES[id].get("name", id)))
 	return true
 
 func claim_mastery_reward(realm: String) -> bool:

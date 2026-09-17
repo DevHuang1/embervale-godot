@@ -99,8 +99,9 @@ uniform float accent_strength : hint_range(0.0, 1.0) = 0.0;
 // Visual richness: brightness boost + domain-warped speckle + ember flecks
 uniform float terrain_brightness : hint_range(0.5, 2.0) = 1.28;
 uniform float detail_warp_amount : hint_range(0.0, 4.0) = 0.9;
-uniform float ember_fleck_density : hint_range(0.0, 0.5) = 0.045;
-uniform float ember_fleck_intensity : hint_range(0.0, 4.0) = 0.85;
+// Disabled by default: hard grid flecks read as square cards on mobile.
+uniform float ember_fleck_density : hint_range(0.0, 0.5) = 0.0;
+uniform float ember_fleck_intensity : hint_range(0.0, 4.0) = 0.0;
 
 // Macro colour variation (v4): low-frequency albedo modulation
 uniform float macro_variation_strength : hint_range(0.0, 0.6) = 0.18;

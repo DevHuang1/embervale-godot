@@ -101,11 +101,6 @@ var _restore_distance: float = 17.5
 var _boss_combat := false
 var _ts_guard: Node = null
 
-# Drag-release orbital inertia
-@export var inertia_strength: float = 1.15
-@export var inertia_decay: float = 4.0
-var _drag_ang_vel := Vector2.ZERO  # (yaw, pitch) rad/s
-
 func _ready() -> void:
 	# Hit-stop recovery is wall-clock driven. This node must continue polling
 	# while gameplay is slowed, otherwise a heavy kill/spell impact can leave
@@ -134,7 +129,7 @@ func _ready() -> void:
 	
 	camera.fov = fov
 	camera_base_position = camera.position
-	InputManager.set_active_camera(camera)
+	InputManager.set_active_camera(camera, self)
 	if dof_enabled:
 		cam_attributes = CameraAttributesPractical.new()
 		cam_attributes.dof_blur_far_enabled = true
@@ -159,8 +154,6 @@ func _physics_process(delta: float) -> void:
 		_apply_shake(delta)
 		return
 	
-	_apply_drag_inertia(delta)
-	_apply_idle_drift(delta)
 	_update_camera_position(delta)
 	_apply_shake(delta)
 
@@ -169,27 +162,6 @@ func _process(_delta: float) -> void:
 	# reduced. Keep this separate from movement/camera simulation so recovery
 	# cannot depend on the slowed gameplay clock.
 	_poll_hit_stop()
-
-func _is_user_rotating() -> bool:
-	return _drag_rotate or _touch_pos.size() >= 2
-
-func _apply_drag_inertia(delta: float) -> void:
-	if _is_user_rotating() or _drag_ang_vel.length_squared() < 0.0004:
-		if not _is_user_rotating():
-			_drag_ang_vel = Vector2.ZERO
-		return
-	target_angle_h += _drag_ang_vel.x * inertia_strength * delta
-	target_angle_v = _clamp_pitch(target_angle_v + _drag_ang_vel.y * inertia_strength * delta)
-	_drag_ang_vel *= exp(-inertia_decay * delta)
-
-func _apply_idle_drift(delta: float) -> void:
-	# Barely-there orbit so the scene breathes when the player stands still
-	var player_speed := target_velocity.length() if target_velocity else 0.0
-	# A fixed-head self-orbit reads as motion sickness in first person; only
-	# breathe the yaw in the over-the-shoulder views.
-	if view_mode == VIEW_FIRST_PERSON or _is_user_rotating() or _cinematic or player_speed > 0.4:
-		return
-	target_angle_h += sin(Time.get_ticks_msec() / 1000.0 * 0.15) * 0.00035
 
 func _update_camera_position(delta: float) -> void:
 	var target_pos: Vector3 = target.global_position
@@ -223,8 +195,15 @@ func _update_camera_position(delta: float) -> void:
 		camera.fov = lerpf(camera.fov, _target_fov, lerp_rate)
 	
 	# Apply rotation
-	rotation.y = lerp(rotation.y, target_angle_h, rotation_speed * delta)
-	rotation.x = lerp(rotation.x, target_angle_v, rotation_speed * delta)
+	if view_mode == VIEW_FIRST_PERSON:
+		# Free-look is input-owned: once the drag ends, the camera must stop
+		# exactly where the player left it instead of continuing to ease or drift.
+		rotation.y = target_angle_h
+		rotation.x = target_angle_v
+	else:
+		var rotation_lerp := clampf(rotation_speed * delta, 0.0, 1.0)
+		rotation.y = lerp_angle(rotation.y, target_angle_h, rotation_lerp)
+		rotation.x = lerpf(rotation.x, target_angle_v, rotation_lerp)
 	
 	# Update spring arm length
 	spring_arm.spring_length = lerp(spring_arm.spring_length, distance, 5.0 * delta)
@@ -433,7 +412,7 @@ func set_distance(new_distance: float) -> void:
 	distance = clamp(new_distance, _target_min_dist, _target_max_dist)
 
 func set_angles(h: float, v: float) -> void:
-	target_angle_h = h
+	target_angle_h = wrapf(h, -PI, PI)
 	target_angle_v = clamp(v, -1.35, -0.18)  # Clamp vertical angle
 
 func get_angles() -> Vector2:
@@ -452,7 +431,6 @@ func set_view_mode(new_mode: String, instant: bool = false,
 	view_mode = new_mode
 	_touch_pos.clear()
 	_touch_prev.clear()
-	_drag_ang_vel = Vector2.ZERO
 	InputManager.world_gesture_active = false
 	third_person = view_mode == VIEW_THIRD_PERSON
 	_apply_view_targets(view_mode)
@@ -532,6 +510,11 @@ func _save_view_mode() -> void:
 @export var rotate_sensitivity: float = 0.005
 @export var pinch_zoom_scale: float = 0.035
 @export var wheel_zoom_step: float = 2.0
+@export var wheel_rotate_step: float = 0.22
+## The right side of the playfield is reserved for camera orbit on mobile.
+## The left side remains tap-to-move/joystick territory.
+@export_range(0.0, 1.0, 0.01) var camera_drag_start_ratio: float = 0.35
+@export var camera_drag_direction_bias: float = 1.15
 
 var _drag_rotate: bool = false
 var _touch_pos := {}
@@ -545,12 +528,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton:
 		_handle_mouse_button(event)
 	elif event is InputEventMouseMotion and _drag_rotate:
-		var dh: float = -event.relative.x * rotate_sensitivity
-		var dv: float = _clamp_pitch(
-			target_angle_v - event.relative.y * rotate_sensitivity) - target_angle_v
-		target_angle_h += dh
-		target_angle_v = _clamp_pitch(target_angle_v + dv)
-		_drag_ang_vel = _drag_ang_vel.lerp(Vector2(dh, dv) * 60.0, 0.4)
+		_apply_orbit_delta(event.relative)
 		if view_mode == VIEW_FIRST_PERSON:
 			_target_angle_v = target_angle_v
 	elif event is InputEventMouseMotion and not _drag_rotate and view_mode == VIEW_FIRST_PERSON:
@@ -572,6 +550,33 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 		MOUSE_BUTTON_WHEEL_DOWN:
 			if event.pressed:
 				set_distance(distance + wheel_zoom_step)
+		MOUSE_BUTTON_WHEEL_LEFT:
+			if event.pressed:
+				_apply_orbit_delta(Vector2(-wheel_rotate_step, 0.0))
+		MOUSE_BUTTON_WHEEL_RIGHT:
+			if event.pressed:
+				_apply_orbit_delta(Vector2(wheel_rotate_step, 0.0))
+
+## InputManager calls this before its normal tap-to-move drag path. This keeps
+## the established left-side movement controls intact while making the
+## camera-side horizontal swipe an unambiguous orbit gesture.
+func wants_world_drag(start_position: Vector2, relative: Vector2) -> bool:
+	if _cinematic or view_mode == VIEW_FIRST_PERSON or _touch_pos.size() >= 2:
+		return false
+	if relative.length_squared() < 16.0:
+		return false
+	if absf(relative.x) <= absf(relative.y) * camera_drag_direction_bias:
+		return false
+	var viewport_width := get_viewport().get_visible_rect().size.x
+	if viewport_width <= 0.0:
+		return false
+	return start_position.x >= viewport_width * camera_drag_start_ratio
+
+func consume_world_drag(start_position: Vector2, relative: Vector2) -> bool:
+	if not wants_world_drag(start_position, relative):
+		return false
+	_apply_orbit_delta(relative)
+	return true
 
 func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 	if InputManager != null and InputManager.has_method("is_joystick_pointer_owned") \
@@ -588,8 +593,6 @@ func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 		_touch_pos.erase(event.index)
 		_touch_prev.erase(event.index)
 	InputManager.world_gesture_active = _touch_pos.size() >= 2
-	if _touch_pos.size() < 2:
-		_drag_ang_vel = Vector2.ZERO
 
 func _handle_screen_drag(event: InputEventScreenDrag) -> void:
 	if InputManager != null and InputManager.has_method("is_joystick_pointer_owned") \
@@ -614,12 +617,7 @@ func _handle_screen_drag(event: InputEventScreenDrag) -> void:
 		return
 	
 	# Two-finger orbit from the pair's average motion
-	var dh := -event.relative.x * 0.5 * rotate_sensitivity
-	var dv := _clamp_pitch(
-		target_angle_v - event.relative.y * 0.5 * rotate_sensitivity) - target_angle_v
-	target_angle_h += dh
-	target_angle_v = _clamp_pitch(target_angle_v + dv)
-	_drag_ang_vel = _drag_ang_vel.lerp(Vector2(dh, dv) * 60.0, 0.4)
+	_apply_orbit_delta(event.relative * 0.5)
 	if view_mode == VIEW_FIRST_PERSON:
 		_target_angle_v = target_angle_v
 	
@@ -632,16 +630,21 @@ func _handle_screen_drag(event: InputEventScreenDrag) -> void:
 	_touch_prev[event.index] = event.position
 	_touch_prev[other_index] = _touch_pos[other_index]
 
+func _apply_orbit_delta(relative: Vector2) -> void:
+	var dh := -relative.x * rotate_sensitivity
+	var next_pitch := _clamp_pitch(target_angle_v - relative.y * rotate_sensitivity)
+	target_angle_h = wrapf(target_angle_h + dh, -PI, PI)
+	target_angle_v = next_pitch
+
 func _apply_first_person_look(relative: Vector2) -> void:
-	target_angle_h -= relative.x * first_person_look_sensitivity
+	target_angle_h = wrapf(target_angle_h
+		- relative.x * first_person_look_sensitivity, -PI, PI)
 	var pitch_delta := relative.y * first_person_look_sensitivity
 	if first_person_invert_y:
 		pitch_delta = -pitch_delta
 	target_angle_v = _clamp_pitch(target_angle_v - pitch_delta)
-	# Tell the mode lerp our hand-picked pitch is the target so nothing eases
-	# the head back to the authored first-person pitch mid-look.
+	# Keep the first-person target aligned with the direct drag orientation.
 	_target_angle_v = target_angle_v
-	_drag_ang_vel = Vector2.ZERO
 
 func set_first_person_look_sensitivity(value: float) -> void:
 	first_person_look_sensitivity = clampf(value, 0.001, 0.02)

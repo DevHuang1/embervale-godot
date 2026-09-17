@@ -40,6 +40,11 @@ const BIOME_MID_LIMIT  : int = 32
 # Update interval — checking every physics frame is too expensive on mobile
 const UPDATE_EVERY_N_FRAMES : int = 6
 
+## Opt-in micro-detail: any descendant in this group is hidden past TIER 1.
+## Explicit opt-in keeps the detail LOD from culling silhouettes it cannot
+## judge (mesh order inside a rig is not a reliable "importance" signal).
+const MICRO_DETAIL_GROUP : String = "lod_micro"
+
 var _camera    : Camera3D = null
 var _bosses    : Array[Node3D] = []
 var _enemies   : Array[Node3D] = []
@@ -50,6 +55,13 @@ var _frame     : int = 0
 var _boss_meshes   : Dictionary = {}   # Node → Array[MeshInstance3D]
 var _enemy_meshes  : Dictionary = {}
 var _biome_meshes  : Dictionary = {}
+
+# Distance detail LOD: presentation-only (shadows + opted-in micro meshes).
+# State is keyed by instance id, never by object reference, so a freed entry
+# can always be pruned without touching an invalid instance.
+var _detail      : Array[Node3D] = []
+var _detail_ids  : Array[int] = []
+var _detail_state : Dictionary = {}   # instance id → {meshes, shadows, micro}
 
 # Particle systems per registered node (for count reduction)
 var _boss_particles  : Dictionary = {}
@@ -63,6 +75,8 @@ func _physics_process(_delta: float) -> void:
 	_frame += 1
 	if _frame % UPDATE_EVERY_N_FRAMES != 0:
 		return
+	if _camera == null or not is_instance_valid(_camera):
+		_camera = get_viewport().get_camera_3d()
 	if _camera == null:
 		return
 	var cam_pos := _camera.global_position
@@ -75,6 +89,10 @@ func _physics_process(_delta: float) -> void:
 	for biome in _biomes:
 		if is_instance_valid(biome):
 			_update_biome_lod(biome, cam_pos)
+	_prune_detail()
+	for detail in _detail:
+		if is_instance_valid(detail):
+			_update_detail_lod(detail, cam_pos)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Registration
@@ -105,6 +123,62 @@ func register_biome(node: Node3D) -> void:
 			_biome_sbs[node] = child
 			break
 
+## Register a bounded, self-contained prop or actor for presentation LOD.
+## Only shadow casting is tiered automatically; mesh culling applies solely to
+## descendants the content explicitly tags with MICRO_DETAIL_GROUP. Freed
+## entries are pruned by the update loop, so any despawn path is safe.
+func register_detail(node: Node3D) -> void:
+	if node == null:
+		return
+	var id := node.get_instance_id()
+	if _detail_state.has(id):
+		return
+	var meshes := _collect_meshes(node)
+	var shadows : Dictionary = {}
+	for mesh in meshes:
+		shadows[mesh] = mesh.cast_shadow
+	var micros : Array[Node3D] = []
+	for child in node.find_children("*", "Node3D", true, false):
+		if child.is_in_group(MICRO_DETAIL_GROUP):
+			micros.append(child as Node3D)
+	_detail_state[id] = {"meshes": meshes, "shadows": shadows, "micro": micros}
+	_detail_ids.append(id)
+	_detail.append(node)
+
+## Detail-LOD state for a registered node (empty when it is not registered).
+func detail_state(node: Node3D) -> Dictionary:
+	if node == null:
+		return {}
+	return _detail_state.get(node.get_instance_id(), {})
+
+func registered_detail_count() -> int:
+	return _detail_state.size()
+
+func _prune_detail() -> void:
+	var index := _detail.size() - 1
+	while index >= 0:
+		if not is_instance_valid(_detail[index]):
+			_detail_state.erase(_detail_ids[index])
+			_detail_ids.remove_at(index)
+			_detail.remove_at(index)
+		index -= 1
+
+func _update_detail_lod(node: Node3D, cam_pos: Vector3) -> void:
+	var dist := node.global_position.distance_to(cam_pos)
+	var near := dist <= TIER1_DIST
+	var state := detail_state(node)
+	var meshes : Array = state.get("meshes", [])
+	var shadows : Dictionary = state.get("shadows", {})
+	for mesh in meshes:
+		if not is_instance_valid(mesh):
+			continue
+		var original : int = int(shadows.get(mesh, GeometryInstance3D.SHADOW_CASTING_SETTING_ON))
+		mesh.cast_shadow = original if near \
+			else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for micro in state.get("micro", []):
+		if is_instance_valid(micro):
+			(micro as Node3D).visible = near
+
 func unregister(node: Node3D) -> void:
 	_bosses.erase(node)
 	_enemies.erase(node)
@@ -115,6 +189,12 @@ func unregister(node: Node3D) -> void:
 	_boss_particles.erase(node)
 	_biome_particles.erase(node)
 	_biome_sbs.erase(node)
+	var detail_id := node.get_instance_id()
+	_detail_state.erase(detail_id)
+	var detail_index := _detail_ids.find(detail_id)
+	if detail_index >= 0:
+		_detail_ids.remove_at(detail_index)
+		_detail.remove_at(detail_index)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LOD updates

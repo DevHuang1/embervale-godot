@@ -15,8 +15,16 @@ const BIG_LEGEND_HEIGHT := 38.0
 const POLL_INTERVAL := 0.15
 const MAX_MARKERS := 64
 
+## Marker priority for the MAX_MARKERS truncation. Quest-critical guidance must
+## survive a crowded map: decorative landmarks are dropped first, never the
+## objective, route, or portal markers.
+const PRIORITY_QUEST := 0
+const PRIORITY_ACTIVITY := 1
+const PRIORITY_NPC := 2
+const PRIORITY_STRUCTURE := 4
+
 var expanded := false
-var markers: Array[Dictionary] = []   # {pos, kind, glyph, label, color}
+var markers: Array[Dictionary] = []   # {pos, kind, glyph, label, color, priority}
 var realm_name := "Whispergrove"
 var _poll := 0.0
 var _pulse_t := 0.0
@@ -65,15 +73,18 @@ func _process(delta: float) -> void:
 func _refresh_world_markers() -> void:
 	var next: Array[Dictionary] = []
 	var seen: Dictionary = {}
-	var append_marker := func(node: Node3D, kind: String, glyph: String, color: Color) -> void:
+	var append_marker := func(node: Node3D, kind: String, glyph: String, color: Color,
+			priority: int = PRIORITY_STRUCTURE) -> void:
 		if node == null or not is_instance_valid(node):
+			return
+		if node.is_in_group("activity_marker") and not node.visible:
 			return
 		var key := "%s:%s" % [kind, node.get_instance_id()]
 		if seen.has(key):
 			return
 		seen[key] = true
 		next.append({"pos": node.global_position, "kind": kind, "glyph": glyph,
-			"label": node.name, "color": color})
+			"label": node.name, "color": color, "priority": priority})
 	for node_value in get_tree().get_nodes_in_group("interactable"):
 		var node := node_value as Node3D
 		if node == null or not is_instance_valid(node):
@@ -81,7 +92,26 @@ func _refresh_world_markers() -> void:
 		var kind := "structure"
 		var glyph := "S"
 		var color := Color(0.78, 0.74, 0.62)
-		if node is ServiceNpc:
+		if node.is_in_group("activity_marker"):
+			var activity: Dictionary = node.call("activity_contract") \
+				if node.has_method("activity_contract") else {}
+			var activity_type := str(activity.get("type", ""))
+			kind = "activity"
+			glyph = "A"
+			color = Color(0.82, 0.66, 1.0)
+			if activity_type in ["combat_patrol", "combat_ambush"]:
+				glyph = "!"
+				color = Color(1.0, 0.42, 0.20)
+			elif activity_type == "gathering":
+				glyph = "G"
+				color = Color(0.42, 0.92, 0.58)
+			elif activity_type == "beacon":
+				glyph = "B"
+				color = Color(0.42, 0.78, 1.0)
+			elif activity_type == "cache":
+				glyph = "$"
+				color = Color(1.0, 0.76, 0.28)
+		elif node is ServiceNpc:
 			kind = "craftsman" if node.service_kind == "forge" else "trader"
 			glyph = "C" if kind == "craftsman" else "T"
 			color = Color(0.45, 0.86, 0.66) if kind == "craftsman" else Color(1.0, 0.74, 0.29)
@@ -98,26 +128,33 @@ func _refresh_world_markers() -> void:
 			kind = "portal"
 			glyph = "P"
 			color = Color(0.82, 0.55, 1.0)
-		append_marker.call(node, kind, glyph, color)
+		append_marker.call(node, kind, glyph, color, _marker_priority(kind, glyph))
 	for node_value in get_tree().get_nodes_in_group("structure"):
-		append_marker.call(node_value as Node3D, "structure", "S", Color(0.78, 0.74, 0.62))
+		append_marker.call(node_value as Node3D, "structure", "S",
+			Color(0.78, 0.74, 0.62), PRIORITY_STRUCTURE)
 	for node_value in get_tree().get_nodes_in_group("portal"):
-		append_marker.call(node_value as Node3D, "portal", "P", Color(0.82, 0.55, 1.0))
+		append_marker.call(node_value as Node3D, "portal", "P",
+			Color(0.82, 0.55, 1.0), PRIORITY_ACTIVITY)
 	for node_value in get_tree().get_nodes_in_group("event"):
-		append_marker.call(node_value as Node3D, "event", "E", Color(0.46, 0.82, 1.0))
+		append_marker.call(node_value as Node3D, "event", "E",
+			Color(0.46, 0.82, 1.0), PRIORITY_ACTIVITY)
+	for node_value in get_tree().get_nodes_in_group("activity"):
+		append_marker.call(node_value as Node3D, "activity", "A",
+			Color(0.82, 0.66, 1.0), PRIORITY_ACTIVITY)
 	for node_value in get_tree().get_nodes_in_group("task"):
-		append_marker.call(node_value as Node3D, "task", "!", Color(1.0, 0.88, 0.38))
+		append_marker.call(node_value as Node3D, "task", "!",
+			Color(1.0, 0.88, 0.38), PRIORITY_QUEST)
 	for node_value in get_tree().get_nodes_in_group("quest_marker"):
 		var node := node_value as Node3D
 		if node != null and is_instance_valid(node):
-			append_marker.call(node, "task", "!", Color(1.0, 0.88, 0.38))
+			append_marker.call(node, "task", "!", Color(1.0, 0.88, 0.38), PRIORITY_QUEST)
 	for node_value in get_tree().get_nodes_in_group("interactable"):
 		var node := node_value as Node3D
 		if node == null or not is_instance_valid(node):
 			continue
 		var node_name := node.name.to_lower()
 		if ("quest" in node_name or "objective" in node_name) and not node is ServiceNpc:
-			append_marker.call(node, "task", "!", Color(1.0, 0.88, 0.38))
+			append_marker.call(node, "task", "!", Color(1.0, 0.88, 0.38), PRIORITY_QUEST)
 	# A few authored route landmarks predate the marker groups. Discover them
 	# by stable scene naming so old realm scenes still expose their objectives.
 	var current_scene := get_tree().current_scene
@@ -134,13 +171,27 @@ func _refresh_world_markers() -> void:
 				else ("E" if "beacon" in route_name else "P")
 			var route_color := Color(1.0, 0.88, 0.38) if route_glyph == "!" \
 				else (Color(0.46, 0.82, 1.0) if route_glyph == "E" else Color(0.82, 0.55, 1.0))
-			append_marker.call(node, "route_%s" % route_glyph, route_glyph, route_color)
+			append_marker.call(node, "route_%s" % route_glyph, route_glyph, route_color, PRIORITY_QUEST)
 	next.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var priority_a := int(a.get("priority", PRIORITY_STRUCTURE))
+		var priority_b := int(b.get("priority", PRIORITY_STRUCTURE))
+		if priority_a != priority_b:
+			return priority_a < priority_b
 		return str(a.get("label", a.get("glyph", ""))) < str(b.get("label", b.get("glyph", "")))
 	)
 	if next.size() > MAX_MARKERS:
 		next.resize(MAX_MARKERS)
 	markers = next
+
+## Priority for a marker classified through the interactable loop.
+func _marker_priority(kind: String, glyph: String) -> int:
+	if kind.begins_with("route") or glyph == "!":
+		return PRIORITY_QUEST
+	if kind in ["activity", "event", "portal"]:
+		return PRIORITY_ACTIVITY
+	if kind in ["craftsman", "trader", "task"]:
+		return PRIORITY_NPC
+	return PRIORITY_STRUCTURE
 
 func _bounds() -> Rect2:
 	var gs := get_node_or_null("/root/GameState")

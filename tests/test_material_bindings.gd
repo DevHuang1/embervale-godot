@@ -6,6 +6,7 @@ extends SceneTree
 
 const SHADERS := [
 	"res://assets/shaders/terrain_ground.gdshader",
+	"res://assets/shaders/terrain_ground_mobile.gdshader",
 	"res://assets/shaders/terrain_ground_layers.gdshader",
 	"res://assets/shaders/rock.gdshader",
 	"res://assets/shaders/bark.gdshader",
@@ -37,6 +38,11 @@ func _run() -> void:
 		if sh == null:
 			failures += 1
 			print("FAIL: shader failed to parse: ", path)
+	var mobile_shader_source := FileAccess.get_file_as_string(
+		"res://assets/shaders/terrain_ground_mobile.gdshader")
+	if mobile_shader_source.count("uniform sampler2D") > 4:
+		failures += 1
+		print("FAIL: mobile terrain shader exceeds the four-albedo sampler budget")
 
 	for realm in REALM_MATERIALS:
 		var path := "res://assets/materials/terrain_%s.tres" % realm

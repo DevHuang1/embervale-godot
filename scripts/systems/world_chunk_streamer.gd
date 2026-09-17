@@ -124,6 +124,17 @@ var _last_movement_msec: int = 0
 func _is_mobile_runtime() -> bool:
 	return OS.has_feature("mobile") or OS.get_name() in ["Android", "iOS"]
 
+func _world_view_scale() -> float:
+	var scaler := get_node_or_null("/root/WorldState/QualityScaler")
+	if scaler == null:
+		scaler = get_node_or_null("/root/QualityScaler")
+	if scaler != null and scaler.has_method("get_world_view_scale"):
+		return clampf(float(scaler.call("get_world_view_scale")), 0.45, 1.0)
+	return 0.55 if _is_mobile_runtime() else 1.0
+
+func _effective_world_radius() -> float:
+	return float(_tier["radius"]) * _world_view_scale()
+
 func _ready() -> void:
 	add_to_group("world_chunk_streamer")
 	_active = _is_streaming_realm()
@@ -372,9 +383,28 @@ func _finalize_chunk_visibility(chunk: Node3D) -> void:
 	for child in chunk.get_children():
 		if child is GeometryInstance3D:
 			var geometry := child as GeometryInstance3D
-			if geometry.name != "GrassCarpet":
-				geometry.visibility_range_end = float(_tier["radius"]) + 30.0
+			if not str(geometry.name).begins_with("GrassCarpet"):
+				geometry.visibility_range_end = _effective_world_radius() + 30.0
 				geometry.visibility_range_end_margin = 12.0
+
+func _refresh_resident_visibility_ranges() -> void:
+	var ranges := _grass_ranges()
+	for chunk_value in _chunks.values():
+		var chunk := chunk_value as Node3D
+		if chunk == null or not is_instance_valid(chunk):
+			continue
+		for child in chunk.get_children():
+			var geometry := child as GeometryInstance3D
+			if geometry == null:
+				continue
+			if str(geometry.name).begins_with("GrassCarpet"):
+				var band := str(geometry.get_meta("source_layer", "near"))
+				var band_index: int = int({"near": 0, "mid": 1, "far": 2}.get(band, 0))
+				geometry.visibility_range_begin = ranges[band_index * 2]
+				geometry.visibility_range_end = ranges[band_index * 2 + 1]
+			else:
+				geometry.visibility_range_end = _effective_world_radius() + 30.0
+			geometry.visibility_range_end_margin = 12.0
 
 func _is_streaming_realm() -> bool:
 	var world_root := get_parent()
@@ -384,14 +414,8 @@ func _is_streaming_realm() -> bool:
 	return realm in KNOWN_REALMS
 
 func _visual_realm_id() -> String:
-	var gs := get_node_or_null("/root/GameState")
-	var active := str(gs.get("current_realm")) if gs != null else ""
-	if active in KNOWN_REALMS:
-		return active
 	var world_root := get_parent()
-	if world_root != null and "biome_id" in world_root:
-		return str(world_root.get("biome_id"))
-	return "bramblewood"
+	return RealmLayoutData.visual_realm_for(world_root)
 
 func _setup() -> void:
 	if _is_mobile_runtime():
@@ -428,6 +452,9 @@ func _apply_quality_startup() -> void:
 			_grass_density = minf(_grass_density, 0.42)
 		if not scaler.is_connected("level_changed", _on_quality_level_changed):
 			scaler.connect("level_changed", _on_quality_level_changed)
+		if scaler.has_signal("world_view_changed") \
+				and not scaler.is_connected("world_view_changed", _on_world_view_changed):
+			scaler.connect("world_view_changed", _on_world_view_changed)
 
 func _collect_terrain_material(world: Node3D) -> void:
 	_terrain_relief = world.get_node_or_null("Terrain") as TerrainRelief
@@ -449,6 +476,15 @@ func _on_quality_level_changed(level: int) -> void:
 	if not _active:
 		return
 	_tier = TIERS[clampi(int(level), 0, 2)]
+	_refresh_resident_visibility_ranges()
+	_last_center = Vector2i(1 << 30, 1 << 30)
+	if _hero != null:
+		call_deferred("_rebuild_ring", _hero.global_position)
+
+func _on_world_view_changed(_mode: int) -> void:
+	if not _active:
+		return
+	_refresh_resident_visibility_ranges()
 	_last_center = Vector2i(1 << 30, 1 << 30)
 	if _hero != null:
 		call_deferred("_rebuild_ring", _hero.global_position)
@@ -514,7 +550,7 @@ func get_surface_material_report(world_position: Vector3) -> Dictionary:
 		"terrain_bound": _terrain_relief != null}
 
 func _ring_radius() -> int:
-	return int(ceil(float(_tier["radius"]) / CHUNK_SIZE)) + PREFETCH_CHUNKS
+	return int(ceil(_effective_world_radius() / CHUNK_SIZE)) + PREFETCH_CHUNKS
 
 func _rebuild_ring(center: Vector3) -> void:
 	var cell_x := int(floor(center.x / CHUNK_SIZE))
@@ -585,14 +621,29 @@ func _relocate_walls(world: Node3D) -> void:
 func _build_clearances() -> void:
 	var profile := RealmLayoutData.profile(_realm_id)
 	_clearances.clear()
-	for key in ["checkpoint", "cave", "arena"]:
+	for boss_anchor in RealmLayoutData.boss_anchor_points_for_world(get_parent()):
+		_clearances.append({"pos": boss_anchor,
+			"radius": RealmLayoutData.BOSS_ARENA_CLEARANCE_RADIUS})
+	for key in ["checkpoint", "cave"]:
 		var anchor3 := profile.get(key, Vector3.ZERO) as Vector3
-		var radius := 5.2 if key == "arena" else (2.6 if key == "checkpoint" else 2.2)
+		var radius := 2.6 if key == "checkpoint" else 2.2
 		_clearances.append({"pos": Vector2(anchor3.x, anchor3.z), "radius": radius})
 	for chest_value in profile.get("chests", []):
 		var chest := chest_value as Dictionary
 		var chest3 := chest.get("pos", Vector3.ZERO) as Vector3
 		_clearances.append({"pos": Vector2(chest3.x, chest3.z), "radius": 1.3})
+	var expansion_profile := profile
+	var world_root := get_parent()
+	if world_root != null and "biome_id" in world_root:
+		var biome_profile := RealmLayoutData.profile(str(world_root.get("biome_id")))
+		if biome_profile.has("expansion_pockets"):
+			expansion_profile = biome_profile
+	for pocket_value in expansion_profile.get("expansion_pockets", []):
+		var pocket := pocket_value as Dictionary
+		if str(pocket.get("role", "")) == "boss":
+			continue
+		var pocket3 := pocket.get("position", Vector3.ZERO) as Vector3
+		_clearances.append({"pos": Vector2(pocket3.x, pocket3.z), "radius": 4.2})
 	for pond_value in WorldGroundComposition.pond_centers(_realm_id):
 		_clearances.append({"pos": pond_value as Vector2, "radius": 4.8})
 
@@ -654,7 +705,7 @@ func _build_shared_resources() -> void:
 	_grass_material.set_shader_parameter("dry_color", (pal["tuft"] as Color).lerp(Color(0.38, 0.31, 0.12), 0.52))
 	_grass_material.set_shader_parameter("blade_height", 0.36)
 	_grass_material.set_shader_parameter("root_height_offset", 0.0)
-	_grass_material.set_shader_parameter("wind_distance_fade", 0.55 if _tier["radius"] > 150.0 else 0.75)
+	_grass_material.set_shader_parameter("wind_distance_fade", 0.55 if _effective_world_radius() > 150.0 else 0.75)
 	_grass_material.set_shader_parameter("interaction_strength", 1.0)
 
 	var trunk_cyl := CylinderMesh.new()
@@ -902,7 +953,7 @@ func _build_ambient_foliage(chunk: Node3D, rng: RandomNumberGenerator) -> void:
 func _grass_ranges() -> Array[float]:
 	var values: Array[float] = []
 	for value in _tier.get("grass", [0.0, 90.0, 60.0, 145.0, 125.0, 230.0]):
-		values.append(float(value))
+		values.append(float(value) * _world_view_scale())
 	return values
 
 func _build_ambient_life() -> void:
@@ -1000,7 +1051,7 @@ func _build_grass(chunk: Node3D, min_world: Vector3, chunk_center_world: Vector3
 	if band_filter.is_empty() or band_filter == "mid":
 		_build_grass_band(chunk, min_world, rng, "mid", 1.8 / sqrt(_grass_density),
 				_grass_mid_mesh, 500 if mobile else 1100, 1)
-	if band_filter.is_empty() and not mobile and int(_tier.get("radius", 0.0)) >= 190:
+	if band_filter.is_empty() and not mobile and _effective_world_radius() >= 190.0:
 		_build_grass_band(chunk, min_world, rng, "far", float(_tier["far"]),
 				_grass_far_mesh, 450, 2)
 
@@ -1125,50 +1176,57 @@ func _batch_mm(chunk: Node3D, name: String, mesh: Mesh, material: Material,
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	chunk.add_child(mmi)
 
-func _build_trees(chunk: Node3D, min_world: Vector3, rng: RandomNumberGenerator) -> void:
-	var count := rng.randi_range(7, 11)
+## Scatter authoritative counts while honouring gameplay clearances. The target
+## band is the authored chunk density; skipping a cleared candidate without a
+## top-up would leave a chunk that overlaps an arena nearly bare (previously the
+## decoration disappeared instead of relocating). `_clearance_blocks` still wins,
+## so cleared ground is never covered, and chunks with no clearance accept
+## exactly the same first `target` candidates as before.
+func _fill_scatter(target: int, min_world: Vector3, rng: RandomNumberGenerator,
+		make_transform: Callable) -> Array[Transform3D]:
 	var transforms: Array[Transform3D] = []
-	for i in count:
+	if target <= 0:
+		return transforms
+	var attempts := 0
+	var max_attempts := maxi(target * 8, 24)
+	while transforms.size() < target and attempts < max_attempts:
+		attempts += 1
 		var local := Vector2(rng.randf(), rng.randf()) * CHUNK_SIZE
 		var world := Vector2(min_world.x + local.x, min_world.z + local.y)
 		if _clearance_blocks(world):
 			continue
-		var s := rng.randf_range(0.75, 1.25)
-		var basis := Basis.from_euler(Vector3(0.0, rng.randf() * TAU, 0.0)).scaled(
-			Vector3(s, rng.randf_range(0.85, 1.15), s))
-		transforms.append(Transform3D(basis,
-			Vector3(local.x, _surface_height(world), local.y)))
+		transforms.append(make_transform.call(local, world) as Transform3D)
+	return transforms
+
+func _build_trees(chunk: Node3D, min_world: Vector3, rng: RandomNumberGenerator) -> void:
+	var count := rng.randi_range(7, 11)
+	var transforms := _fill_scatter(count, min_world, rng,
+		func(local: Vector2, world: Vector2) -> Transform3D:
+			var s := rng.randf_range(0.75, 1.25)
+			var basis := Basis.from_euler(Vector3(0.0, rng.randf() * TAU, 0.0)).scaled(
+				Vector3(s, rng.randf_range(0.85, 1.15), s))
+			return Transform3D(basis, Vector3(local.x, _surface_height(world), local.y)))
 	_batch_mm(chunk, "StreamTrees", _tree_mesh, null, transforms, true)
 
 func _build_rocks_and_bushes(chunk: Node3D, min_world: Vector3,
 		rng: RandomNumberGenerator) -> void:
-	var rock_transforms: Array[Transform3D] = []
 	var rock_count := rng.randi_range(8, 14)
-	for i in rock_count:
-		var local := Vector2(rng.randf(), rng.randf()) * CHUNK_SIZE
-		var world := Vector2(min_world.x + local.x, min_world.z + local.y)
-		if _clearance_blocks(world):
-			continue
-		var s := rng.randf_range(0.35, 1.0)
-		var basis := Basis.from_euler(Vector3(rng.randf_range(-0.2, 0.2),
-			rng.randf() * TAU, rng.randf_range(-0.2, 0.2))).scaled(
-			Vector3(s, rng.randf_range(0.5, 0.85), s))
-		rock_transforms.append(Transform3D(basis,
-			Vector3(local.x, _surface_height(world) + 0.05, local.y)))
+	var rock_transforms := _fill_scatter(rock_count, min_world, rng,
+		func(local: Vector2, world: Vector2) -> Transform3D:
+			var s := rng.randf_range(0.35, 1.0)
+			var basis := Basis.from_euler(Vector3(rng.randf_range(-0.2, 0.2),
+				rng.randf() * TAU, rng.randf_range(-0.2, 0.2))).scaled(
+				Vector3(s, rng.randf_range(0.5, 0.85), s))
+			return Transform3D(basis, Vector3(local.x, _surface_height(world) + 0.05, local.y)))
 	_batch_mm(chunk, "StreamRocks", _rock_mesh, _rock_material, rock_transforms, true)
 
-	var bush_transforms: Array[Transform3D] = []
 	var bush_count := rng.randi_range(5, 11)
-	for i in bush_count:
-		var local := Vector2(rng.randf(), rng.randf()) * CHUNK_SIZE
-		var world := Vector2(min_world.x + local.x, min_world.z + local.y)
-		if _clearance_blocks(world):
-			continue
-		var s := rng.randf_range(0.6, 1.3)
-		var basis := Basis.from_euler(Vector3(0.0, rng.randf() * TAU, 0.0)).scaled(
-			Vector3(s, rng.randf_range(0.7, 1.3), s))
-		bush_transforms.append(Transform3D(basis,
-			Vector3(local.x, _surface_height(world) + 0.02, local.y)))
+	var bush_transforms := _fill_scatter(bush_count, min_world, rng,
+		func(local: Vector2, world: Vector2) -> Transform3D:
+			var s := rng.randf_range(0.6, 1.3)
+			var basis := Basis.from_euler(Vector3(0.0, rng.randf() * TAU, 0.0)).scaled(
+				Vector3(s, rng.randf_range(0.7, 1.3), s))
+			return Transform3D(basis, Vector3(local.x, _surface_height(world) + 0.02, local.y)))
 	_batch_mm(chunk, "StreamBushes", _bush_mesh, _bush_material, bush_transforms, true)
 
 func _build_deadwood(chunk: Node3D, min_world: Vector3,
@@ -1219,14 +1277,9 @@ func _build_ruins(chunk: Node3D, min_world: Vector3, rng: RandomNumberGenerator)
 			rng.randf_range(-1.6, 1.6) * (wall_count - i))
 		wall.rotation.y = rng.randf() * TAU
 		group.add_child(wall)
-	var floor_box := MeshInstance3D.new()
-	floor_box.name = "RuinFloor"
-	var floor_mesh := BoxMesh.new()
-	floor_mesh.size = Vector3(3.4, 0.16, 3.0)
-	floor_box.mesh = floor_mesh
-	floor_box.material_override = _stone_material
-	floor_box.position = anchor + Vector3(0.0, 0.08, 0.0)
-	group.add_child(floor_box)
+	# Ruins sit directly on the streamed terrain.  A flat BoxMesh floor makes
+	# an isolated square patch at chunk distance and exposes the terrain tile
+	# boundary to the camera.
 	## Scattered bones and a charred beam.
 	for b in rng.randi_range(4, 7):
 		var bone := MeshInstance3D.new()
@@ -1310,11 +1363,12 @@ func get_chunk_count() -> int:
 
 func get_tier_spec() -> Dictionary:
 	return {
-		"radius": float(_tier["radius"]),
+		"radius": _effective_world_radius(),
 		"near": _near_spacing(),
 		"far": float(_tier["far"]),
 		"near_zone": NEAR_ZONE,
 		"density": _grass_density,
+		"view_scale": _world_view_scale(),
 	}
 
 func get_runtime_diagnostics() -> Dictionary:
@@ -1343,5 +1397,6 @@ func get_runtime_diagnostics() -> Dictionary:
 		"grass_by_band": grass_by_band,
 		"last_generation_ms": float(_last_generation_usec) / 1000.0,
 		"resident_far_fill": grass_by_band["far"] > 0,
-		"quality_radius": float(_tier["radius"]),
+		"quality_radius": _effective_world_radius(),
+		"world_view_scale": _world_view_scale(),
 	}

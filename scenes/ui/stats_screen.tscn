@@ -1,16 +1,26 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
-[ext_resource type="Script" path="res://scripts/ui/stats_screen.gd" id="1_0"]
+[ext_resource type="Script" path="res://scripts/ui/stats_screen.gd" id="1_screen"]
+[ext_resource type="Script" path="res://scripts/ui/stats_panel.gd" id="2_stats"]
 
 [node name="StatsScreen" type="CanvasLayer"]
 layer = 22
-script = ExtResource("1_0")
+visible = false
+script = ExtResource("1_screen")
 
-[node name="Root" type="ColorRect" parent="."]
+[node name="Root" type="Control" parent="."]
+layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-color = Color(0.002, 0.006, 0.005, 0.90)
+
+[node name="Dim" type="ColorRect" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+color = Color(0.002, 0.006, 0.005, 0.88)
 
 [node name="Center" type="CenterContainer" parent="Root"]
 layout_mode = 1
@@ -18,65 +28,56 @@ anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 
-[node name="Panel" type="PanelContainer" parent="Root/Center"]
-custom_minimum_size = Vector2(740, 560)
+[node name="Panel" type="Panel" parent="Root/Center"]
+custom_minimum_size = Vector2(740, 680)
+layout_mode = 2
+
+[node name="Header" type="Control" parent="Root/Center/Panel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 0.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = 84.0
+grow_horizontal = 2
+
+[node name="Title" type="Label" parent="Root/Center/Panel/Header"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_right = -130.0
+grow_horizontal = 2
+theme_type_variation = &"MenuTitle"
+text = "STATS"
+
+[node name="CloseButton" type="Button" parent="Root/Center/Panel/Header"]
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -110.0
+grow_horizontal = 0
+custom_minimum_size = Vector2(110, 56)
+focus_mode = 0
+text = "CLOSE"
+tooltip_text = "Close stats"
+theme_override_font_sizes/font_size = 16
 
 [node name="VBox" type="VBoxContainer" parent="Root/Center/Panel"]
-theme_override_constants/separation = 12
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 98.0
+offset_right = -24.0
+offset_bottom = -24.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
 
-[node name="Header" type="Label" parent="Root/Center/Panel/VBox"]
+[node name="StatsPanel" type="VBoxContainer" parent="Root/Center/Panel/VBox"]
 layout_mode = 2
-theme_type_variation = &"MenuTitle"
-text = "EMBERSONA — LV 01"
-horizontal_alignment = 1
-
-[node name="PointsLabel" type="Label" parent="Root/Center/Panel/VBox"]
-layout_mode = 2
-theme_type_variation = &"RowLabel"
-text = "Unspent stat points: 0"
-horizontal_alignment = 1
-
-[node name="Currencies" type="Label" parent="Root/Center/Panel/VBox"]
-layout_mode = 2
-theme_type_variation = &"Body"
-text = "HP 34/34 · GOLD 30 · DIAMONDS 0"
-horizontal_alignment = 1
-
-[node name="SoftCapNote" type="Label" parent="Root/Center/Panel/VBox"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.68, 0.72, 0.64, 1)
-theme_override_font_sizes/font_size = 12
-text = "FIRST 20 POINTS: FULL VALUE  ·  AFTER 20: 50% EFFECTIVE VALUE"
-horizontal_alignment = 1
-autowrap_mode = 2
-
-[node name="Rows" type="GridContainer" parent="Root/Center/Panel/VBox"]
-layout_mode = 2
-columns = 4
-theme_override_constants/h_separation = 14
-theme_override_constants/v_separation = 10
-
-[node name="Footer" type="HBoxContainer" parent="Root/Center/Panel/VBox"]
-layout_mode = 2
-alignment = 1
-theme_override_constants/separation = 18
-
-[node name="Confirm" type="Button" parent="Root/Center/Panel/VBox/Footer"]
-custom_minimum_size = Vector2(190, 60)
-layout_mode = 2
-text = "CONFIRM"
-disabled = true
-theme_override_font_sizes/font_size = 20
-
-[node name="Reset" type="Button" parent="Root/Center/Panel/VBox/Footer"]
-custom_minimum_size = Vector2(160, 60)
-layout_mode = 2
-text = "RESET"
-disabled = true
-theme_override_font_sizes/font_size = 20
-
-[node name="Close" type="Button" parent="Root/Center/Panel/VBox/Footer"]
-custom_minimum_size = Vector2(160, 60)
-layout_mode = 2
-text = "CLOSE"
-theme_override_font_sizes/font_size = 20
+size_flags_vertical = 3
+script = ExtResource("2_stats")

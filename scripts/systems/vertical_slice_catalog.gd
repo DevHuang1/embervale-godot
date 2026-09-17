@@ -33,9 +33,9 @@ const SET: Dictionary = {
 		{"id": "thorn_charger", "scene": "res://scenes/entities/thorn_charger.tscn", "role": "disruptor"},
 	],
 	"boss": {
-		"id": "bramblewood_thornwarden",
-		"scene": "res://scenes/entities/boss_bramblewood_thornwarden.tscn",
-		"reward_id": "bramblewood_thornwarden",
+		"id": "whispergrove_root_harrow",
+		"scene": "res://scenes/entities/boss_articulated.tscn",
+		"reward_id": "whispergrove_root_harrow",
 	},
 	"realm_kit": {
 		"id": "whispergrove",

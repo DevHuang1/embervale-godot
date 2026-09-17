@@ -12,16 +12,42 @@ offset_right = 1080.0
 offset_bottom = 1920.0
 color = Color(0.01, 0.02, 0.02, 0.86)
 
-[node name="Root" type="PanelContainer" parent="."]
+[node name="Root" type="Panel" parent="."]
 offset_left = 60.0
 offset_top = 130.0
 offset_right = 1020.0
 offset_bottom = 1790.0
 
 [node name="VBox" type="VBoxContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 98.0
+offset_right = -24.0
+offset_bottom = -24.0
+grow_horizontal = 2
+grow_vertical = 2
 theme_override_constants/separation = 18
 
-[node name="Title" type="Label" parent="Root/VBox"]
+[node name="Header" type="Control" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 0.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = 84.0
+grow_horizontal = 2
+
+[node name="Title" type="Label" parent="Root/Header"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_right = -220.0
+grow_horizontal = 2
 text = "LANTERN CAMP · LEVEL 1"
 theme_type_variation = &"MenuTitle"
 
@@ -40,6 +66,11 @@ theme_override_constants/separation = 12
 text = ""
 horizontal_alignment = 1
 
-[node name="Close" type="Button" parent="Root/VBox"]
-text = "RETURN TO ROUTE"
+[node name="Close" type="Button" parent="Root/Header"]
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -190.0
+grow_horizontal = 0
+text = "CLOSE"
 custom_minimum_size = Vector2(0, 64)

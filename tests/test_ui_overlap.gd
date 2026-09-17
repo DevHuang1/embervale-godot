@@ -37,7 +37,10 @@ func _audit(scene: Node, paths: Array, label: String) -> int:
 		if n == null:
 			print("FAIL: missing node ", p)
 			return 1
-		nodes.append(n)
+		# Hidden overlays can share a staging band safely; only rendered controls
+		# participate in the visual overlap audit.
+		if n.is_visible_in_tree():
+			nodes.append(n)
 	await _frames(4)
 	for i in nodes.size():
 		for j in range(i + 1, nodes.size()):
@@ -53,8 +56,10 @@ func _audit(scene: Node, paths: Array, label: String) -> int:
 
 func _is_exclusive(scene: Node, a: Control, b: Control) -> bool:
 	for pair in EXCLUSIVE_PAIRS:
-		var na := scene.get_node(pair[0]) as Control
-		var nb := scene.get_node(pair[1]) as Control
+		var na := scene.get_node_or_null(pair[0]) as Control
+		var nb := scene.get_node_or_null(pair[1]) as Control
+		if na == null or nb == null:
+			continue
 		if (na == a and nb == b) or (na == b and nb == a):
 			return true
 	return false

@@ -24,8 +24,10 @@ var tap_threshold: float = 0.3
 var world_gesture_active: bool = false  # true while two-finger camera gesture
 var first_person_active: bool = false   # true while CameraRig drives a 1-finger free-look
 var active_camera: Camera3D = null
+var active_camera_controller: Node = null
 var held_move_keys: Dictionary = {}
 var _drag_samples: Dictionary = {}  # index -> {speed: float, dir: Vector2}
+var _drag_start_positions: Dictionary = {}  # pointer id -> screen position
 var _joystick_pointer_ids: Dictionary = {}
 var _first_person_look_pointer: int = -1
 const SETTINGS_PATH := "user://settings.cfg"
@@ -146,6 +148,7 @@ func _handle_joystick_pointer(pointer_id: int, pressed: bool) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		clear_joystick_pointers()
+		_drag_start_positions.clear()
 		_first_person_look_pointer = -1
 		world_gesture_active = false
 
@@ -196,6 +199,7 @@ func _handle_touch(event: InputEventScreenTouch) -> void:
 			# interaction, or a dodge flick.
 			begin_first_person_look(event.index)
 			return
+		_drag_start_positions[event.index] = event.position
 		_drag_samples[event.index] = {"speed": 0.0, "dir": Vector2.ZERO, "time": Time.get_ticks_msec() / 1000.0}
 		if now - last_tap_time < tap_threshold:
 			interact_pressed.emit()
@@ -206,6 +210,7 @@ func _handle_touch(event: InputEventScreenTouch) -> void:
 		else:
 			last_tap_time = now
 	else:
+		_drag_start_positions.erase(event.index)
 		if first_person_active:
 			end_first_person_look(event.index)
 			return
@@ -248,11 +253,28 @@ func _handle_drag(event: InputEventScreenDrag) -> void:
 		# dodge input, even when the drag is fast.
 		return
 	var relative := event.relative
+	if _camera_consumes_world_drag(event):
+		# A horizontal drag on the camera side of the world is an orbit gesture,
+		# not player steering. Emit a stop so an earlier movement sample cannot
+		# keep the hero sliding while the player pans the view.
+		move_input.emit(Vector2.ZERO)
+		return
 	if relative.length() > touch_deadzone:
 		move_input.emit(relative.normalized())
 		_track_drag_sample(event, relative)
 	else:
 		move_input.emit(Vector2.ZERO)
+
+func _camera_consumes_world_drag(event: InputEventScreenDrag) -> bool:
+	if active_camera_controller == null or not is_instance_valid(active_camera_controller):
+		return false
+	if not active_camera_controller.has_method("consume_world_drag"):
+		return false
+	var start_position := event.position
+	if _drag_start_positions.has(event.index):
+		start_position = _drag_start_positions[event.index]
+	return bool(active_camera_controller.call("consume_world_drag", start_position,
+		event.relative))
 
 func _track_drag_sample(event: InputEventScreenDrag, relative: Vector2) -> void:
 	if relative.length() <= touch_deadzone:
@@ -283,8 +305,9 @@ func _handle_mouse(event: InputEventMouseButton) -> void:
 func _handle_mouse_motion(event: InputEventMouseMotion) -> void:
 	pass
 
-func set_active_camera(camera: Camera3D) -> void:
+func set_active_camera(camera: Camera3D, controller: Node = null) -> void:
 	active_camera = camera
+	active_camera_controller = controller
 
 func emit_world_tap(screen_pos: Vector2, camera: Camera3D) -> void:
 	var from = camera.project_ray_origin(screen_pos)

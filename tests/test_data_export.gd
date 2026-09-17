@@ -1,13 +1,25 @@
 extends SceneTree
 
 const GAME_STATE_SCRIPT := preload("res://scripts/autoload/game_state.gd")
+const STORE_SECURITY := preload("res://scripts/systems/store_security.gd")
 
 func _initialize() -> void:
 	var state := GAME_STATE_SCRIPT.new()
 	state.record_activity("TEST EVENT")
 	state.purchase_ledger.append({"id": "cosmetic_test", "kind": "cosmetic_trail",
 		"price": 10, "currency": "diamonds"})
+	state.purchase_ledger.append({
+		"id": "ember_cache", "kind": "provider_embermarks", "price": 180,
+		"currency": "diamonds", "provider": "revenuecat",
+		"provider_record_id": "revenuecat:embermarks_cache:one_time",
+		"provider_entitlement": "embermarks_cache", "provider_expires_at": -1})
 	var payload: Dictionary = state.build_data_export()
+	# A support diagnostic must never carry a credential or provider secret.
+	var serialized := JSON.stringify(payload)
+	if not STORE_SECURITY.find_secret_leaks(serialized).is_empty():
+		push_error("Support export contains a secret-shaped value")
+		quit(1)
+		return
 	var settings_source := FileAccess.get_file_as_string("res://scripts/ui/settings_menu.gd")
 	if not settings_source.contains("local reset clears this device's progress only"):
 		push_error("Settings does not explain local reset versus provider ownership")

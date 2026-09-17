@@ -42,6 +42,10 @@ func _run() -> void:
 	if not is_equal_approx(scaler.grass_density_scale, 1.0):
 		failures += 1
 		print("FAIL: HIGH should use the full grass-carpet density")
+	if scaler.world_view_mode != QualityScaler.WorldView.FULL \
+			or not is_equal_approx(scaler.get_world_view_scale(), 1.0):
+		failures += 1
+		print("FAIL: default desktop world view should be FULL")
 	if not scaler.budget_is_bounded():
 		failures += 1
 		print("FAIL: HIGH presentation budget exceeds the production cap")
@@ -91,9 +95,33 @@ func _run() -> void:
 	if not is_equal_approx(scaler.grass_density_scale, 0.65):
 		failures += 1
 		print("FAIL: LOW should retain a reduced grass carpet")
+	scaler.set_world_view_mode(QualityScaler.WorldView.REDUCED)
+	if scaler.world_view_mode != QualityScaler.WorldView.REDUCED \
+			or not is_equal_approx(scaler.get_world_view_scale(), 0.45):
+		failures += 1
+		print("FAIL: REDUCED world view should shrink presentation distance")
 	if not scaler.budget_is_bounded():
 		failures += 1
 		print("FAIL: LOW presentation budget exceeds the production cap")
+
+	# --- Reduced world view clips presentation distance and restores authored far ---
+	var view_stage := Node3D.new()
+	view_stage.name = "WorldViewStage"
+	root.add_child(view_stage)
+	var view_camera := Camera3D.new()
+	view_camera.far = 700.0
+	view_stage.add_child(view_camera)
+	current_scene = view_stage
+	scaler.set_world_view_mode(QualityScaler.WorldView.REDUCED)
+	if not is_equal_approx(view_camera.far, QualityScaler.REDUCED_CAMERA_FAR):
+		failures += 1
+		print("FAIL: REDUCED world view should shorten the camera far clip")
+	scaler.set_world_view_mode(QualityScaler.WorldView.FULL)
+	if not is_equal_approx(view_camera.far, 700.0):
+		failures += 1
+		print("FAIL: FULL world view should restore the authored camera far clip")
+	current_scene = null
+	view_stage.free()
 
 	# --- Medium retains an explicit bounded middle tier ---
 	scaler.set_mode(QualityScaler.Mode.AUTO)
@@ -151,6 +179,7 @@ func _run() -> void:
 		print("FAIL: mid-band fps must not change level")
 
 	# --- Mode persists into the shared settings cfg and loads back ---
+	scaler.set_world_view_mode(QualityScaler.WorldView.REDUCED)
 	scaler.set_mode(QualityScaler.Mode.LOW)
 	var reread := QualityScaler.new()
 	reread.settings_path = scaler.settings_path
@@ -158,7 +187,12 @@ func _run() -> void:
 	if reread.mode != QualityScaler.Mode.LOW:
 		failures += 1
 		print("FAIL: mode should persist across instances")
+	reread._load_extra_settings()
+	if reread.world_view_mode != QualityScaler.WorldView.REDUCED:
+		failures += 1
+		print("FAIL: world view should persist across instances")
 	reread.free()
+	scaler.set_world_view_mode(QualityScaler.WorldView.FULL)
 	scaler.set_mode(QualityScaler.Mode.AUTO)
 
 	if failures == 0:

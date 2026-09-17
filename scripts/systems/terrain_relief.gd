@@ -1,6 +1,8 @@
 extends Node3D
 class_name TerrainRelief
 
+const LAYOUT := preload("res://scripts/world/realm_layout_data.gd")
+
 ## === Terrain Relief ===
 ## Runtime heightmapped ground: replaces the flat PlaneMesh with a
 ## ridged ArrayMesh, rolling interior swells, and flattened gameplay
@@ -46,6 +48,7 @@ var _flatten_points: Array[Vector2] = [
 	Vector2(-10.0, -17.0),  # Mountain cache chest (ridge foot)
 	Vector2(19.0, -16.0),   # Embervault cave entrance (ridge foot)
 ]
+var _boss_anchor_points: Array[Vector2] = []
 
 ## Per-realm ground palettes for terrain_ground.gdshader. Every explorable
 ## realm gets a distinct underfoot read: grass/dirt/stone families plus a
@@ -61,7 +64,9 @@ const REALM_TERRAIN := {
 		"stone_color": Color(0.38, 0.38, 0.35),
 		"crest_color": Color(0.45, 0.44, 0.40),
 "accent_color": Color(0.96, 0.72, 0.29),
-			"accent_strength": 0.35, "realm_tint": Color(0.88, 1.0, 0.72),
+			# Ground-grid accent flecks are disabled: their cell edges read as
+			# square cards on the mobile/compatibility renderer.
+			"accent_strength": 0.0, "realm_tint": Color(0.88, 1.0, 0.72),
 			"realm_tint_strength": 0.16, "moisture_strength": 0.12,
 			"moss_color": Color(0.20, 0.52, 0.22), "moss_strength": 0.34,
 			"terrain_brightness": 1.18, "uv_world_scale": 0.15, "tex_gain": 1.34,
@@ -74,7 +79,7 @@ const REALM_TERRAIN := {
 		"stone_color": Color(0.40, 0.40, 0.37),
 		"crest_color": Color(0.47, 0.46, 0.42),
 "accent_color": Color(1.00, 0.86, 0.45),
-			"accent_strength": 0.22, "realm_tint": Color(0.76, 0.98, 0.82),
+			"accent_strength": 0.0, "realm_tint": Color(0.76, 0.98, 0.82),
 			"realm_tint_strength": 0.22, "moisture_strength": 0.28,
 			"moss_color": Color(0.28, 0.72, 0.40), "moss_strength": 0.58,
 			"terrain_brightness": 1.20, "uv_world_scale": 0.14, "tex_gain": 1.32,
@@ -87,7 +92,7 @@ const REALM_TERRAIN := {
 		"crest_color": Color(0.36, 0.41, 0.43),
 		"dirt_amount": 0.78, "sand_amount": 0.18,
 "accent_color": Color(0.55, 0.85, 1.00),
-			"accent_strength": 0.28, "realm_tint": Color(0.54, 0.78, 0.82),
+			"accent_strength": 0.0, "realm_tint": Color(0.54, 0.78, 0.82),
 			"realm_tint_strength": 0.30, "moisture_strength": 0.86,
 			"moss_color": Color(0.22, 0.62, 0.58), "moss_strength": 0.48,
 			"terrain_brightness": 1.12, "uv_world_scale": 0.15, "tex_gain": 1.38,
@@ -100,7 +105,7 @@ const REALM_TERRAIN := {
 		"stone_color": Color(0.30, 0.26, 0.24),
 		"crest_color": Color(0.38, 0.31, 0.26),
 "accent_color": Color(1.00, 0.45, 0.12),
-			"accent_strength": 0.50, "realm_tint": Color(1.0, 0.62, 0.34),
+			"accent_strength": 0.0, "realm_tint": Color(1.0, 0.62, 0.34),
 			"realm_tint_strength": 0.20, "moisture_strength": 0.08,
 			"moss_color": Color(0.48, 0.20, 0.08), "moss_strength": 0.22,
 			"terrain_brightness": 1.16, "uv_world_scale": 0.14, "tex_gain": 1.36,
@@ -113,7 +118,7 @@ const REALM_TERRAIN := {
 		"stone_color": Color(0.22, 0.20, 0.30),
 		"crest_color": Color(0.28, 0.25, 0.38),
 "accent_color": Color(0.45, 0.72, 1.00),
-			"accent_strength": 0.55, "realm_tint": Color(0.58, 0.46, 1.0),
+			"accent_strength": 0.0, "realm_tint": Color(0.58, 0.46, 1.0),
 			"realm_tint_strength": 0.34, "moisture_strength": 0.42,
 			"moss_color": Color(0.30, 0.22, 0.62), "moss_strength": 0.34,
 			"terrain_brightness": 1.14, "uv_world_scale": 0.15, "tex_gain": 1.35,
@@ -124,9 +129,21 @@ const REALM_TERRAIN := {
 
 ## POM tiers: LOW off, MEDIUM single-step offset, HIGH short 4-step march.
 const POM_BY_LEVEL := [0, 1, 2]
+const DESKTOP_TERRAIN_SHADER := "res://assets/shaders/terrain_ground.gdshader"
+const MOBILE_TERRAIN_SHADER := "res://assets/shaders/terrain_ground_mobile.gdshader"
+## Static references guarantee these low-cost Android albedo resources remain
+## in the PCK even though the full desktop layer set is selected dynamically.
+const MOBILE_TERRAIN_TEXTURES := {
+	"grass": preload("res://assets/textures/stylized/grass_v2/albedo.png"),
+	"dirt": preload("res://assets/textures/stylized/dirt/albedo.png"),
+	"sand": preload("res://assets/textures/stylized/sand_v2/albedo.png"),
+	"rock": preload("res://assets/textures/stylized/rock/albedo.png"),
+}
 
 func _ready() -> void:
 	add_to_group("terrain_relief")
+	_register_layout_boss_anchors()
+	_register_layout_content_anchors()
 	terrain_mesh.mesh = _build_mesh()
 	terrain_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	var ground := _load_realm_material()
@@ -138,10 +155,17 @@ func _ready() -> void:
 		qs.level_changed.connect(_on_quality_level)
 		_on_quality_level(qs.level)
 
+func _is_mobile_runtime() -> bool:
+	return OS.has_feature("mobile") or OS.get_name() in ["Android", "iOS"]
+
 ## Realm material from assets/materials/terrain_<realm>.tres (binds the
 ## stylized PBR layer sets); falls back to a bare shader material so the
 ## palette override below still produces valid ground.
 func _load_realm_material() -> ShaderMaterial:
+	if _is_mobile_runtime():
+		var mobile_ground := ShaderMaterial.new()
+		mobile_ground.shader = load(MOBILE_TERRAIN_SHADER) as Shader
+		return mobile_ground
 	var realm := _realm_id()
 	for path in ["res://assets/materials/terrain_%s.tres" % realm,
 			"res://assets/materials/terrain_bramblewood.tres"]:
@@ -153,10 +177,10 @@ func _load_realm_material() -> ShaderMaterial:
 				# sampled albedo, macro breakup, slope masks, and mobile tier gates.
 				# The experimental layer compositor remains available for tests and
 				# later A/B work, but must not silently flatten the player-facing map.
-				mat.shader = load("res://assets/shaders/terrain_ground.gdshader")
+				mat.shader = load(DESKTOP_TERRAIN_SHADER) as Shader
 				return mat
 	var ground := ShaderMaterial.new()
-	ground.shader = load("res://assets/shaders/terrain_ground.gdshader")
+	ground.shader = load(DESKTOP_TERRAIN_SHADER) as Shader
 	return ground
 
 func _apply_palette(ground: ShaderMaterial) -> void:
@@ -196,6 +220,7 @@ func _apply_palette(ground: ShaderMaterial) -> void:
 	ground.set_shader_parameter("moss_strength", maxf(float(pal.get("moss_strength", 0.0)), 0.42))
 
 func _bind_ground_texture_layers(ground: ShaderMaterial) -> void:
+	var mobile := _is_mobile_runtime()
 	var layers := {
 		"grass": "grass",
 		"dirt": "dirt",
@@ -207,43 +232,76 @@ func _bind_ground_texture_layers(ground: ShaderMaterial) -> void:
 		var layer_name := str(layers[layer_value])
 		var v2_root := "res://assets/textures/stylized/%s_v2" % layer_name
 		var root := v2_root if ResourceLoader.exists("%s/albedo.png" % v2_root) else "res://assets/textures/stylized/%s" % layer_name
-		ground.set_shader_parameter("%s_tex" % layer, load("%s/albedo.png" % root))
-		ground.set_shader_parameter("%s_norm" % layer, load("%s/normal.png" % root))
-		ground.set_shader_parameter("%s_rough" % layer, load("%s/roughness.png" % root))
+		var albedo := _mobile_texture(layer) if mobile \
+			else _load_texture(root, "albedo")
+		if albedo != null:
+			ground.set_shader_parameter("%s_tex" % layer, albedo)
+		if mobile:
+			continue
+		var normal := _load_texture(root, "normal")
+		var roughness := _load_texture(root, "roughness")
+		if normal != null:
+			ground.set_shader_parameter("%s_norm" % layer, normal)
+		if roughness != null:
+			ground.set_shader_parameter("%s_rough" % layer, roughness)
+	if mobile:
+		return
 	for layer_name in ["moss", "mud"]:
 		var root := "res://assets/textures/stylized/%s_v2" % layer_name
 		if not ResourceLoader.exists("%s/albedo.png" % root):
 			root = "res://assets/textures/stylized/%s" % layer_name
-		ground.set_shader_parameter("%s_tex" % layer_name,
-			load("%s/albedo.png" % root))
-		ground.set_shader_parameter("%s_norm" % layer_name,
-			load("%s/normal.png" % root))
-		ground.set_shader_parameter("%s_rough" % layer_name,
-			load("%s/roughness.png" % root))
+		var albedo := _load_texture(root, "albedo")
+		var normal := _load_texture(root, "normal")
+		var roughness := _load_texture(root, "roughness")
+		if albedo != null:
+			ground.set_shader_parameter("%s_tex" % layer_name, albedo)
+		if normal != null:
+			ground.set_shader_parameter("%s_norm" % layer_name, normal)
+		if roughness != null:
+			ground.set_shader_parameter("%s_rough" % layer_name, roughness)
+
+func _load_texture(root: String, channel: String) -> Texture2D:
+	var path := "%s/%s.png" % [root, channel]
+	if not ResourceLoader.exists(path):
+		return null
+	return load(path) as Texture2D
+
+func _mobile_texture(layer: String) -> Texture2D:
+	return MOBILE_TERRAIN_TEXTURES.get(layer) as Texture2D
 
 func _on_quality_level(level: int) -> void:
 	var ground := terrain_mesh.material_override as ShaderMaterial
 	if ground == null or not ground.shader:
 		return
 	var idx := clampi(level, 0, POM_BY_LEVEL.size() - 1)
-	ground.set_shader_parameter("pom_mode", POM_BY_LEVEL[idx])
+	if "pom_mode" in ground.shader.code:
+		ground.set_shader_parameter("pom_mode", POM_BY_LEVEL[idx])
 
 ## Realm id for this map: biome scenes carry biome_id; Moonfen's manager
 ## doesn't, so fall back to the current travel realm.
 func _realm_id() -> String:
-	var gs := get_node_or_null("/root/GameState")
-	var active_realm := str(gs.get("current_realm")) if gs != null else ""
-	# Whispergrove and Bramblewood intentionally share grove.tscn. Preserve
-	# the active travel identity instead of letting the scene's bramblewood
-	# biome_id erase Whispergrove's softer visual profile.
-	if active_realm == "whispergrove":
-		return active_realm
 	var world_root := get_parent()
-	if world_root != null and "biome_id" in world_root:
-		return str(world_root.get("biome_id"))
-	if gs != null:
-		return active_realm
-	return "bramblewood"
+	return LAYOUT.visual_realm_for(world_root)
+
+func _register_layout_boss_anchors() -> void:
+	_boss_anchor_points.clear()
+	for anchor in LAYOUT.boss_anchor_points_for_world(get_parent()):
+		if _boss_anchor_points.has(anchor):
+			continue
+		_boss_anchor_points.append(anchor)
+		if not _flatten_points.has(anchor):
+			_flatten_points.append(anchor)
+
+## Level the ground under every authored route, gate, chest, gathering node,
+## set-piece, pocket and structure the realm profile declares. The hardcoded
+## gameplay list above only covers fixed scene nodes (spawn, summon points,
+## quest board); everything that moves with layout data is derived here so
+## terrain, content and streaming cannot drift apart.
+func _register_layout_content_anchors() -> void:
+	for anchor in LAYOUT.flatten_anchors_for_world(get_parent()):
+		if _flatten_points.has(anchor):
+			continue
+		_flatten_points.append(anchor)
 
 func height_at(x: float, z: float) -> float:
 	var p := Vector2(x, z)
@@ -366,7 +424,11 @@ func _flatten_mask(p: Vector2) -> float:
 
 ## Public anchor list for prop placement: the flattened gameplay zones.
 func prop_anchor_points() -> Array[Vector2]:
-	return _flatten_points
+	var result: Array[Vector2] = []
+	for anchor in _flatten_points:
+		if not _boss_anchor_points.has(anchor):
+			result.append(anchor)
+	return result
 
 func _build_mesh() -> ArrayMesh:
 	var n := clampi(subdivisions, 32, 254)

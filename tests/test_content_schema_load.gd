@@ -29,5 +29,34 @@ func _run() -> void:
 		quit(1)
 		return
 	gs.delete_save()
+
+	# A veteran save that stored only the equipped starter weapon (no forge
+	# ledger entry) must gain it on load so it can be upgraded and salvaged.
+	var legacy_path := "/tmp/embervale_legacy_starter_weapon.cfg"
+	gs.save_path = legacy_path
+	gs.delete_save()
+	var legacy := ConfigFile.new()
+	legacy.set_value("meta", "schema_version", 4)
+	legacy.set_value("progress", "forged_weapons", [])
+	legacy.set_value("progress", "equipped_weapon", {"id": "mug_mace"})
+	if legacy.save(legacy_path) != OK or not gs.load_game():
+		push_error("Starter-weapon-only save could not be loaded")
+		quit(1)
+		return
+	if not gs.forged_weapons.any(func(w): return str(w.get("id", "")) == "mug_mace"):
+		push_error("Equipped starter weapon was not adopted into the forge ledger")
+		quit(1)
+		return
+	var adopted: Dictionary = {}
+	for weapon in gs.forged_weapons:
+		if str(weapon.get("id", "")) == "mug_mace":
+			adopted = weapon
+			break
+	if str(adopted.get("name", "")).is_empty() or int(adopted.get("atk", 0)) <= 0:
+		push_error("Adopted starter weapon was not normalized from its def")
+		quit(1)
+		return
+	gs.delete_save()
+	gs.save_path = path
 	print("ALL CONTENT SCHEMA LOAD TESTS PASSED")
 	quit()

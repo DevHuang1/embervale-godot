@@ -20,6 +20,7 @@ extends Node
 ##   RewardManager.check_daily_bonus()
 
 signal reward_granted(summary: Dictionary)   # { gold, xp, diamonds, items, materials, loot_context }
+signal quest_reward_granted(completion_id: String, title: String, summary: Dictionary)
 signal level_up_triggered(new_level: int)
 signal first_kill_reward(boss_id: String, diamonds: int)
 signal boss_reward_choice_available(boss_id: String, choices: Array)
@@ -27,12 +28,45 @@ signal daily_bonus_granted(streak: int, gold: int)
 
 const XP_PER_LEVEL_BASE := 100
 const XP_SCALE           := 1.35   # each level needs 35% more XP
+const OBJECTIVE_REWARD_DROPS := {
+	"kill": [
+		{"type": "gold", "id": "", "quantity": 20, "rarity": 0},
+		{"type": "xp", "id": "", "quantity": 35, "rarity": 0},
+	],
+	"gather": [
+		{"type": "gold", "id": "", "quantity": 12, "rarity": 0},
+		{"type": "xp", "id": "", "quantity": 20, "rarity": 0},
+	],
+	"reach": [
+		{"type": "gold", "id": "", "quantity": 20, "rarity": 0},
+		{"type": "xp", "id": "", "quantity": 30, "rarity": 0},
+	],
+	"craft": [
+		{"type": "gold", "id": "", "quantity": 18, "rarity": 0},
+		{"type": "xp", "id": "", "quantity": 30, "rarity": 0},
+	],
+	"equip": [
+		{"type": "gold", "id": "", "quantity": 15, "rarity": 0},
+		{"type": "xp", "id": "", "quantity": 25, "rarity": 0},
+	],
+	"upgrade": [
+		{"type": "gold", "id": "", "quantity": 25, "rarity": 0},
+		{"type": "xp", "id": "", "quantity": 45, "rarity": 0},
+	],
+	"open_chest": [
+		{"type": "gold", "id": "", "quantity": 10, "rarity": 0},
+		{"type": "xp", "id": "", "quantity": 15, "rarity": 0},
+	],
+}
 
 @onready var _gs : Node = get_node_or_null("/root/GameState")
 
 func _ready() -> void:
-	# Check daily bonus on game start
-	call_deferred("check_daily_bonus")
+	# The menu triggers this after GameState has loaded or reset the selected
+	# profile. RewardManager never reads or writes the save file directly.
+	if _gs != null and _gs.has_signal("objective_completed") \
+			and not _gs.objective_completed.is_connected(_on_objective_completed):
+		_gs.objective_completed.connect(_on_objective_completed)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Enemy kill
@@ -66,10 +100,20 @@ func grant_boss_kill(boss_id: String, first_kill: bool, realm_id: String = "bram
 		_gs.call("record_activity", "BOSS DEFEATED · %s · %s" % [boss_id, realm_id])
 	var table : LootTable
 	match boss_id:
-		"hushling_matriarch", "moonfen_matriarch", "bramblewood_thornwarden":
-			table = LootTable.boss_matriarch()
-		_:
-			table = LootTable.chest_boss()
+		"hushling_matriarch":       table = LootTable.boss_matriarch()
+		"bramblewood_thornwarden":  table = LootTable.boss_bramblewood()
+		"mistfen_siltcrawler":      table = LootTable.boss_mistfen()
+		"heartwood_cindercolossus": table = LootTable.boss_heartwood()
+		"moonfen_voidweaver":       table = LootTable.boss_moonfen()
+		"whispergrove_root_harrow", "boss_whispergrove_root_harrow": table = LootTable.boss_matriarch()
+		"bramblewood_thorn_regent", "bramblewood_briar_widow", \
+		"biome_bramblewood_thorn_regent", "biome_bramblewood_briar_widow": table = LootTable.boss_bramblewood()
+		"mistfen_fogmaw", "biome_mistfen_fogmaw": table = LootTable.boss_mistfen()
+		"heartwood_cinderhart", "heartwood_ash_bellower", \
+		"biome_heartwood_cinderhart", "biome_heartwood_ash_bellower": table = LootTable.boss_heartwood()
+		"moonfen_tide_oracle", "moonfen_lunar_leviathan", \
+		"biome_moonfen_tide_oracle", "biome_moonfen_lunar_leviathan": table = LootTable.boss_moonfen()
+		_:                          table = LootTable.chest_boss()
 
 	var drops := table.roll(realm_id, _current_stage())
 	grant_drops(drops)
@@ -110,33 +154,90 @@ func grant_boss_kill(boss_id: String, first_kill: bool, realm_id: String = "bram
 		_gs.set("boss_first_kills", kills)
 		if _gs.has_method("save_game"):
 			_gs.call("save_game")
+		if _gs.has_method("flush_save"):
+			_gs.call("flush_save")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Chest
 # ─────────────────────────────────────────────────────────────────────────────
 
-func grant_chest(chest_tier: String = "common", realm_id: String = "bramblewood") -> void:
+func grant_chest(chest_tier: String = "common", realm_id: String = "bramblewood",
+		source_id: String = "", source_label: String = "",
+		persistent: bool = false) -> Dictionary:
+	if _gs == null:
+		_gs = get_node_or_null("/root/GameState")
+	if _gs == null:
+		return {}
 	if _gs != null and _gs.has_method("record_activity"):
 		_gs.call("record_activity", "CHEST OPENED · %s · %s" % [chest_tier, realm_id])
+	var drops := roll_chest_drops(chest_tier, realm_id)
+	return grant_drops(drops, {
+		"source": "chest",
+		"source_id": source_id,
+		"source_label": source_label if not source_label.is_empty() else "Chest",
+		"persistent": persistent,
+	})
+
+## Roll a chest table without mutating GameState. Physical-delivery callers
+## (ChestNode) use this so they can persist the exact roll before any grant is
+## applied and spawn one pickup per drop.
+func roll_chest_drops(chest_tier: String = "common",
+		realm_id: String = "bramblewood") -> Array:
 	var table : LootTable
 	match chest_tier:
 		"rare":  table = LootTable.chest_rare()
 		"boss":  table = LootTable.chest_boss()
 		_:       table = LootTable.chest_common()
-	var drops := table.roll(realm_id, _current_stage())
-	grant_drops(drops)
+	return table.roll(realm_id, _current_stage())
+
+## Display-only summary of a chest roll. Shows the full contents for the reveal
+## but never mutates GameState — `preview` tells the HUD not to announce a
+## payout, because the grants happen later as each pickup is collected.
+static func chest_roll_preview(drops: Array) -> Dictionary:
+	var summary: Dictionary = {"gold": 0, "xp": 0, "diamonds": 0,
+		"items": [], "materials": [], "weapons": [], "armors": [],
+		"loot_context": [], "granted": false, "preview": true}
+	for raw in drops:
+		if not raw is Dictionary:
+			continue
+		var drop: Dictionary = raw
+		var did := str(drop.get("id", ""))
+		var qty := int(drop.get("quantity", 1))
+		var rarity := int(drop.get("rarity", 0))
+		match str(drop.get("type", "")):
+			"gold":     summary["gold"] = int(summary["gold"]) + qty
+			"xp":       summary["xp"] = int(summary["xp"]) + qty
+			"diamond":  summary["diamonds"] = int(summary["diamonds"]) + qty
+			"item":     summary["items"].append({"id": did, "qty": qty, "rarity": rarity})
+			"material": summary["materials"].append({"id": did, "qty": qty})
+			"weapon":   summary["weapons"].append({"id": did, "rarity": rarity})
+			"armor":    summary["armors"].append({"id": did, "rarity": rarity})
+	return summary
+
+func announce_chest_roll(chest_tier: String, realm_id: String, source_id: String,
+		source_label: String, drops: Array, persistent: bool) -> void:
+	var summary := chest_roll_preview(drops)
+	summary["source"] = "chest"
+	summary["source_id"] = source_id
+	summary["source_label"] = source_label if not source_label.is_empty() else "Chest"
+	summary["persistent"] = persistent
+	summary["chest_tier"] = chest_tier
+	summary["realm"] = realm_id
+	reward_granted.emit(summary)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Grant drops array (core dispatcher)
 # ─────────────────────────────────────────────────────────────────────────────
 
-func grant_drops(drops: Array) -> void:
+func grant_drops(drops: Array, metadata: Dictionary = {}) -> Dictionary:
 	if _gs == null:
 		_gs = get_node_or_null("/root/GameState")
 	if _gs == null:
-		return
+		return {}
 
-	var summary := { "gold": 0, "xp": 0, "diamonds": 0, "items": [], "materials": [], "weapons": [], "armors": [], "loot_context": [] }
+	var summary: Dictionary = { "gold": 0, "xp": 0, "diamonds": 0,
+		"items": [], "materials": [], "weapons": [], "armors": [],
+		"loot_context": [], "granted": true }
 
 	for drop in drops:
 		var dtype    := str(drop.get("type", "gold"))
@@ -175,27 +276,34 @@ func grant_drops(drops: Array) -> void:
 				_add_loot_context(summary, dtype, did)
 
 			"material":
-				var mats : Dictionary = _gs.get("raw_materials") if _gs.get("raw_materials") != null else {}
-				mats[did] = int(mats.get(did, 0)) + qty
-				_gs.set("raw_materials", mats)
+				# Material rewards must use GameState's canonical mutation boundary so
+				# validation, persistence coalescing, and inventory UI signals stay in
+				# sync. Invalid or non-positive drops are not granted.
+				if qty <= 0 or not GameState.MATERIAL_DEFS.has(did) \
+						or not _gs.has_method("add_material"):
+					continue
+				_gs.call("add_material", did, qty)
 				summary["materials"].append({"id": did, "qty": qty})
 				_add_loot_context(summary, dtype, did)
 
 			"weapon":
-				if not did.is_empty() and _gs.has_method("add_weapon"):
-					var wdefs : Dictionary = _gs.get("WEAPON_DEFS") if _gs.get("WEAPON_DEFS") != null else {}
-					if wdefs.has(did):
-						_gs.call("add_weapon", wdefs[did].duplicate(true), true, "")
-				summary["weapons"].append({"id": did, "rarity": rarity})
-				_add_loot_context(summary, dtype, did)
+				# Constants are not instance properties; read them from the
+				# GameState class directly or the lookup silently yields null and
+				# the weapon is announced without ever being granted.
+				if not did.is_empty() and _gs.has_method("add_weapon") \
+						and GameState.WEAPON_DEFS.has(did):
+					_gs.call("add_weapon",
+						(GameState.WEAPON_DEFS[did] as Dictionary).duplicate(true), true, "")
+					summary["weapons"].append({"id": did, "rarity": rarity})
+					_add_loot_context(summary, dtype, did)
 
 			"armor":
-				if not did.is_empty() and _gs.has_method("add_armor"):
-					var adefs : Dictionary = _gs.get("ARMOR_DEFS") if _gs.get("ARMOR_DEFS") != null else {}
-					if adefs.has(did):
-						_gs.call("add_armor", adefs[did].duplicate(true), true)
-				summary["armors"].append({"id": did, "rarity": rarity})
-				_add_loot_context(summary, dtype, did)
+				if not did.is_empty() and _gs.has_method("add_armor") \
+						and GameState.ARMOR_DEFS.has(did):
+					_gs.call("add_armor",
+						(GameState.ARMOR_DEFS[did] as Dictionary).duplicate(true), true)
+					summary["armors"].append({"id": did, "rarity": rarity})
+					_add_loot_context(summary, dtype, did)
 
 			"relic":
 				pass  # Handled by ScanManager; relics need forge flow
@@ -204,7 +312,10 @@ func grant_drops(drops: Array) -> void:
 	if _gs.has_method("save_game"):
 		_gs.call("save_game")
 
+	for key in metadata:
+		summary[key] = metadata[key]
 	reward_granted.emit(summary)
+	return summary
 
 func _add_loot_context(summary: Dictionary, drop_type: String, drop_id: String) -> void:
 	var context := describe_drop_context(drop_type, drop_id)
@@ -283,19 +394,14 @@ func xp_needed_for_next_level(level: int) -> int:
 # Quest stage milestone rewards
 # ─────────────────────────────────────────────────────────────────────────────
 
-func grant_quest_stage(stage: int) -> void:
+func grant_quest_stage(stage: int) -> Dictionary:
 	if _gs == null:
 		_gs = get_node_or_null("/root/GameState")
-	if _gs != null:
-		var claims: Dictionary = _gs.get("quest_reward_claims") \
-			if _gs.get("quest_reward_claims") is Dictionary else {}
-		var claim_key := str(stage)
-		if bool(claims.get(claim_key, false)):
-			return
-		claims[claim_key] = true
-		_gs.set("quest_reward_claims", claims)
-		if _gs.has_method("record_activity"):
-			_gs.call("record_activity", "QUEST REWARD · STAGE %d" % stage)
+	if _gs == null:
+		return {}
+	var claim_key := str(stage)
+	if _is_quest_claimed(claim_key):
+		return {}
 	var drops : Array[Dictionary] = []
 	match stage:
 		1:  # CLAIM_SHARD
@@ -315,23 +421,90 @@ func grant_quest_stage(stage: int) -> void:
 				{"type":"xp",       "id":"", "quantity":300, "rarity":0},
 				{"type":"diamond",  "id":"", "quantity":5,  "rarity":3},
 			]
-	if not drops.is_empty():
-		grant_drops(drops)
+	if drops.is_empty():
+		return {}
+	_mark_quest_claim(claim_key)
+	if _gs.has_method("record_activity"):
+		_gs.call("record_activity", "QUEST REWARD · STAGE %d" % stage)
+	var title := "Chapter %d complete" % stage
+	if _gs.has_method("get_quest_copy"):
+		var copy: Variant = _gs.call("get_quest_copy", stage)
+		if copy is Dictionary:
+			title = str((copy as Dictionary).get("title", title))
+	var summary := grant_drops(drops, {
+		"source": "quest_stage",
+		"source_id": "stage:%d" % stage,
+		"source_label": title,
+		"completion_kind": "quest_stage",
+	})
+	if summary.is_empty():
+		_unmark_quest_claim(claim_key)
+		return {}
+	quest_reward_granted.emit(claim_key, title, summary)
+	return summary
+
+func _on_objective_completed(objective_id: String) -> void:
+	if _gs == null or not _gs.has_method("get_objective"):
+		return
+	var objective_variant: Variant = _gs.call("get_objective", objective_id)
+	if not objective_variant is Dictionary:
+		return
+	var objective: Dictionary = objective_variant
+	var objective_type := str(objective.get("type", ""))
+	if not OBJECTIVE_REWARD_DROPS.has(objective_type):
+		return
+	var claim_key := "objective:%s" % objective_id
+	if _is_quest_claimed(claim_key):
+		return
+	var drops: Array = (OBJECTIVE_REWARD_DROPS[objective_type] as Array).duplicate(true)
+	if drops.is_empty():
+		return
+	_mark_quest_claim(claim_key)
+	var title := str(objective.get("description", "Objective complete"))
+	if _gs.has_method("record_activity"):
+		_gs.call("record_activity", "QUEST REWARD · OBJECTIVE %s" % objective_id)
+	var summary := grant_drops(drops, {
+		"source": "quest_objective",
+		"source_id": objective_id,
+		"source_label": title,
+		"completion_kind": "quest_objective",
+	})
+	if summary.is_empty():
+		_unmark_quest_claim(claim_key)
+		return
+	quest_reward_granted.emit(claim_key, title, summary)
+
+func _is_quest_claimed(claim_key: String) -> bool:
+	if _gs == null:
+		return false
+	var claims: Variant = _gs.get("quest_reward_claims")
+	return claims is Dictionary and bool((claims as Dictionary).get(claim_key, false))
+
+func _mark_quest_claim(claim_key: String) -> void:
+	if _gs == null:
+		return
+	var claims: Dictionary = _gs.get("quest_reward_claims") \
+		if _gs.get("quest_reward_claims") is Dictionary else {}
+	claims[claim_key] = true
+	_gs.set("quest_reward_claims", claims)
+
+func _unmark_quest_claim(claim_key: String) -> void:
+	if _gs == null:
+		return
+	var claims: Variant = _gs.get("quest_reward_claims")
+	if claims is Dictionary:
+		(claims as Dictionary).erase(claim_key)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Daily login bonus
 # ─────────────────────────────────────────────────────────────────────────────
 
-const DAILY_BONUS_KEY := "last_daily_bonus"
-const DAILY_STREAK_KEY := "daily_streak"
-
 func check_daily_bonus() -> void:
-	var cfg := ConfigFile.new()
-	var save_path := "user://embervale_save.cfg"
-	if cfg.load(save_path) != OK:
+	if _gs == null or not _gs.has_method("get_daily_bonus_state"):
 		return
-	var last_ts  := int(cfg.get_value("daily", DAILY_BONUS_KEY,  0))
-	var streak   := int(cfg.get_value("daily", DAILY_STREAK_KEY, 0))
+	var saved_state: Dictionary = _gs.call("get_daily_bonus_state")
+	var last_ts  := int(saved_state.get("last_claim", 0))
+	var streak   := int(saved_state.get("streak", 0))
 	var now_ts   := int(Time.get_unix_time_from_system())
 	var day_secs := 86400
 
@@ -351,9 +524,8 @@ func check_daily_bonus() -> void:
 		{"type":"xp",      "id":"", "quantity":30 + streak * 8, "rarity":0},
 	])
 
-	cfg.set_value("daily", DAILY_BONUS_KEY,  now_ts)
-	cfg.set_value("daily", DAILY_STREAK_KEY, streak)
-	cfg.save(save_path)
+	_gs.call("set_daily_bonus_state", now_ts, streak)
+	_gs.call("flush_save")
 	daily_bonus_granted.emit(streak, gold_bonus)
 
 # ─────────────────────────────────────────────────────────────────────────────

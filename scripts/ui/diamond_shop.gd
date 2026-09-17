@@ -11,6 +11,7 @@ const ITEMS := preload("res://scripts/systems/diamond_catalog.gd").ITEMS
 const PURCHASE_STATES: Array[String] = ["unavailable", "pending", "failed",
 	"cancelled", "offline", "restoring", "confirmed"]
 var scan_purchase_state: String = "unavailable"
+var _store: Node = null
 
 @onready var game_state: GameState = GameState
 @onready var audio: AudioManager = AudioManager
@@ -31,6 +32,17 @@ func _ready() -> void:
 	close_button.pressed.connect(close)
 	unequip_button.pressed.connect(_on_unequip_all)
 	game_state.diamonds_changed.connect(func(_t): _refresh())
+	_connect_store()
+
+## The web-store row is optional furniture: without the autoload (or without a
+## configured provider) the case still opens and every local path still works.
+func _connect_store() -> void:
+	_store = get_node_or_null("/root/StoreManager")
+	if _store == null:
+		return
+	_store.availability_changed.connect(_on_store_availability_changed)
+	_store.refresh_finished.connect(_on_store_refresh_finished)
+	_store.purchase_claimed.connect(_on_store_purchase_claimed)
 
 func open() -> void:
 	visible = true
@@ -70,8 +82,125 @@ func _refresh() -> void:
 	diamonds_label.text = "DIAMONDS  %d" % game_state.diamonds
 	for child in items_vbox.get_children():
 		child.queue_free()
+	items_vbox.add_child(_build_web_store_row())
 	for item in ITEMS:
 		items_vbox.add_child(_build_row(item))
+
+## Ember marks bought on the web, delivered to this device by provider
+## confirmation. No price is duplicated here: the hosted checkout owns pricing.
+func _build_web_store_row() -> Control:
+	var panel := PanelContainer.new()
+	panel.add_theme_constant_override("panel_inset", 10)
+	panel.add_theme_stylebox_override("panel", UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON))
+	var vbox := VBoxContainer.new()
+	panel.add_child(vbox)
+
+	var header := Label.new()
+	header.text = "EMBER MARKS · ONLINE STORE"
+	UiKit.style_label(header, &"MenuTitle", 13)
+	vbox.add_child(header)
+
+	var status := Label.new()
+	status.text = _store_status_text()
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	UiKit.style_label(status, &"Caption", 11)
+	vbox.add_child(status)
+
+	var row := HBoxContainer.new()
+	vbox.add_child(row)
+	var state := _store_state()
+
+	var buy := Button.new()
+	buy.custom_minimum_size = Vector2(160, 0)
+	buy.text = "BUY ONLINE"
+	buy.tooltip_text = "Opens the hosted checkout in your browser."
+	buy.disabled = state not in ["ready", "pending"]
+	UiKit.style_primary_button(buy)
+	buy.pressed.connect(_on_buy_online)
+	row.add_child(buy)
+
+	var restore := Button.new()
+	restore.custom_minimum_size = Vector2(120, 0)
+	restore.text = "RESTORE"
+	restore.tooltip_text = "Rechecks provider ownership. A claimed pack is never granted twice."
+	restore.disabled = state == "unavailable"
+	UiKit.style_secondary_button(restore)
+	restore.pressed.connect(_on_restore_purchases)
+	row.add_child(restore)
+	return panel
+
+func _store_state() -> String:
+	if _store == null or not _store.has_method("availability_state"):
+		return "unavailable"
+	return str(_store.availability_state())
+
+func _store_status_text() -> String:
+	var state := _store_state()
+	if state == "unavailable":
+		return "Online packs are not configured in this build. All local play is unaffected."
+	if state == "pending":
+		return "Checking provider ownership · no duplicate grant will be made."
+	var last: Dictionary = {}
+	if _store != null and _store.has_method("last_result"):
+		last = _store.last_result()
+	match str(last.get("status", "")):
+		"offline", "timeout":
+			return "Offline · reconnect, then restore to recheck ownership."
+		"rate_limited":
+			return "Just checked · wait a moment before restoring again."
+		"unauthorized", "not_found":
+			return "The provider rejected this build's lookup · check the store configuration."
+		_:
+			return "Provider connected · packs are delivered to this device after checkout."
+
+func _on_buy_online() -> void:
+	if _store == null or not _store.has_method("open_web_store"):
+		message_label.text = "Online packs are not configured in this build."
+		audio.play_ui_cancel()
+		return
+	if bool(_store.open_web_store()):
+		message_label.text = "Finish checkout in your browser, then return and tap RESTORE."
+		audio.play_ui_blip()
+	else:
+		message_label.text = "The online store could not be opened."
+		audio.play_ui_cancel()
+	_refresh()
+
+func _on_restore_purchases() -> void:
+	if _store == null or not _store.has_method("request_refresh"):
+		message_label.text = "Online packs are not configured in this build."
+		audio.play_ui_cancel()
+		return
+	message_label.text = "Checking provider ownership · no duplicate grant will be made."
+	audio.play_ui_blip()
+	_store.request_refresh()
+	_refresh()
+
+func _on_store_availability_changed(_available: bool) -> void:
+	if visible:
+		_refresh()
+
+func _on_store_refresh_finished(result: Dictionary) -> void:
+	if not bool(result.get("ok", false)):
+		match str(result.get("status", "")):
+			"rate_limited":
+				message_label.text = "Just checked · wait a moment before restoring again."
+			"unavailable", "unconfigured":
+				message_label.text = "Online packs are not configured in this build."
+			"unauthorized", "not_found":
+				message_label.text = "The provider rejected this build's lookup · check the store configuration."
+			_:
+				message_label.text = "Could not reach the store · reconnect and restore again."
+	elif int(result.get("granted", 0)) <= 0:
+		message_label.text = "No new ownership found · nothing was double-granted."
+	if visible:
+		_refresh()
+
+func _on_store_purchase_claimed(grants: int, diamonds: int) -> void:
+	var noun := "pack" if grants == 1 else "packs"
+	message_label.text = "%d %s delivered · +%d ember marks." % [grants, noun, diamonds]
+	audio.play_forge_success()
+	_refresh()
 
 func _build_row(item: Dictionary) -> Control:
 	var panel := PanelContainer.new()

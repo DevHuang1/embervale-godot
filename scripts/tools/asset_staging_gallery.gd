@@ -8,7 +8,7 @@ class_name AssetStagingGallery
 const REVIEW_ASSETS: Array[Dictionary] = [
 	{"label": "NATURE PROP", "path": "res://assets/models/kenney_nature/Models/tree_detailed.fbx"},
 	{"label": "GRAVEYARD PROP", "path": "res://assets/models/kenney_graveyard/Models/altar-stone.fbx"},
-	{"label": "FOLIAGE SPRITE", "path": "res://assets/ambient/kenney_foliage_sprites/Vector/foliageSprites_flat.svg"},
+	{"label": "FOLIAGE SPRITE", "path": "res://assets/ambient/kenney_foliage_sprites/PNG/Flat/sprite_0001.png"},
 	{"label": "SURVIVAL PROP", "path": "res://assets/models/kenney_survival/Models/tent.fbx"},
 	{"label": "REALM CRYSTAL", "path": "res://assets/models/kenney_tower_defense/Models/detail-crystal.fbx"},
 	{"label": "DUNGEON CHARACTER", "path": "res://assets/models/kenney_mini_dungeon/Models/character-human.fbx"},

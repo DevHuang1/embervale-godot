@@ -26,6 +26,7 @@ var _bed_target_db := -60.0
 var _bed_live := false
 var _bed_bus := -1
 var _cue_live := 0
+var _shutting_down := false
 const CUE_PLAYER_CAP := 14
 
 ## Every transient one-shot voice joins this group so stop_one_shots() can
@@ -65,6 +66,12 @@ func _ready() -> void:
 		# skill button callback, producing a deterministic first-cast hitch.
 		_prewarm_mobile_combat_cues()
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		# GameState owns the final quit request; AudioManager owns releasing
+		# playback before that request tears down the SceneTree.
+		shutdown_for_exit()
+
 func _ensure_standard_buses() -> void:
 	## Keep audio routing deterministic for imported scenes, tests, and fresh
 	## projects whose bus layout has not been authored yet.
@@ -77,6 +84,8 @@ func _ensure_standard_buses() -> void:
 		AudioServer.set_bus_send(index, "Master")
 
 func _process(delta: float) -> void:
+	if _shutting_down:
+		return
 	_update_boss_score(delta)
 	# Ease the combat bed toward its intensity target; stop when idle long.
 	if _combat_player == null:
@@ -95,6 +104,8 @@ func _process(delta: float) -> void:
 ## Called every frame by WorldState: crossfades the tense bed in with combat
 ## intensity; `night` muffles the bed's highs (dread reads better muffled).
 func update_combat_beds(intensity: float, night: float = 0.0) -> void:
+	if _shutting_down:
+		return
 	if boss_score_active:
 		set_music_state("boss")
 	elif intensity >= 0.7:
@@ -175,6 +186,8 @@ func _render_combat_bed(b: PackedFloat32Array, duration: float) -> void:
 ## Starts all three layers on the same audio frame. Repeated calls reuse the
 ## cached streams and never create more voices.
 func start_boss_score(_boss_id: String = "matriarch") -> void:
+	if _shutting_down:
+		return
 	if _boss_score_streams.is_empty():
 		for layer in BOSS_SCORE_LAYER_CAP:
 			var samples := PackedFloat32Array()
@@ -329,6 +342,8 @@ func save_settings() -> void:
 
 # === Procedural Chimes (embervale-style) ===
 func play_chime(frequency: float, start_offset: float = 0.0, duration: float = 0.15, volume: float = 0.05, wave_type: int = AudioStreamWAV.FORMAT_16_BITS) -> void:
+	if _shutting_down or not is_inside_tree():
+		return
 	var player = AudioStreamPlayer.new()
 	player.add_to_group(ONE_SHOT_GROUP)
 	add_child(player)
@@ -354,10 +369,12 @@ func play_chime(frequency: float, start_offset: float = 0.0, duration: float = 0
 	
 	player.stream = stream
 	player.volume_db = linear_to_db(sfx_volume)
+	player.finished.connect(_on_synth_finished.bind(player))
 	player.play()
-	
-	await player.finished
-	player.queue_free()
+
+func _on_synth_finished(player: AudioStreamPlayer) -> void:
+	if is_instance_valid(player):
+		player.queue_free()
 
 # === Predefined Cues ===
 func play_ui_blip() -> void:
@@ -436,6 +453,30 @@ func play_skill_release(skill_type: String) -> void:
 		_:
 			pass
 
+## Typed boss skill event bridge. Boss gameplay emits the event once at each
+## authoritative phase; this keeps new roster ids/skills explicit while
+## reusing the existing capped synth/recorded SFX implementation.
+func play_boss_skill_event(boss_id: String, skill_id: String,
+		event_name: String, skill_type: String, at_node: Node = null) -> void:
+	match event_name:
+		"start":
+			if skill_type == "sword":
+				play_whoosh()
+			else:
+				play_skill_cast(skill_type)
+		"impact":
+			match skill_type:
+				"sword": play_slash()
+				"regen": play_skill_release("heal_bloom")
+				"roll": play_skill_release("aoe")
+				"slam", "burrow": play_boss_stomp(at_node)
+				_: play_skill_release("explosion")
+		"movement":
+			if skill_type == "roll":
+				play_boss_stomp(at_node)
+			elif skill_type == "fly":
+				play_profile_cue("grave_moss", "cast")
+
 func play_explosion() -> void:
 	play_cue("explosion")
 
@@ -492,6 +533,8 @@ func _sfx_local_path(name: String) -> String:
 	return ""
 
 func _play_wav_from_disk(path: String, volume_db: float) -> AudioStreamPlayer:
+	if _shutting_down or not is_inside_tree():
+		return null
 	var wav := AudioStreamWAV.load_from_file(path) as AudioStreamWAV
 	if wav == null:
 		return null
@@ -508,6 +551,8 @@ func _play_wav_from_disk(path: String, volume_db: float) -> AudioStreamPlayer:
 ## extracts the requested wav entry in place. When offline every step just
 ## returns; a future call retries from where it left off.
 func _fetch_sfx(name: String) -> void:
+	if _shutting_down:
+		return
 	if _sfx_fetching.has(name):
 		return
 	# `name` must be one of the known variant ids so the zip entry we read is a
@@ -528,6 +573,9 @@ func _fetch_sfx(name: String) -> void:
 			return
 		var resp: Array = await http.request_completed
 		http.queue_free()
+		if _shutting_down:
+			_sfx_release(name)
+			return
 		if int(resp[0]) != HTTPRequest.RESULT_SUCCESS or int(resp[1]) != 200:
 			_sfx_release(name)
 			return
@@ -702,6 +750,8 @@ func play_profile_cue(preset: String, kind: String) -> void:
 ## loop point is inaudible. Called once from the grove.
 ## bed: "grove" (crickets over warm pad) or "fen" (bubbles over cold drone).
 func start_ambient(bed: String = "grove") -> void:
+	if _shutting_down:
+		return
 	if ambient_playing:
 		return
 	ambient_playing = true
@@ -776,6 +826,8 @@ func _render_fen_bed(b: PackedFloat32Array, duration: float) -> void:
 ## the same name always yields the same set), then plays with config rules.
 
 func play_cue(cue_name: String) -> void:
+	if _shutting_down or not is_inside_tree():
+		return
 	if _is_mobile_runtime() and _is_mobile_combat_cue(cue_name) \
 			and not _cue_streams.has(cue_name):
 		# Never synthesize a combat WAV on the gameplay frame. The startup
@@ -821,9 +873,13 @@ func stop_one_shots() -> void:
 		if not is_instance_valid(player):
 			continue
 		if player is AudioStreamPlayer:
-			(player as AudioStreamPlayer).stop()
+			var player_2d := player as AudioStreamPlayer
+			player_2d.stop()
+			player_2d.stream = null
 		elif player is AudioStreamPlayer3D:
-			(player as AudioStreamPlayer3D).stop()
+			var player_3d := player as AudioStreamPlayer3D
+			player_3d.stop()
+			player_3d.stream = null
 		player.queue_free()
 	# Freed one-shots never reach `finished`, so release the voice counter
 	# here or the CUE_PLAYER_CAP would stay consumed for the session.
@@ -843,8 +899,70 @@ func stop_all_playback() -> void:
 		_bed_live = false
 	stop_boss_score_immediate()
 
+## Exit-only cleanup. Unlike realm teardown, this also detaches cached streams
+## so direct process shutdown cannot retain WAV resources through the autoload.
+func shutdown_for_exit() -> void:
+	_shutting_down = true
+	stop_all_playback()
+	if music_player != null and is_instance_valid(music_player):
+		music_player.stream = null
+	if _combat_player != null and is_instance_valid(_combat_player):
+		_combat_player.stream = null
+	for player in _boss_score_players:
+		if player != null and is_instance_valid(player):
+			player.stream = null
+	_cue_streams.clear()
+	_boss_score_streams.clear()
+	_combat_stream = null
+
+## Autoload teardown happens after the active scene begins closing. Stop every
+## remaining playback before the engine releases the AudioStreamPlayer nodes;
+## otherwise AudioServer can retain AudioStreamPlaybackWAV instances until the
+## process exits. The method is intentionally idempotent for tests and quits.
+func _exit_tree() -> void:
+	# `quit()` can bypass another frame for queued frees. Release streams and
+	# free the remaining voice nodes synchronously while the autoload still owns
+	# them so the AudioServer cannot retain playback objects at process exit.
+	shutdown_for_exit()
+	for node in get_tree().get_nodes_in_group(ONE_SHOT_GROUP):
+		_shutdown_audio_node(node as Node)
+	if music_player != null and is_instance_valid(music_player):
+		music_player.stop()
+		music_player.stream = null
+		music_player.free()
+	if _combat_player != null and is_instance_valid(_combat_player):
+		_combat_player.stop()
+		_combat_player.stream = null
+		_combat_player.free()
+	for player in _boss_score_players:
+		if player != null and is_instance_valid(player):
+			player.stop()
+			player.stream = null
+			player.free()
+	_cue_streams.clear()
+	_boss_score_streams.clear()
+	_boss_score_players.clear()
+	_combat_stream = null
+	music_player = null
+	_combat_player = null
+
+func _shutdown_audio_node(node: Node) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+	if node is AudioStreamPlayer:
+		var player_2d := node as AudioStreamPlayer
+		player_2d.stop()
+		player_2d.stream = null
+	elif node is AudioStreamPlayer3D:
+		var player_3d := node as AudioStreamPlayer3D
+		player_3d.stop()
+		player_3d.stream = null
+	node.free()
+
 ## Positional playback for world-space events (stomps, bursts, deaths).
 func play_synth_at(host: Node, cue_name: String, volume_db_offset := 0.0) -> void:
+	if _shutting_down or not is_inside_tree():
+		return
 	# is_instance_valid first: a freed host reference must fall back to the
 	# non-positional cue instead of erroring on is_inside_tree().
 	if host == null or not is_instance_valid(host) or not host.is_inside_tree():
@@ -1258,6 +1376,8 @@ func _to_wav(b: PackedFloat32Array) -> AudioStreamWAV:
 
 # === Streamed SFX (for imported files) ===
 func play_sfx(resource_path: String, volume_db: float = 0.0) -> AudioStreamPlayer:
+	if _shutting_down or not is_inside_tree():
+		return null
 	var player = AudioStreamPlayer.new()
 	player.add_to_group(ONE_SHOT_GROUP)
 	add_child(player)
@@ -1273,10 +1393,15 @@ func _on_sfx_finished(player: AudioStreamPlayer) -> void:
 
 # === Music ===
 func play_music(resource_path: String, fade_time: float = 1.0) -> void:
+	if _shutting_down or not is_inside_tree():
+		return
 	if music_player and music_player.playing:
 		music_player.volume_db = -80
 		await get_tree().create_timer(fade_time).timeout
-		music_player.queue_free()
+		if _shutting_down or not is_inside_tree():
+			return
+		if is_instance_valid(music_player):
+			music_player.queue_free()
 	
 	music_player = AudioStreamPlayer.new()
 	add_child(music_player)

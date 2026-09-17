@@ -19,6 +19,7 @@ var _cue_impact_fired := false
 var _impact_fraction_override := -1.0
 var _cue_speed := 1.0
 var _attack_serial := -1
+var _cue_alias_overrides: Dictionary = {}
 
 ## Per-cue playback speed: the authored sword clip is 1.167s — far slower
 ## than the attack cadence — so light swings play slightly sped up. Heavy
@@ -54,6 +55,18 @@ func bind(anim_root: Node) -> void:
 		tree = trees[0] as AnimationTree
 		tree.active = true
 
+## Register exact authored aliases for a boss skill without changing the
+## global cue table used by heroes and legacy enemies.
+func register_cue_alias(cue: String, aliases: Array[String]) -> void:
+	if cue.is_empty() or aliases.is_empty():
+		return
+	_cue_alias_overrides[cue] = aliases.duplicate()
+
+func register_skill_alias(skill_id: String, clip_name: String) -> void:
+	if skill_id.is_empty() or clip_name.is_empty():
+		return
+	register_cue_alias(skill_id, [clip_name, "BOSS_%s" % skill_id, skill_id])
+
 ## Map a gameplay cue to the closest clip name in the imported set.
 func _resolve(alias: String) -> String:
 	if player == null:
@@ -63,7 +76,7 @@ func _resolve(alias: String) -> String:
 		return ""
 	# Alias table first (pack clip naming differs from gameplay cues),
 	# then exact, then substring fallbacks.
-	var wanted: Array = CUE_ALIASES.get(alias, [alias])
+	var wanted: Array = _cue_alias_overrides.get(alias, CUE_ALIASES.get(alias, [alias]))
 	for want in wanted:
 		want = str(want).to_lower()
 		for name in list:
@@ -128,6 +141,14 @@ func stop() -> void:
 	_current_clip = ""
 	_cue_elapsed = 0.0
 	_cue_impact_fired = false
+
+## Skill-specific authored playback seam. Missing skill clips fall back to the
+## existing generic cue so a partial asset never stalls the combat action.
+func play_skill(skill_id: String, fallback_cue: String = "cast",
+		cross: float = 0.05, restart: bool = true) -> bool:
+	if play_cue(skill_id, cross, restart):
+		return true
+	return play_cue(fallback_cue, cross, restart)
 
 func current_cue() -> String:
 	return _current_cue

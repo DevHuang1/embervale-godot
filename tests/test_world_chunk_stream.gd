@@ -117,8 +117,17 @@ func _check_caps(realm: String) -> int:
 		scene.queue_free()
 		await process_frame
 		return f
+	var activity_director := scene.find_child("RealmActivityDirector", true, false)
+	if activity_director == null:
+		f += 1
+		print("FAIL: %s activity director missing from streamed realm" % realm)
+	else:
+		var activity_report: Dictionary = activity_director.call("get_diagnostics")
+		if int(activity_report.get("active_combat_count", 0)) > 2:
+			f += 1
+			print("FAIL: %s streamed activity combat cap exceeded" % realm)
 
-	var arena3 := RealmLayoutData.profile(realm).get("arena", Vector3.ZERO) as Vector3
+	var boss_anchors := RealmLayoutData.boss_anchor_points(realm)
 	var chunk_total := 0
 	for chunk_node in streamer.get_children():
 		if not str(chunk_node.name).begins_with("StreamChunk_"):
@@ -138,10 +147,11 @@ func _check_caps(realm: String) -> int:
 					var world_pos := Vector2((child as MultiMeshInstance3D).global_position.x,
 						(child as MultiMeshInstance3D).global_position.z) \
 						+ Vector2(origin.x, origin.z)
-					if world_pos.distance_to(Vector2(arena3.x, arena3.z)) < 4.9:
-						f += 1
-						print("FAIL: %s streamed grass inside arena" % realm)
-						break
+					for boss_anchor in boss_anchors:
+						if world_pos.distance_to(boss_anchor) < RealmLayoutData.BOSS_ARENA_CLEARANCE_RADIUS:
+							f += 1
+							print("FAIL: %s streamed grass inside boss arena" % realm)
+							break
 			elif child.name == "StreamTrees":
 				var trees := (child as MultiMeshInstance3D).multimesh.instance_count
 				if trees < 7 or trees > 11:
@@ -170,6 +180,18 @@ func _check_caps(realm: String) -> int:
 	if chunk_total < 9:
 		f += 1
 		print("FAIL: %s streamer built too few chunks (%d)" % [realm, chunk_total])
+	if realm == "bramblewood":
+		for pocket_value in RealmLayoutData.profile(realm).get("expansion_pockets", []):
+			var pocket: Dictionary = pocket_value as Dictionary
+			var position: Vector3 = pocket.get("position", Vector3.ZERO)
+			if not bool(streamer.call("_clearance_blocks", Vector2(position.x, position.z))):
+				f += 1
+				print("FAIL: Bramblewood pocket lacks streamer clearance -> ",
+					str(pocket.get("id", "")))
+	for boss_anchor in boss_anchors:
+		if not bool(streamer.call("_clearance_blocks", boss_anchor)):
+			f += 1
+			print("FAIL: %s boss anchor lacks streamer clearance -> %s" % [realm, boss_anchor])
 
 	## Walls moved to the extended boundary only when streaming.
 	var world_bounds := scene.get_node_or_null("WorldBounds")

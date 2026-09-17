@@ -86,7 +86,7 @@ const ENTRIES: Array[Dictionary] = [
 		"import_settings": "reviewed",
 		"runtime_owner": "scripts/systems/ambient_foliage_patch.gd",
 		"runtime_use_case": "bounded grass and field-detail patches in streamed realm chunks",
-		"runtime_paths": ["res://assets/ambient/kenney_foliage_sprites/Vector/foliageSprites_flat.svg"],
+		"runtime_paths": ["res://assets/ambient/kenney_foliage_sprites/PNG/Flat/sprite_0001.png"],
 	},
 	{
 		"id": "kenney_survival",

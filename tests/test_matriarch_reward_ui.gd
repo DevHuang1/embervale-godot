@@ -29,15 +29,28 @@ func _run() -> void:
 	_assert_true(labels.any(func(text: String) -> bool:
 		return text.contains("CROWN OF THE OLD ROOT")),
 		"owned Matriarch reward appears by authored name")
-	_assert_true(labels.any(func(text: String) -> bool:
-		return text.contains("Every second basic strike")),
-		"weapon card explains the build-changing passive")
-	_assert_true(labels.any(func(text: String) -> bool:
-		return text.contains("ATK 11") and text.contains("MAGIC")),
-		"weapon card compares attack and playstyle")
-	_assert_true(buttons.any(func(text: String) -> bool:
-		return text.contains("UPGRADE +1") and text.contains("IRON") and text.contains("GOLD")),
-		"weapon card exposes exact forge requirements")
+	# Select by id: the starter weapon is ledger gear now, so index 0 is not
+	# necessarily the reward.
+	var reward_weapon: Dictionary = {}
+	for weapon in game_state.forged_weapons:
+		if str(weapon.get("id", "")) == "matriarch_scepter":
+			reward_weapon = weapon
+			break
+	_assert_true(not reward_weapon.is_empty(), "Matriarch reward is in the forge ledger")
+	if reward_weapon.is_empty():
+		_finish(game_state)
+		return
+	satchel.call("_show_item_detail", reward_weapon)
+	await process_frame
+	var inspect_detail := str(satchel.get("_selected_item_label").text)
+	_assert_true(inspect_detail.contains("Every second basic strike"),
+		"inspect sheet explains the build-changing passive")
+	_assert_true(inspect_detail.contains("ATK 11") and inspect_detail.contains("MAGIC")
+		and inspect_detail.contains("vs current"),
+		"inspect sheet compares attack and playstyle")
+	_assert_true(inspect_detail.contains("UPGRADE") and inspect_detail.contains("IRON")
+		and inspect_detail.contains("GOLD"),
+		"inspect sheet exposes exact forge requirements")
 	satchel.queue_free()
 	await process_frame
 	_finish(game_state)

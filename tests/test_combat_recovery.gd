@@ -100,6 +100,16 @@ func _run() -> void:
 		print("FAIL: tree ended paused")
 
 	gs.delete_save()
+	var audio := root.get_node_or_null("/root/AudioManager")
+	if audio != null and audio.has_method("shutdown_for_exit"):
+		audio.call("shutdown_for_exit")
+	if is_instance_valid(scene):
+		scene.queue_free()
+	await _frames(60)
+	var audio_nodes := get_nodes_in_group("audio_one_shot")
+	if not audio_nodes.is_empty():
+		failures += 1
+		print("FAIL: transient audio nodes survived shutdown -> ", audio_nodes.size())
 	if failures == 0:
 		print("ALL COMBAT RECOVERY TESTS PASSED")
 	else:

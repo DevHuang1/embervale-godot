@@ -111,9 +111,16 @@ func _build_collision() -> void:
 func _build_visual() -> void:
 	_decal = MeshInstance3D.new()
 	_decal.name = "ZoneDecal"
-	var qm := QuadMesh.new()
-	qm.size = Vector2(zone_radius * 2.0, zone_radius * 2.0)
-	_decal.mesh = qm
+	# Keep the encounter read as a circle in the world.  The old untextured
+	# QuadMesh exposed its square bounds on the ground, especially on the
+	# compatibility renderer and at oblique camera angles.
+	var disc := CylinderMesh.new()
+	disc.top_radius = zone_radius
+	disc.bottom_radius = zone_radius
+	disc.height = 0.025
+	disc.radial_segments = 32
+	disc.rings = 1
+	_decal.mesh = disc
 	_decal_mat = StandardMaterial3D.new()
 	_decal_mat.albedo_color = Color(_tier_color().r, _tier_color().g, _tier_color().b, 0.18)
 	_decal_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -122,7 +129,6 @@ func _build_visual() -> void:
 	_decal_mat.emission_energy_multiplier = 0.42
 	_decal_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_decal.material_override = _decal_mat
-	_decal.rotation.x = -PI * 0.5
 	_decal.position.y  = 0.04
 	add_child(_decal)
 
@@ -183,15 +189,24 @@ func _flash_activate() -> void:
 
 func _spawn_pack() -> void:
 	var parent := get_parent() if get_parent() else get_tree().current_scene
-	if parent == null: return
+	if parent == null:
+		return
 
 	# Get variant from Bestiary
 	var variant : Dictionary = Bestiary.variant_for(realm_id, tier)
-	if variant.is_empty(): return
+	if variant.is_empty():
+		# An authored encounter that cannot build its pack must stay open for a
+		# retry instead of silently consuming the beat.
+		_spawned = false
+		push_warning("EncounterZone %s: no %s variant for realm %s" % [name, tier, realm_id])
+		return
 
 	var kind : String = str(variant.get("kind", "hushling"))
 	var scene_path := _scene_for_kind(kind)
-	if not ResourceLoader.exists(scene_path): return
+	if not ResourceLoader.exists(scene_path):
+		_spawned = false
+		push_warning("EncounterZone %s: enemy scene missing for kind %s" % [name, kind])
+		return
 	var scn : PackedScene = load(scene_path)
 	if scn == null: return
 

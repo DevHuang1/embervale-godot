@@ -1,116 +1,82 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://scripts/ui/satchel.gd" id="1_0"]
+[ext_resource type="Script" path="res://scripts/ui/satchel.gd" id="1_satchel"]
 
 [node name="SatchelUI" type="CanvasLayer"]
-layer = 20
-script = ExtResource("1_0")
+layer = 22
+visible = false
+script = ExtResource("1_satchel")
 
-[node name="Root" type="PanelContainer" parent="."]
+[node name="Dim" type="ColorRect" parent="."]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 40.0
-offset_top = 40.0
-offset_right = -40.0
-offset_bottom = -40.0
+mouse_filter = 2
+color = Color(0.002, 0.006, 0.005, 0.88)
 
-[node name="VBox" type="VBoxContainer" parent="Root"]
-theme_override_constants/separation = 14
+[node name="Root" type="Panel" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -508.0
+offset_top = -750.0
+offset_right = 508.0
+offset_bottom = 750.0
+grow_horizontal = 2
+grow_vertical = 2
 
-[node name="Header" type="HBoxContainer" parent="Root/VBox"]
-layout_mode = 2
+[node name="Header" type="Control" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 0.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = 84.0
+grow_horizontal = 2
 
-[node name="Title" type="Label" parent="Root/VBox/Header"]
-layout_mode = 2
+[node name="Title" type="Label" parent="Root/Header"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_right = -220.0
+grow_horizontal = 2
 theme_type_variation = &"MenuTitle"
 text = "FIELD SATCHEL"
 
-[node name="InventoryMark" type="Label" parent="Root/VBox/Header"]
-layout_mode = 2
-theme_type_variation = &"Eyebrow"
-text = "  ◈  WARDEN LOADOUT"
-
-[node name="CountLabel" type="Label" parent="Root/VBox/Header"]
-layout_mode = 2
-theme_type_variation = &"Subtitle"
-text = "0 items carried"
-horizontal_alignment = 2
-size_flags_horizontal = 3
-
-[node name="CloseButton" type="Button" parent="Root/VBox/Header"]
-custom_minimum_size = Vector2(150, 56)
-layout_mode = 2
-tooltip_text = "Close (Esc)"
-text = "✕  CLOSE"
-theme_override_font_sizes/font_size = 19
-
-[node name="ItemsList" type="ScrollContainer" parent="Root/VBox"]
-layout_mode = 2
-size_flags_vertical = 3
-custom_minimum_size = Vector2(0, 220)
-
-[node name="ItemsVBox" type="VBoxContainer" parent="Root/VBox/ItemsList"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="ForgedGear" type="PanelContainer" parent="Root/VBox"]
-layout_mode = 2
-
-[node name="ForgedVBox" type="VBoxContainer" parent="Root/VBox/ForgedGear"]
-layout_mode = 2
-theme_override_constants/separation = 10
-
-[node name="ForgedTitle" type="Label" parent="Root/VBox/ForgedGear/ForgedVBox"]
-layout_mode = 2
-theme_type_variation = &"Eyebrow"
-text = "FORGED GEAR"
-
-[node name="CurrentWeapon" type="HBoxContainer" parent="Root/VBox/ForgedGear/ForgedVBox"]
-layout_mode = 2
-theme_override_constants/separation = 16
-
-[node name="WeaponGlyph" type="Label" parent="Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon"]
-layout_mode = 2
-theme_type_variation = &"Title"
-text = "+"
-theme_override_font_sizes/font_size = 44
-
-[node name="WeaponInfo" type="VBoxContainer" parent="Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="WeaponName" type="Label" parent="Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon/WeaponInfo"]
-layout_mode = 2
-theme_type_variation = &"Title"
-text = "MUG MACE"
-theme_override_font_sizes/font_size = 26
-
-[node name="WeaponStats" type="Label" parent="Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon/WeaponInfo"]
-layout_mode = 2
+[node name="CountLabel" type="Label" parent="Root/Header"]
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -205.0
+offset_right = -143.0
+grow_horizontal = 0
 theme_type_variation = &"Caption"
-text = "ATK 7 / REACH 8.2"
+text = "0 carried"
+horizontal_alignment = 2
 
-[node name="ForgeButton" type="Button" parent="Root/VBox/ForgedGear/ForgedVBox/CurrentWeapon"]
-layout_mode = 2
-text = "FORGE NEW"
+[node name="CloseButton" type="Button" parent="Root/Header"]
+layout_mode = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -133.0
+grow_horizontal = 0
+custom_minimum_size = Vector2(110, 56)
+focus_mode = 0
+text = "CLOSE"
+tooltip_text = "Close satchel"
+theme_override_font_sizes/font_size = 16
 
-[node name="ClassFooter" type="PanelContainer" parent="Root/VBox"]
-layout_mode = 2
-
-[node name="ClassVBox" type="VBoxContainer" parent="Root/VBox/ClassFooter"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="ClassTitle" type="Label" parent="Root/VBox/ClassFooter/ClassVBox"]
-layout_mode = 2
-theme_type_variation = &"Eyebrow"
-text = "ACTIVE CLASS: CINDER WARDEN"
-
-[node name="PassiveText" type="Label" parent="Root/VBox/ClassFooter/ClassVBox"]
-layout_mode = 2
-theme_type_variation = &"Body"
-text = "Every third auto-strike blooms with 4 bonus ember damage."
-
-[node name="SkillKit" type="HBoxContainer" parent="Root/VBox/ClassFooter/ClassVBox"]
-layout_mode = 2
+[node name="VBox" type="VBoxContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 98.0
+offset_right = -24.0
+offset_bottom = -24.0
+theme_override_constants/separation = 10

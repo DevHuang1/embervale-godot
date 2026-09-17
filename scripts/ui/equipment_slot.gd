@@ -21,9 +21,9 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	if not data is Dictionary:
 		return false
 	var item := data as Dictionary
-	return GameState.can_equip_item(item, slot)
+	var game_state := get_tree().root.get_node_or_null("GameState")
+	return game_state != null and bool(game_state.call("can_equip_item", item, slot))
 
 func _drop_data(_at_position: Vector2, data: Variant) -> void:
 	if data is Dictionary:
 		item_dropped.emit(str((data as Dictionary).get("id", "")), slot)
-

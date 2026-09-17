@@ -159,6 +159,27 @@ static func mistfen_common() -> LootTable:
 	t.add({"type":"item",     "id":"moss_tonic", "weight":0.9, "rarity":0})
 	return t
 
+static func moonfen_common() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(1, 2)
+	t.add({"type":"gold",     "min":8,  "max":20,  "weight":2.6})
+	t.add({"type":"xp",       "min":14, "max":28,  "weight":2.2})
+	t.add({"type":"material", "id":"moonmoss",         "weight":2.0, "realm":"moonfen"})
+	t.add({"type":"material", "id":"crystal_fragment", "weight":1.4, "realm":"moonfen"})
+	t.add({"type":"item",     "id":"moss_tonic",       "weight":0.8, "rarity":0})
+	return t
+
+static func moonfen_elite() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(2, 3)
+	t.add({"type":"gold",     "min":14, "max":32,  "weight":2.4})
+	t.add({"type":"xp",       "min":26, "max":48,  "weight":2.0})
+	t.add({"type":"material", "id":"moonmoss",         "weight":1.6, "rarity":1, "realm":"moonfen"})
+	t.add({"type":"material", "id":"crystal_fragment", "weight":1.2, "rarity":2, "realm":"moonfen"})
+	t.add({"type":"item",     "id":"moss_tonic",       "weight":0.6, "rarity":0})
+	t.add({"type":"diamond",  "min":1,  "max":2,   "weight":0.4, "rarity":2})
+	return t
+
 static func heartwood_common() -> LootTable:
 	var t := LootTable.new()
 	t.set_rolls(2, 3)
@@ -226,15 +247,18 @@ static func chest_boss() -> LootTable:
 static func for_enemy(realm_id: String, tier: String) -> LootTable:
 	match realm_id:
 		"mistfen":   return mistfen_common() if tier != "elite" else bramblewood_elite()
-		"heartwood": return heartwood_common()
+		"heartwood": return heartwood_common() if tier != "elite" else heartwood_common()
+		"moonfen":   return moonfen_common() if tier != "elite" else moonfen_elite()
 		_:
 			return bramblewood_common() if tier == "normal" else bramblewood_elite()
 
 ## Convenience: roll a table for an enemy archetype and return
 ## { gold: int, materials: Array[{id, qty}], items: Array, xp: int }.
 ## Used by Hushling._spawn_loot().
-static func roll_enemy(archetype: String) -> Dictionary:
+static func roll_enemy(archetype: String, realm_id: String = "") -> Dictionary:
 	var table := bramblewood_elite() if archetype == "elite" else bramblewood_common()
+	if not realm_id.is_empty():
+		table = for_enemy(realm_id, archetype)
 	var drops := table.roll()
 	var result := { "gold": 0, "xp": 0, "materials": [], "items": [] }
 	for drop in drops:
@@ -255,7 +279,8 @@ static func roll_enemy(archetype: String) -> Dictionary:
 ## { gold: int, xp: int, materials: Array[{id, qty}], gear: Dictionary or null }.
 ## Used by BossBase._spawn_rewards(); tables stay centralized here.
 static func roll_boss(boss_id: String) -> Dictionary:
-	var drops := chest_boss().roll()
+	var table := _boss_table_for(boss_id)
+	var drops := table.roll()
 	var result := { "gold": 0, "xp": 0, "materials": [], "gear": null }
 	for drop in drops:
 		var dtype := str(drop.get("type", ""))
@@ -274,3 +299,73 @@ static func roll_boss(boss_id: String) -> Dictionary:
 						"rarity": int(drop.get("rarity", 1)),
 					}
 	return result
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-boss loot tables
+# ─────────────────────────────────────────────────────────────────────────────
+
+static func boss_bramblewood() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(3, 4)
+	t.add({"type":"gold",    "min":100, "max":200, "weight":1.0, "guaranteed":true})
+	t.add({"type":"xp",      "min":200, "max":350, "weight":1.0, "guaranteed":true})
+	t.add({"type":"diamond", "min":3,   "max":6,   "weight":1.0, "rarity":3,  "guaranteed":true})
+	t.add({"type":"weapon",  "id":"thornbite_cleaver","weight":0.7,"rarity":3})
+	t.add({"type":"material","id":"bramble_wood","min":3,"max":5,"weight":2.0,"rarity":1})
+	t.add({"type":"material","id":"iron_shard",  "min":2,"max":4,"weight":1.5,"rarity":2})
+	t.add({"type":"item",    "id":"hushling_thorn","min":4,"max":8,"weight":1.2,"rarity":1})
+	return t
+
+static func boss_mistfen() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(3, 4)
+	t.add({"type":"gold",    "min":120, "max":220, "weight":1.0, "guaranteed":true})
+	t.add({"type":"xp",      "min":250, "max":400, "weight":1.0, "guaranteed":true})
+	t.add({"type":"diamond", "min":3,   "max":7,   "weight":1.0, "rarity":3,  "guaranteed":true})
+	t.add({"type":"weapon",  "id":"tidecall_brand","weight":0.7,"rarity":3})
+	t.add({"type":"material","id":"fen_reed",    "min":3,"max":5,"weight":2.0,"rarity":1})
+	t.add({"type":"material","id":"spore_dust",  "min":2,"max":4,"weight":1.5,"rarity":2})
+	t.add({"type":"item",    "id":"moss_tonic",  "min":2,"max":3,"weight":1.0,"rarity":0})
+	return t
+
+static func boss_heartwood() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(3, 4)
+	t.add({"type":"gold",    "min":140, "max":260, "weight":1.0, "guaranteed":true})
+	t.add({"type":"xp",      "min":300, "max":480, "weight":1.0, "guaranteed":true})
+	t.add({"type":"diamond", "min":4,   "max":8,   "weight":1.0, "rarity":3,  "guaranteed":true})
+	t.add({"type":"weapon",  "id":"cinderhart_maul","weight":0.6,"rarity":4})
+	t.add({"type":"material","id":"emberstone",  "min":4,"max":6,"weight":2.0,"rarity":1})
+	t.add({"type":"material","id":"monster_core", "min":2,"max":4,"weight":1.5,"rarity":2})
+	t.add({"type":"item",    "id":"moss_tonic",  "min":2,"max":3,"weight":0.8,"rarity":0})
+	return t
+
+static func boss_moonfen() -> LootTable:
+	var t := LootTable.new()
+	t.set_rolls(3, 4)
+	t.add({"type":"gold",    "min":160, "max":300, "weight":1.0, "guaranteed":true})
+	t.add({"type":"xp",      "min":350, "max":550, "weight":1.0, "guaranteed":true})
+	t.add({"type":"diamond", "min":4,   "max":9,   "weight":1.0, "rarity":3,  "guaranteed":true})
+	t.add({"type":"weapon",  "id":"oracle_crescent","weight":0.6,"rarity":4})
+	t.add({"type":"material","id":"moonmoss",         "min":4,"max":6,"weight":2.0,"rarity":1})
+	t.add({"type":"material","id":"crystal_fragment", "min":3,"max":5,"weight":1.5,"rarity":2})
+	t.add({"type":"item",    "id":"moss_tonic",       "min":2,"max":3,"weight":0.8,"rarity":0})
+	return t
+
+static func _boss_table_for(boss_id: String) -> LootTable:
+	match boss_id:
+		"bramblewood_thornwarden":  return boss_bramblewood()
+		"hushling_matriarch":       return boss_matriarch()
+		"mistfen_siltcrawler":      return boss_mistfen()
+		"heartwood_cindercolossus": return boss_heartwood()
+		"moonfen_voidweaver":       return boss_moonfen()
+		"biome_thornhide_alpha", "biome_rootbound_warden": return boss_bramblewood()
+		"biome_fenmaw":             return boss_mistfen()
+		"biome_cinderhart_colossus": return boss_heartwood()
+		"biome_moonfen_oracle":     return boss_moonfen()
+		"boss_whispergrove_root_harrow": return boss_matriarch()
+		"biome_bramblewood_thorn_regent", "biome_bramblewood_briar_widow": return boss_bramblewood()
+		"biome_mistfen_fogmaw":      return boss_mistfen()
+		"biome_heartwood_cinderhart", "biome_heartwood_ash_bellower": return boss_heartwood()
+		"biome_moonfen_tide_oracle", "biome_moonfen_lunar_leviathan": return boss_moonfen()
+		_:                          return chest_boss()

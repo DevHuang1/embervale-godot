@@ -4,6 +4,14 @@
 extends "res://scripts/systems/world_manager.gd"
 class_name BiomeManager
 
+const BRAMBLEWOOD_EXPEDITION_SCRIPT := preload("res://scripts/world/bramblewood_expedition.gd")
+const REALM_ACTIVITY_DIRECTOR_SCRIPT := preload("res://scripts/world/realm_activity_director.gd")
+const CHEST_NODE_SCRIPT := preload("res://scripts/entities/chest_node.gd")
+const GATHERING_NODE_SCRIPT := preload("res://scripts/world/gathering_node.gd")
+const MOBILE_LOD_SCRIPT := preload("res://scripts/systems/mobile_lod_controller.gd")
+const BIOME_BOSS_DIRECTOR_SCRIPT := preload("res://scripts/systems/boss_encounter_director.gd")
+const BOSS_ROSTER := preload("res://scripts/systems/boss_roster_catalog.gd")
+
 ## === Biome Manager ===
 ## Turns a grove-derived scene into one explorable biome: fixed realm
 ## theming, respawning realm-tier packs, travel gates to sibling biomes,
@@ -19,6 +27,22 @@ const DESPAWN_FAR_RADIUS := 130.0
 ## Packs never spawn inside this radius around the arena stone (readable boss).
 const ARENA_CLEAR_RADIUS := 16.0
 
+## === Map-wide encounter pockets ===
+## Authored hostile groups placed along the whole realm route so the map has
+## life at every beat instead of only materialising a ring around the hero. A
+## pocket wakes when the hero walks near it and its leftovers are culled once
+## the player moves on, so the realm-wide hostile budget stays bounded.
+const POCKET_GLOBAL_CAP := 16
+const POCKET_DESPAWN_MARGIN := 44.0
+const POCKET_RESPAWN_SECONDS := 20.0
+## Cluster spacing inside a pocket ring.
+const POCKET_SPAWN_INNER := 0.30
+const POCKET_SPAWN_OUTER := 0.62
+
+var _spawn_pockets: Array[Dictionary] = []
+var _structures_built := false
+var _pocket_sweep_in := 1.0
+
 var _despawn_sweep_in := 0.25
 
 var _biome_def: Dictionary = {}
@@ -28,12 +52,22 @@ var _biome_boss: Node3D = null
 var _boss_down_at := -1.0
 var _traveling := false
 var _arrival_focus_played := false
+var _bramblewood_expedition: Node3D = null
+var _realm_activity_director: RealmActivityDirector = null
+var _authored_chest_host: Node3D = null
+var _authored_resource_host: Node3D = null
+var _authored_encounter_host: Node3D = null
+var _mobile_lod: MobileLodController = null
+var _boss_director: BossEncounterDirector = null
+var _side_boss_markers: Array[Dictionary] = []
 
 func _ready() -> void:
 	_biome_def = Bestiary.biome(biome_id)
 	if _biome_def.is_empty():
 		push_error("BiomeManager: unknown biome_id '%s'" % biome_id)
 	super._ready()
+	_boss_director = BIOME_BOSS_DIRECTOR_SCRIPT.new()
+	_boss_director.setup(self)
 	_enter_biome()
 
 ## === Identity ===
@@ -47,11 +81,149 @@ func _enter_biome() -> void:
 	var title := str(_biome_def.get("title", biome_id.capitalize()))
 	game_state.quest_progress.emit("Now entering %s." % title)
 	_play_realm_audio(_visual_realm_id())
+	_build_profile_chests()
+	_build_profile_resources()
+	_build_profile_encounters()
+	_build_spawn_pockets()
+	_build_structures()
 	_build_gates()
 	_build_arena()
+	_build_side_bosses()
+	_build_bramblewood_expansion()
+	call_deferred("_build_realm_activity_director")
 	_spawn_wave(current_grove_state)
 	_start_respawner()
 	call_deferred("_play_realm_arrival")
+
+func _build_profile_chests() -> void:
+	if _authored_chest_host != null and is_instance_valid(_authored_chest_host):
+		return
+	# The shared grove presents Whispergrove during onboarding and Bramblewood
+	# once the expedition unlocks, so the authored chests must follow the
+	# *presented* realm. Using biome_id here left onboarding with Bramblewood
+	# caches (and no Whispergrove ones) on the same ground.
+	var profile := RealmLayoutData.profile(_visual_realm_id())
+	var chest_values: Variant = profile.get("chests", [])
+	if not chest_values is Array or (chest_values as Array).is_empty():
+		return
+	_authored_chest_host = Node3D.new()
+	_authored_chest_host.name = "AuthoredChests"
+	add_child(_authored_chest_host)
+	var seen_ids: Dictionary = {}
+	for chest_value in chest_values:
+		if not chest_value is Dictionary:
+			continue
+		var definition: Dictionary = chest_value
+		var chest_id := str(definition.get("id", "")).strip_edges()
+		if chest_id.is_empty() or seen_ids.has(chest_id):
+			continue
+		seen_ids[chest_id] = true
+		var chest: ChestNode = CHEST_NODE_SCRIPT.new()
+		chest.name = "Chest_%s" % chest_id
+		chest.realm_id = _visual_realm_id()
+		if not chest.configure_from_definition(definition):
+			chest.queue_free()
+			continue
+		chest.add_to_group("authored_chest")
+		_authored_chest_host.add_child(chest)
+		var position_value: Variant = definition.get("pos", Vector3.ZERO)
+		if position_value is Vector3:
+			chest.global_position = position_value
+		var terrain := get_node_or_null("Terrain") as TerrainRelief
+		if terrain != null:
+			terrain.conform_anchor(chest, 0.04)
+
+## === Map-wide gathering nodes ===
+## The realm profiles have always carried authored `resources`; nothing built
+## them, so gathering existed only as activity markers near spawn. These become
+## real, persisted GatheringNodes spread along the route.
+func _build_profile_resources() -> void:
+	if _authored_resource_host != null and is_instance_valid(_authored_resource_host):
+		return
+	var profile := RealmLayoutData.profile(_visual_realm_id())
+	var values: Variant = profile.get("resources", [])
+	if not values is Array or (values as Array).is_empty():
+		return
+	_authored_resource_host = Node3D.new()
+	_authored_resource_host.name = "AuthoredResources"
+	add_child(_authored_resource_host)
+	var realm := _visual_realm_id()
+	for value in values:
+		if not value is Dictionary:
+			continue
+		var definition: Dictionary = value
+		var material_id := str(definition.get("id", "")).strip_edges()
+		if material_id.is_empty():
+			continue
+		var pos_value: Variant = definition.get("pos", Vector3.ZERO)
+		if not pos_value is Vector3:
+			continue
+		var node: GatheringNode = GATHERING_NODE_SCRIPT.new()
+		node.name = "Gather_%s" % material_id
+		var amount := maxi(int(definition.get("yield", 2)), 1)
+		node.configure(material_id, amount, amount, 1.15, 240.0, realm)
+		_authored_resource_host.add_child(node)
+		node.global_position = _resolve_content_spot(pos_value as Vector3)
+		var terrain := get_node_or_null("Terrain") as TerrainRelief
+		if terrain != null:
+			terrain.conform_anchor(node, 0.04)
+
+## === Authored encounters ===
+## Realm profiles author specific enemy kinds per position. These are one-time
+## set-pieces: respawning pressure across the map comes from spawn pockets, so
+## this stays a bounded, hand-placed complement.
+func _build_profile_encounters() -> void:
+	if _authored_encounter_host != null and is_instance_valid(_authored_encounter_host):
+		return
+	var profile := RealmLayoutData.profile(_visual_realm_id())
+	var values: Variant = profile.get("encounters", [])
+	if not values is Array or (values as Array).is_empty():
+		return
+	_authored_encounter_host = Node3D.new()
+	_authored_encounter_host.name = "AuthoredEncounters"
+	add_child(_authored_encounter_host)
+	var index := 0
+	for value in values:
+		if not value is Dictionary:
+			continue
+		var definition: Dictionary = value
+		var scene_name := str(definition.get("scene", "")).strip_edges()
+		if scene_name.is_empty():
+			continue
+		var pos_value: Variant = definition.get("pos", Vector3.ZERO)
+		if not pos_value is Vector3:
+			continue
+		var enemy := _spawn_named_enemy(scene_name,
+			_resolve_content_spot(pos_value as Vector3),
+			str(definition.get("tier", "normal")), index)
+		if enemy == null:
+			continue
+		index += 1
+
+func _spawn_named_enemy(scene_name: String, world_pos: Vector3, tier: String,
+		index: int) -> Node3D:
+	var path := "res://scenes/entities/%s.tscn" % scene_name
+	if not ResourceLoader.exists(path):
+		push_warning("BiomeManager: authored encounter scene missing: %s" % path)
+		return null
+	var scene: PackedScene = load(path)
+	if scene == null or _authored_encounter_host == null:
+		return null
+	var enemy: Node3D = scene.instantiate()
+	if enemy == null:
+		return null
+	enemy.name = "AuthoredEncounter_%s_%d" % [scene_name, index]
+	enemy.set_meta("authored_encounter", scene_name)
+	_authored_encounter_host.add_child(enemy)
+	enemy.global_position = world_pos
+	_register_detail_lod(enemy)
+	var model := CharacterModelData.for_realm(_visual_realm_id(), tier)
+	if model != null:
+		model.configure_entity(enemy)
+	var terrain := get_node_or_null("Terrain") as TerrainRelief
+	if terrain != null:
+		terrain.conform_anchor(enemy, 0.12)
+	return enemy
 
 func _play_realm_arrival() -> void:
 	if _arrival_focus_played:
@@ -62,10 +234,17 @@ func _play_realm_arrival() -> void:
 		return
 	var camera_rig := get_node_or_null("CameraRig")
 	if camera_rig != null and camera_rig.has_method("play_focus_moment"):
-		var anchor := Vector3(-5.5, 4.0, 7.0) if _arena_stone != null \
-			else Vector3(0.0, 3.5, 6.0)
-		var focus_offset := Vector3(0.0, 1.4, 0.0) if _arena_stone != null \
-			else Vector3(0.0, 1.2, 0.0)
+		# Frame the focus from the hero's side. The old build hardcoded a
+		# near-spawn camera anchor, which swept the lens across the whole realm
+		# once the arenas moved 90-170 m out.
+		var focus_offset := Vector3(0.0, 1.4, 0.0)
+		var anchor := focus.global_position + focus_offset + Vector3(0.0, 1.0, 5.0)
+		if hero != null and is_instance_valid(hero):
+			var toward_hero := hero.global_position - focus.global_position
+			toward_hero.y = 0.0
+			if toward_hero.length() > 0.5:
+				anchor = focus.global_position + focus_offset \
+					+ toward_hero.normalized() * 5.0 + Vector3(0.0, 1.0, 0.0)
 		camera_rig.play_focus_moment(focus, anchor, focus_offset, 1.6)
 
 func _realm_tint() -> Color:
@@ -77,8 +256,7 @@ func _fx_tint() -> Color:
 		"firefly_tint", Color(1.0, 0.86, 0.45))
 
 func _visual_realm_id() -> String:
-	return "whispergrove" if biome_id == "bramblewood" \
-		and game_state.current_realm == "whispergrove" else biome_id
+	return RealmLayoutData.visual_realm_for(self)
 
 ## === Theming: fixed to this biome, not the quest ladder ===
 
@@ -115,10 +293,22 @@ func _on_respawn_tick() -> void:
 	# the traversal zones once the hero leaves the arena area. Without this,
 	# the global pool stayed pinned at pack_cap by enemies clustering around
 	# the boss stone and no pack ever respawned anywhere else in the realm.
+	_tick_spawn_pockets()
+	# Hero-relative packs remain only as cover for ground the authored pockets
+	# do not reach, so travelling never crosses a completely empty stretch.
 	var cap := int(_biome_def.get("pack_cap", 5))
 	if _nearby_enemy_count(hero.global_position, PACK_LIVE_RADIUS) >= cap:
 		return
-	_spawn_biome_pack(hero.global_position)
+	if not _pocket_covers(hero.global_position):
+		_spawn_biome_pack(hero.global_position)
+
+func _pocket_covers(point: Vector3) -> bool:
+	for pocket in _spawn_pockets:
+		var origin: Vector3 = pocket.get("origin", Vector3.ZERO)
+		var reach := float(pocket.get("radius", 24.0)) + POCKET_DESPAWN_MARGIN
+		if Vector2(point.x - origin.x, point.z - origin.z).length() <= reach:
+			return true
+	return false
 
 ## Idle pack enemies far behind the hero are culled so the realm's encounter
 ## budget travels with the player instead of accumulating around the boss.
@@ -132,13 +322,18 @@ func _despawn_distant_enemies() -> void:
 			continue
 		if enemy.is_in_group("boss"):
 			continue
+		# Authored set-pieces are hand-placed and bounded per realm; distance
+		# culling is for procedural pressure only, and would silently delete a
+		# hand-placed encounter the first frame a realm loads.
+		if enemy.has_meta("authored_encounter"):
+			continue
 		if enemy.global_position.distance_to(center) > DESPAWN_FAR_RADIUS:
 			enemy.queue_free()
 
 func _nearby_enemy_count(center: Vector3, radius: float) -> int:
 	var count := 0
 	for enemy in get_tree().get_nodes_in_group("enemy"):
-		if enemy is Node3D and is_instance_valid(enemy) \
+		if is_instance_valid(enemy) and enemy is Node3D \
 				and enemy.global_position.distance_to(center) <= radius:
 			count += 1
 	return count
@@ -166,25 +361,437 @@ func _spawn_biome_pack(origin: Vector3) -> void:
 		_spawn_pack_enemy(anchor, biome_id, false, idx, total)
 		idx += 1
 
+## === Map-wide spawn pockets ===
+## Authored groups pulled from the realm layout so hostile life exists down the
+## whole route. Progress is gameplay-identical across quality tiers: only the
+## presentation budget scales, never the pocket positions, tiers, or counts.
+
+func _build_spawn_pockets() -> void:
+	if not _spawn_pockets.is_empty():
+		return
+	var profile := RealmLayoutData.profile(_visual_realm_id())
+	var values: Variant = profile.get("spawn_pockets", [])
+	if not values is Array:
+		return
+	for value in values:
+		if not value is Dictionary:
+			continue
+		var definition: Dictionary = value
+		var pos_value: Variant = definition.get("pos", Vector3.ZERO)
+		if not pos_value is Vector3:
+			continue
+		_spawn_pockets.append({
+			"id": str(definition.get("id", "")),
+			"origin": _resolve_content_spot(pos_value as Vector3),
+			"tier": str(definition.get("tier", "normal")),
+			"count": maxi(int(definition.get("count", 2)), 1),
+			"radius": maxf(float(definition.get("radius", 24.0)), 8.0),
+			"alive": [],
+			"next_at": 0.0,
+		})
+
+## Fill any pocket the hero is close to. Cheap enough to run on a slow sweep:
+## a handful of distance checks against authored origins.
+func _tick_spawn_pockets() -> void:
+	if _spawn_pockets.is_empty() or hero == null or not is_instance_valid(hero):
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	var center := hero.global_position
+	for pocket in _spawn_pockets:
+		var origin: Vector3 = pocket.get("origin", Vector3.ZERO)
+		var radius: float = float(pocket.get("radius", 24.0))
+		var distance := Vector2(center.x - origin.x, center.z - origin.z).length()
+		var living: Array = []
+		for enemy in pocket.get("alive", []):
+			if is_instance_valid(enemy) and enemy is Node3D:
+				living.append(enemy)
+		pocket["alive"] = living
+		if distance > radius + POCKET_DESPAWN_MARGIN:
+			for enemy in living:
+				if enemy.is_in_group("boss"):
+					continue
+				enemy.queue_free()
+			pocket["alive"] = []
+			continue
+		if distance > radius:
+			continue
+		if now < float(pocket.get("next_at", 0.0)):
+			continue
+		if living.size() >= int(pocket.get("count", 2)):
+			continue
+		if _spawn_pocket_group(pocket, living) > 0:
+			pocket["next_at"] = now + POCKET_RESPAWN_SECONDS
+
+func _spawn_pocket_group(pocket: Dictionary, living: Array) -> int:
+	var budget := _hostile_budget_remaining()
+	if budget <= 0:
+		return 0
+	var total := int(pocket.get("count", 2))
+	var missing := mini(total - living.size(), budget)
+	if missing <= 0:
+		return 0
+	var origin: Vector3 = pocket.get("origin", Vector3.ZERO)
+	var radius := float(pocket.get("radius", 24.0))
+	var tier := str(pocket.get("tier", "normal"))
+	var spawned := 0
+	for i in missing:
+		var angle := TAU * float(living.size() + i) / maxf(float(total), 1.0) \
+			+ randf_range(-0.28, 0.28)
+		var dist := randf_range(radius * POCKET_SPAWN_INNER, radius * POCKET_SPAWN_OUTER)
+		var spot := origin + Vector3(cos(angle) * dist, 0.2, sin(angle) * dist)
+		# A pocket ring can reach into a boss arena or a gate; never let an
+		# individual spawn land there even when the pocket origin is legal.
+		var enemy := _spawn_tiered_enemy(
+			push_clear_of_zones(spot, _reserved_zones()), tier)
+		if enemy == null:
+			continue
+		enemy.set_meta("spawn_pocket_id", str(pocket.get("id", "")))
+		living.append(enemy)
+		spawned += 1
+	return spawned
+
+## === Presentation LOD ===
+## One shared, distance-budgeted controller for every authoritative prop and
+## actor this manager builds. It is presentation-only: shadows and opted-in
+## micro detail, never collision, timing or telegraphs.
+func _register_detail_lod(node: Node3D) -> void:
+	if node == null:
+		return
+	var lod := _ensure_mobile_lod()
+	if lod != null:
+		lod.register_detail(node)
+
+func _ensure_mobile_lod() -> MobileLodController:
+	if _mobile_lod != null and is_instance_valid(_mobile_lod):
+		return _mobile_lod
+	if not is_inside_tree():
+		return null
+	_mobile_lod = MOBILE_LOD_SCRIPT.new()
+	_mobile_lod.name = "MobileLod"
+	add_child(_mobile_lod)
+	return _mobile_lod
+
+## Realm-wide hostile budget. Counts every live enemy (bosses included) so a
+## boss fight plus pocket refills can never stack past the mobile ceiling.
+func _hostile_budget_remaining() -> int:
+	var total := 0
+	for enemy in get_tree().get_nodes_in_group("enemy"):
+		if is_instance_valid(enemy) and enemy is Node3D:
+			total += 1
+	return POCKET_GLOBAL_CAP - total
+
+func _spawn_tiered_enemy(world_pos: Vector3, tier: String) -> Node3D:
+	var elite := tier == "elite"
+	var variant_tier := "elite" if elite else ("hard" if tier == "hard" else "normal")
+	var realm_id := _visual_realm_id()
+	var v := Bestiary.variant_for(realm_id, variant_tier)
+	if v.is_empty():
+		return null
+	var kind := str(v.get("kind", "hushling"))
+	var scene_path := "res://scenes/entities/elite_hushling.tscn" if elite \
+		else ("res://scenes/entities/spitter.tscn" if kind == "spitter" \
+		else ("res://scenes/entities/moonfen_fenling.tscn" if kind in ["fenling", "moonfen_fenling"] \
+		else ("res://scenes/entities/relic_leech.tscn" if kind == "relic_leech" \
+		else "res://scenes/entities/hushling.tscn")))
+	var scene: PackedScene = load(scene_path)
+	if scene == null:
+		return null
+	var enemy: Node3D = scene.instantiate()
+	if enemy == null:
+		return null
+	add_child(enemy)
+	enemy.global_position = world_pos
+	_register_detail_lod(enemy)
+	var md := CharacterModelData.new()
+	md.display_name = str(v.get("display", "Hushling"))
+	md.model_scale = float(v.get("scale", 1.0))
+	md.body_tint = v.get("tint", Color(0, 0, 0, 0))
+	md.eye_glow_color = v.get("eye", Color(0, 0, 0, 0))
+	md.max_hp_override = int(v.get("hp", 0))
+	md.base_atk_bonus = int(v.get("atk_bonus", 0))
+	md.move_speed_mult = float(v.get("speed", 1.0))
+	md.configure_entity(enemy)
+	if enemy.has_method("configure_archetype") and not enemy is RealmArchetypeEnemy:
+		enemy.configure_archetype(kind)
+	if bool(v.get("volley", false)) and "thorn_volley" in enemy:
+		enemy.thorn_volley = true
+	var terrain := get_node_or_null("Terrain") as TerrainRelief
+	if terrain != null:
+		terrain.conform_anchor(enemy, 0.12)
+	return enemy
+
+## === Authored structures: readable set-pieces down the whole route ===
+
+func _build_structures() -> void:
+	if _structures_built:
+		return
+	var profile := RealmLayoutData.profile(_visual_realm_id())
+	var values: Variant = profile.get("structures", [])
+	if not values is Array or (values as Array).is_empty():
+		return
+	_structures_built = true
+	var host := Node3D.new()
+	host.name = "AuthoredStructures"
+	add_child(host)
+	for value in values:
+		if not value is Dictionary:
+			continue
+		var definition: Dictionary = value
+		var pos_value: Variant = definition.get("pos", Vector3.ZERO)
+		if not pos_value is Vector3:
+			continue
+		var root := Node3D.new()
+		root.name = "Structure_%s" % str(definition.get("id", "structure"))
+		root.add_to_group("structure")
+		root.set_meta("structure_id", str(definition.get("id", "")))
+		root.set_meta("structure_kind", str(definition.get("kind", "ruins")))
+		host.add_child(root)
+		root.global_position = _resolve_content_spot(pos_value as Vector3)
+		_build_structure_kind(root, str(definition.get("kind", "ruins")))
+		_register_detail_lod(root)
+		var label := Label3D.new()
+		label.name = "StructureLabel"
+		label.text = str(definition.get("label", "LANDMARK")).to_upper()
+		label.font_size = 30
+		label.outline_size = 8
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.no_depth_test = true
+		label.modulate = _fx_tint()
+		label.position = Vector3(0.0, 3.6, 0.0)
+		root.add_child(label)
+		var terrain := get_node_or_null("Terrain") as TerrainRelief
+		if terrain != null:
+			terrain.conform_anchor(root, 0.06)
+
+func _structure_stone_material() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = load("res://assets/textures/stylized/rock/albedo.png")
+	mat.normal_enabled = true
+	mat.normal_texture = load("res://assets/textures/stylized/rock/normal.png")
+	mat.roughness_texture = load("res://assets/textures/stylized/rock/roughness.png")
+	mat.albedo_color = _realm_tint().darkened(0.45).lerp(Color(0.30, 0.28, 0.25), 0.35)
+	mat.roughness = 0.92
+	return mat
+
+func _structure_mesh(parent: Node3D, mesh: Mesh, position: Vector3,
+		material: Material, rotation_y: float = 0.0) -> MeshInstance3D:
+	var instance := MeshInstance3D.new()
+	instance.mesh = mesh
+	instance.position = position
+	instance.rotation.y = rotation_y
+	instance.material_override = material
+	parent.add_child(instance)
+	return instance
+
+func _build_structure_kind(root: Node3D, kind: String) -> void:
+	var stone := _structure_stone_material()
+	match kind:
+		"arch":
+			var pillar := CylinderMesh.new()
+			pillar.top_radius = 0.34
+			pillar.bottom_radius = 0.5
+			pillar.height = 3.2
+			pillar.radial_segments = 7
+			_structure_mesh(root, pillar, Vector3(-1.5, 1.6, 0), stone)
+			_structure_mesh(root, pillar, Vector3(1.5, 1.6, 0), stone)
+			var lintel := BoxMesh.new()
+			lintel.size = Vector3(3.7, 0.55, 0.55)
+			_structure_mesh(root, lintel, Vector3(0, 3.0, 0), stone)
+		"watch", "spire":
+			var tower := CylinderMesh.new()
+			tower.top_radius = 0.10 if kind == "spire" else 0.42
+			tower.bottom_radius = 0.72
+			tower.height = 5.0
+			tower.radial_segments = 8
+			_structure_mesh(root, tower, Vector3(0, 2.5, 0), stone)
+			var crown := CylinderMesh.new()
+			crown.top_radius = 0.95
+			crown.bottom_radius = 0.95
+			crown.height = 0.24
+			crown.radial_segments = 8
+			_structure_mesh(root, crown, Vector3(0, 4.9, 0), stone)
+			var lamp := SphereMesh.new()
+			lamp.radius = 0.28
+			lamp.height = 0.56
+			var glow := StandardMaterial3D.new()
+			glow.albedo_color = _fx_tint().darkened(0.2)
+			glow.emission_enabled = true
+			glow.emission = _fx_tint()
+			glow.emission_energy_multiplier = 1.1
+			_structure_mesh(root, lamp, Vector3(0, 5.35, 0), glow)
+		"camp":
+			var ground := CylinderMesh.new()
+			ground.top_radius = 3.0
+			ground.bottom_radius = 3.2
+			ground.height = 0.12
+			ground.radial_segments = 12
+			_structure_mesh(root, ground, Vector3(0, 0.06, 0), stone)
+			var tent := CylinderMesh.new()
+			tent.top_radius = 0.05
+			tent.bottom_radius = 1.5
+			tent.height = 1.9
+			tent.radial_segments = 7
+			_structure_mesh(root, tent, Vector3(-1.1, 0.95, 0.6), stone)
+			var fire := SphereMesh.new()
+			fire.radius = 0.26
+			fire.height = 0.5
+			var ember := StandardMaterial3D.new()
+			ember.albedo_color = Color(0.4, 0.16, 0.06)
+			ember.emission_enabled = true
+			ember.emission = _fx_tint()
+			ember.emission_energy_multiplier = 0.9
+			_structure_mesh(root, fire, Vector3(1.2, 0.22, -0.4), ember)
+			var light := OmniLight3D.new()
+			light.light_color = _fx_tint()
+			light.light_energy = 0.7
+			light.omni_range = 6.0
+			light.position = Vector3(1.2, 1.0, -0.4)
+			root.add_child(light)
+		"basin":
+			var rim := TorusMesh.new()
+			rim.inner_radius = 1.7
+			rim.outer_radius = 2.1
+			rim.ring_segments = 20
+			var rim_instance := _structure_mesh(root, rim, Vector3(0, 0.16, 0), stone)
+			rim_instance.rotation.x = PI * 0.5
+			var pool := CylinderMesh.new()
+			pool.top_radius = 1.75
+			pool.bottom_radius = 1.75
+			pool.height = 0.06
+			pool.radial_segments = 16
+			var water := StandardMaterial3D.new()
+			water.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			water.albedo_color = Color(_realm_tint().r, _realm_tint().g, _realm_tint().b, 0.6)
+			water.emission_enabled = true
+			water.emission = _realm_tint()
+			water.emission_energy_multiplier = 0.25
+			_structure_mesh(root, pool, Vector3(0, 0.14, 0), water)
+		"shrine":
+			var base := CylinderMesh.new()
+			base.top_radius = 1.25
+			base.bottom_radius = 1.55
+			base.height = 0.65
+			base.radial_segments = 8
+			_structure_mesh(root, base, Vector3(0, 0.32, 0), stone)
+			var core := SphereMesh.new()
+			core.radius = 0.46
+			core.height = 0.92
+			var glow := StandardMaterial3D.new()
+			glow.albedo_color = _fx_tint().darkened(0.3)
+			glow.emission_enabled = true
+			glow.emission = _fx_tint()
+			glow.emission_energy_multiplier = 0.8
+			_structure_mesh(root, core, Vector3(0, 1.02, 0), glow)
+		_:  # ruins
+			var column_tall := CylinderMesh.new()
+			column_tall.top_radius = 0.26
+			column_tall.bottom_radius = 0.36
+			column_tall.height = 2.2
+			column_tall.radial_segments = 6
+			var column_broken := CylinderMesh.new()
+			column_broken.top_radius = 0.26
+			column_broken.bottom_radius = 0.36
+			column_broken.height = 1.1
+			column_broken.radial_segments = 6
+			for i in 7:
+				var angle := TAU * float(i) / 7.0
+				var broken := i % 3 == 0
+				var mesh: CylinderMesh = column_broken if broken else column_tall
+				var instance := _structure_mesh(root, mesh,
+					Vector3(cos(angle) * 2.6, mesh.height * 0.5, sin(angle) * 2.6), stone)
+				instance.rotation.z = 0.22 if broken else 0.0
+
 ## === Travel gates ===
 
-func _build_gates() -> void:
+## Realm travel stays a short walk from the arrival point. Gates own only the
+## first few route waypoints: deriving them from the whole route pushed them
+## 30-90 m out once the routes lengthened to reach the far boss arenas.
+const GATE_ROUTE_SPAN := 3
+## Hostiles and set-pieces keep this far clear of a travel gate.
+const GATE_CLEARANCE := 12.0
+## Authored props keep this far clear of an authored chest.
+const CHEST_CLEARANCE := 4.0
+
+## Deterministic gate anchors, filtered to the destinations that resolve to a
+## real realm so callers and builders agree on the order.
+func _gate_anchor_positions() -> Array[Vector3]:
 	var dests: Array = _biome_def.get("gates", [])
 	var origin := player_spawn.global_position
 	var route: Array = RealmLayoutData.profile(_visual_realm_id()).get("route", [])
-	# Gates occupy authored route endpoints, keeping travel flow distinct while
-	# falling back to the old deterministic ring for incomplete profiles.
+	var result: Array[Vector3] = []
 	var base_angle := float(abs(int(biome_id.hash())) % 628) / 100.0
 	for i in dests.size():
-		var dest := str(dests[i])
-		if not Bestiary.WORLD_REALMS.has(dest):
+		if not Bestiary.WORLD_REALMS.has(str(dests[i])):
 			continue
 		var angle := base_angle + TAU * float(i) / maxf(float(dests.size()), 1.0)
 		var pos := origin + Vector3(cos(angle) * 15.0, 0, sin(angle) * 15.0)
 		if route.size() > 1:
-			var route_index := 1 + (i * maxi(route.size() - 2, 1)) / maxi(dests.size(), 1)
-			pos = route[mini(route_index, route.size() - 1)]
+			var span := mini(route.size() - 1, GATE_ROUTE_SPAN)
+			var route_index := 1 + (i * maxi(span, 1)) / maxi(dests.size(), 1)
+			pos = route[mini(route_index, span)]
+		result.append(pos)
+	return result
+
+func _build_gates() -> void:
+	var dests: Array = _biome_def.get("gates", [])
+	var anchors := _gate_anchor_positions()
+	var anchor_index := 0
+	for i in dests.size():
+		var dest := str(dests[i])
+		if not Bestiary.WORLD_REALMS.has(dest):
+			continue
+		var pos: Vector3 = anchors[anchor_index] if anchor_index < anchors.size() \
+			else player_spawn.global_position
+		anchor_index += 1
 		_gates.append({"node": _make_monolith(dest, pos), "dest": dest})
+
+## === Reserved ground: boss arenas and travel gates ===
+## Readable boss fights and unobstructed portals are gameplay contracts, not
+## decoration. Authored hostiles and set-pieces are pushed clear of these zones
+## at build time so future data edits cannot silently break them.
+
+func _reserved_zones() -> Array[Dictionary]:
+	var zones: Array[Dictionary] = []
+	for anchor in RealmLayoutData.boss_anchor_points_for_world(self):
+		zones.append({"pos": Vector3(anchor.x, 0.0, anchor.y), "radius": ARENA_CLEAR_RADIUS})
+	for gate_pos in _gate_anchor_positions():
+		zones.append({"pos": gate_pos, "radius": GATE_CLEARANCE})
+	return zones
+
+func _chest_anchor_points() -> Array[Vector3]:
+	var result: Array[Vector3] = []
+	for chest in get_tree().get_nodes_in_group("authored_chest"):
+		var node := chest as Node3D
+		if node != null and is_instance_valid(node):
+			result.append(node.global_position)
+	return result
+
+## Slide a point just outside every reserved circle it violates. Blockers push
+## in order, so a point trapped between two zones settles outside the last one.
+static func push_clear_of_zones(origin: Vector3, zones: Array[Dictionary]) -> Vector3:
+	var result := origin
+	for zone in zones:
+		var blocker: Vector3 = zone.get("pos", Vector3.ZERO)
+		var min_distance := float(zone.get("radius", 12.0))
+		var offset := Vector3(result.x - blocker.x, 0.0, result.z - blocker.z)
+		var gap := offset.length()
+		if gap >= min_distance:
+			continue
+		var direction := offset.normalized() if gap > 0.1 else Vector3.BACK
+		result = blocker + direction * min_distance
+		result.y = origin.y
+	return result
+
+func _resolve_content_spot(origin: Vector3) -> Vector3:
+	var spot := push_clear_of_zones(origin, _reserved_zones())
+	for chest_pos in _chest_anchor_points():
+		var offset := Vector3(spot.x - chest_pos.x, 0.0, spot.z - chest_pos.z)
+		if offset.length() >= CHEST_CLEARANCE:
+			continue
+		var direction := offset.normalized() if offset.length() > 0.1 else Vector3.BACK
+		spot = chest_pos + direction * CHEST_CLEARANCE
+		spot.y = origin.y
+	return spot
 
 func _make_monolith(dest: String, pos: Vector3) -> Node3D:
 	var gate := Node3D.new()
@@ -279,11 +886,14 @@ func _make_monolith(dest: String, pos: Vector3) -> Node3D:
 ## === Arena: walk the stone to wake the biome boss ===
 
 func _build_arena() -> void:
+	if _expansion_accessible():
+		return
 	var boss_id := str(_biome_def.get("boss_id", ""))
 	if boss_id.is_empty():
 		return  # final-boss biome: the Matriarch answers the quest rite only
 	_arena_stone = Node3D.new()
 	_arena_stone.name = "ArenaStone"
+	_arena_stone.add_to_group("boss_arena")
 	var pillar := MeshInstance3D.new()
 	var cyl := CylinderMesh.new()
 	cyl.top_radius = 0.5
@@ -299,8 +909,8 @@ func _build_arena() -> void:
 	_arena_stone.add_child(pillar)
 	var ring := MeshInstance3D.new()
 	var tor := TorusMesh.new()
-	tor.inner_radius = 1.5
-	tor.outer_radius = 1.9
+	tor.inner_radius = BOSS_DIRECTOR_SCRIPT.ARENA_MARKER_INNER_RADIUS
+	tor.outer_radius = BOSS_DIRECTOR_SCRIPT.ARENA_MARKER_OUTER_RADIUS
 	ring.mesh = tor
 	ring.material_override = mat
 	_arena_stone.add_child(ring)
@@ -321,6 +931,100 @@ func _build_arena() -> void:
 	if terrain != null:
 		terrain.conform_anchor(_arena_stone, 0.08)
 
+func _build_side_bosses() -> void:
+	if not _side_boss_markers.is_empty():
+		return
+	var profile := RealmLayoutData.profile(_visual_realm_id())
+	var side_values: Variant = profile.get("side_bosses", [])
+	if not side_values is Array:
+		return
+	for side_value in side_values:
+		if not side_value is Dictionary:
+			continue
+		var definition: Dictionary = side_value
+		var boss_id := BOSS_ROSTER.canonical_id_for(str(definition.get("id", "")))
+		if BOSS_ROSTER.definition_for(boss_id).is_empty():
+			continue
+		var marker := Node3D.new()
+		marker.name = "SideBossStone_%s" % boss_id
+		marker.add_to_group("boss_arena")
+		var stone_mesh := CylinderMesh.new()
+		stone_mesh.top_radius = 0.42
+		stone_mesh.bottom_radius = 0.68
+		stone_mesh.height = 1.0
+		stone_mesh.radial_segments = 8
+		var stone := MeshInstance3D.new()
+		stone.name = "Stone"
+		stone.mesh = stone_mesh
+		var stone_material := StandardMaterial3D.new()
+		stone_material.albedo_color = _realm_tint().darkened(0.62)
+		stone_material.emission_enabled = true
+		stone_material.emission = _fx_tint()
+		stone_material.emission_energy_multiplier = 0.42
+		stone.material_override = stone_material
+		marker.add_child(stone)
+		var ring := MeshInstance3D.new()
+		ring.name = "SummonRing"
+		var ring_mesh := TorusMesh.new()
+		ring_mesh.inner_radius = BOSS_DIRECTOR_SCRIPT.ARENA_MARKER_INNER_RADIUS
+		ring_mesh.outer_radius = BOSS_DIRECTOR_SCRIPT.ARENA_MARKER_OUTER_RADIUS
+		ring_mesh.ring_segments = 18
+		ring.mesh = ring_mesh
+		ring.position.y = 0.06
+		ring.material_override = stone_material
+		marker.add_child(ring)
+		var label := Label3D.new()
+		label.name = "BossLabel"
+		label.text = str(definition.get("display_name", boss_id)).to_upper()
+		label.font_size = 42
+		label.pixel_size = 0.004
+		label.outline_size = 10
+		label.modulate = _fx_tint()
+		label.position = Vector3(0.0, 1.65, 0.0)
+		marker.add_child(label)
+		add_child(marker)
+		var position_value: Variant = definition.get("position", Vector3.ZERO)
+		if position_value is Vector3:
+			marker.global_position = position_value
+		var terrain := get_node_or_null("Terrain") as TerrainRelief
+		if terrain != null:
+			terrain.conform_anchor(marker, 0.06)
+		_side_boss_markers.append({"id": boss_id, "node": marker, "down_at": -1.0})
+
+func _expansion_accessible() -> bool:
+	return biome_id == Bestiary.REALM_BRAMBLEWOOD and game_state != null \
+		and (bool(game_state.get("onboarding_completed")) \
+		or int(game_state.get("current_stage")) >= int(game_state.QuestStage.COMPLETE))
+
+func _build_bramblewood_expansion() -> void:
+	if not _expansion_accessible() or (_bramblewood_expedition != null \
+			and is_instance_valid(_bramblewood_expedition)):
+		return
+	if _arena_stone != null and is_instance_valid(_arena_stone):
+		_arena_stone.queue_free()
+		_arena_stone = null
+	_bramblewood_expedition = BRAMBLEWOOD_EXPEDITION_SCRIPT.new()
+	_bramblewood_expedition.name = "BramblewoodExpedition"
+	add_child(_bramblewood_expedition)
+	if _bramblewood_expedition.has_method("setup"):
+		_bramblewood_expedition.call("setup", self)
+
+func _build_realm_activity_director() -> void:
+	if _realm_activity_director != null and is_instance_valid(_realm_activity_director):
+		return
+	_realm_activity_director = REALM_ACTIVITY_DIRECTOR_SCRIPT.new()
+	_realm_activity_director.name = "RealmActivityDirector"
+	add_child(_realm_activity_director)
+	var activity_realm := _visual_realm_id()
+	# The shared grove scene represents Whispergrove during onboarding and
+	# Bramblewood after the expedition opens.  Save compatibility still
+	# canonicalizes the old whispergrove id to bramblewood, so stage/access is
+	# the reliable runtime discriminator for this activity layer.
+	if biome_id == Bestiary.REALM_BRAMBLEWOOD and activity_realm == "bramblewood" \
+			and not _expansion_accessible() and int(game_state.current_stage) < int(game_state.QuestStage.COMPLETE):
+		activity_realm = "whispergrove"
+	_realm_activity_director.setup(self, activity_realm, abs(int(biome_id.hash())))
+
 func _engage_arena_boss() -> void:
 	var boss_id := str(_biome_def.get("boss_id", ""))
 	var def := Bestiary.boss_def(boss_id)
@@ -328,16 +1032,16 @@ func _engage_arena_boss() -> void:
 		return
 	if _biome_boss != null and is_instance_valid(_biome_boss):
 		return
-	var scene_path := str(def.get("scene", "res://scenes/entities/boss_biome.tscn"))
-	var scene: PackedScene = load(scene_path)
-	if scene == null:
-		push_error("BiomeManager: boss scene missing (%s)" % scene_path)
+	if _boss_director == null:
 		return
-	_biome_boss = scene.instantiate()
-	if "def_id" in _biome_boss:
-		_biome_boss.def_id = boss_id
-	add_child(_biome_boss)
-	_biome_boss.global_position = _arena_stone.global_position + Vector3(0, 0.1, 6)
+	var player_position := hero.global_position if hero != null \
+		and is_instance_valid(hero) else _arena_stone.global_position
+	var boss_position := BOSS_DIRECTOR_SCRIPT.entry_position_for(
+		_arena_stone.global_position, player_position)
+	boss_position.y += 0.1
+	_biome_boss = _boss_director.spawn_boss(boss_id, false, boss_position)
+	if _biome_boss == null:
+		return
 	# Hide the summoning stone once its lord walks
 	_arena_stone.visible = false
 	if camera_rig:
@@ -347,6 +1051,73 @@ func _engage_arena_boss() -> void:
 	game_state.quest_progress.emit(str(def.get("intro", "The arena wakes.")))
 	if _biome_boss.has_signal("died"):
 		_biome_boss.died.connect(_on_arena_boss_died)
+
+func _engage_side_boss(index: int) -> void:
+	if _boss_director == null or _biome_boss != null and is_instance_valid(_biome_boss):
+		return
+	if index < 0 or index >= _side_boss_markers.size():
+		return
+	var entry := _side_boss_markers[index]
+	var marker := entry.get("node") as Node3D
+	if marker == null or not is_instance_valid(marker) or not marker.visible:
+		return
+	var boss_id := str(entry.get("id", ""))
+	var definition := BOSS_ROSTER.definition_for(boss_id)
+	var player_position := hero.global_position if hero != null \
+		and is_instance_valid(hero) else marker.global_position
+	var boss_position := BOSS_DIRECTOR_SCRIPT.entry_position_for(
+		marker.global_position, player_position)
+	boss_position.y += 0.1
+	_biome_boss = _boss_director.spawn_boss(boss_id, false, boss_position)
+	if _biome_boss == null:
+		return
+	marker.visible = false
+	if camera_rig:
+		camera_rig.add_shake(0.6)
+		camera_rig.play_boss_intro(_biome_boss)
+	audio.play_enemy_telegraph()
+	game_state.quest_progress.emit("%s answers the side arena." % str(definition.get("name", boss_id)).capitalize())
+	if _biome_boss.has_signal("died"):
+		_biome_boss.died.connect(_on_side_boss_died.bind(index))
+
+func _on_side_boss_died(index: int) -> void:
+	_biome_boss = null
+	if index < 0 or index >= _side_boss_markers.size():
+		return
+	_side_boss_markers[index]["down_at"] = Time.get_ticks_msec() / 1000.0
+
+func _primary_boss_cleared() -> bool:
+	if game_state == null or not game_state.has_method("has_boss_killed"):
+		return false
+	var required_key := BOSS_ROSTER.gameplay_key_for(str(_biome_def.get("boss_id", "")))
+	if biome_id == Bestiary.REALM_BRAMBLEWOOD:
+		required_key = "boss_whispergrove_root_harrow"
+	return bool(game_state.call("has_boss_killed", required_key))
+
+func _process_side_bosses(player_position: Vector3) -> void:
+	if not _primary_boss_cleared() or _biome_boss != null and is_instance_valid(_biome_boss):
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	for index in _side_boss_markers.size():
+		var entry := _side_boss_markers[index]
+		var marker := entry.get("node") as Node3D
+		if marker == null or not is_instance_valid(marker):
+			continue
+		var down_at := float(entry.get("down_at", -1.0))
+		if down_at > 0.0:
+			if now - down_at < 30.0:
+				continue
+			_side_boss_markers[index]["down_at"] = -1.0
+			marker.visible = true
+		if marker.visible and player_position.distance_to(marker.global_position) \
+				< BOSS_DIRECTOR_SCRIPT.ARENA_TRIGGER_RADIUS:
+			_engage_side_boss(index)
+			return
+
+func _reset_biome_boss() -> void:
+	if _biome_boss != null and is_instance_valid(_biome_boss) \
+			and _biome_boss.has_method("reset_encounter"):
+		_biome_boss.call("reset_encounter")
 
 func _on_arena_boss_died() -> void:
 	_biome_boss = null
@@ -358,6 +1129,8 @@ func _on_arena_boss_died() -> void:
 ## set_process(false) whenever no relic trophy exists, which would kill
 ## gate/arena polling.
 func _process(delta: float) -> void:
+	if _bramblewood_expedition == null and _expansion_accessible():
+		_build_bramblewood_expansion()
 	if _relic_trophy != null and is_instance_valid(_relic_trophy):
 		_relic_trophy.rotate_y(delta * 0.7)
 	# Throttled clean-up pass so packs left behind on the route are pruned
@@ -366,7 +1139,13 @@ func _process(delta: float) -> void:
 	if _despawn_sweep_in <= 0.0:
 		_despawn_sweep_in = 0.5
 		_despawn_distant_enemies()
+	_pocket_sweep_in -= delta
+	if _pocket_sweep_in <= 0.0:
+		_pocket_sweep_in = 1.0
+		_tick_spawn_pockets()
 	if _traveling or hero == null or not is_instance_valid(hero):
+		return
+	if _biome_boss != null and is_instance_valid(_biome_boss):
 		return
 	var pos := hero.global_position
 	# Gates
@@ -379,7 +1158,10 @@ func _process(delta: float) -> void:
 			return
 	# Arena
 	if _arena_stone != null and is_instance_valid(_arena_stone) and _arena_stone.visible \
-			and pos.distance_to(_arena_stone.global_position) < 2.4:
+			and not (biome_id == Bestiary.REALM_BRAMBLEWOOD \
+			and current_grove_state < GameState.QuestStage.COMPLETE) \
+			and pos.distance_to(_arena_stone.global_position) \
+			< BOSS_DIRECTOR_SCRIPT.ARENA_TRIGGER_RADIUS:
 		_engage_arena_boss()
 		return
 	# Rematch: the stone re-rises half a minute after a kill
@@ -387,6 +1169,7 @@ func _process(delta: float) -> void:
 		_boss_down_at = -1.0
 		if _arena_stone != null and is_instance_valid(_arena_stone):
 			_arena_stone.visible = true
+	_process_side_bosses(pos)
 
 func _travel_to(dest: String) -> void:
 	if _traveling:

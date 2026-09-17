@@ -17,6 +17,16 @@ func _run() -> void:
 			quit(1)
 			return
 		seen[id] = true
+	var boss_weapons := ["thornbite_cleaver", "tidecall_brand",
+		"cinderhart_maul", "oracle_crescent"]
+	for weapon_id in boss_weapons:
+		var weapon: Dictionary = gs.WEAPON_DEFS.get(weapon_id, {})
+		if weapon.is_empty() or weapon.get("skills") is not Array \
+				or int(weapon.get("atk", 0)) <= 0 \
+				or str(weapon.get("source", "")).is_empty():
+			push_error("Boss weapon %s is not a usable WEAPON_DEFS entry" % weapon_id)
+			quit(1)
+			return
 	seen.clear()
 	for id in gs.ARMOR_DEFS:
 		var definition: Dictionary = gs.ARMOR_DEFS[id]
@@ -31,11 +41,23 @@ func _run() -> void:
 		var category := str(recipe.get("category", ""))
 		var valid_output := category == "weapon" and gs.WEAPON_DEFS.has(output_id) \
 			or category == "armor" and gs.ARMOR_DEFS.has(output_id) \
-			or category in ["potion", "utility"] and output_id == "moss_tonic"
-		if not valid_output or int(recipe.get("gold_cost", -1)) < 0:
+			or category in ["potion", "utility"] and gs.CONSUMABLE_DEFS.has(output_id)
+		if not valid_output or int(recipe.get("gold_cost", -1)) < 0 \
+				or int(recipe.get("output_qty", 0)) < 1:
 			push_error("Recipe %s has unreachable output: %s" % [recipe_id, output_id])
 			quit(1)
 			return
+		# A single-item consumable recipe whose card promises one thing and
+		# hands over another is a bait recipe. Bulk bundles are allowed to carry
+		# their own title because the crafting card states the granted item.
+		if category in ["potion", "utility"] and int(recipe.get("output_qty", 1)) == 1:
+			var granted := str(gs.CONSUMABLE_DEFS[output_id].get("name", output_id)).to_upper()
+			var advertised := str(recipe.get("name", recipe_id)).to_upper()
+			if advertised != granted:
+				push_error("Recipe %s advertises '%s' but grants '%s'"
+					% [recipe_id, advertised, granted])
+				quit(1)
+				return
 	for realm_id in Bestiary.REALMS:
 		var realm: Dictionary = Bestiary.REALMS[realm_id]
 		if str(realm.get("id", "")) != str(realm_id) \

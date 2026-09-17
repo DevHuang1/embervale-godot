@@ -3,6 +3,7 @@ class_name HUD
 
 const BOSS_REWARD_CHOICE_PANEL := preload("res://scripts/ui/boss_reward_choice_panel.gd")
 const REWARD_REVEAL_PANEL := preload("res://scripts/ui/reward_reveal_panel.gd")
+const REWARD_REVEAL_MODEL := preload("res://scripts/systems/reward_reveal_model.gd")
 
 ## === HUD — Full Embervale Combat + Quest Interface ===
 
@@ -15,6 +16,8 @@ const REWARD_REVEAL_PANEL := preload("res://scripts/ui/reward_reveal_panel.gd")
 @onready var gold_label : Label = $Root/MetaRow/TopRow/GoldLabel
 @onready var diamond_label : Label = $Root/MetaRow/TopRow/DiamondLabel
 @onready var settings_button : Button = $Root/MetaRow/TopRow/SettingsButton
+@onready var top_row : HBoxContainer = $Root/MetaRow/TopRow
+@onready var action_row : HBoxContainer = $Root/MetaRow/ActionRow
 @onready var satchel_button : Button = $Root/MetaRow/ActionRow/SatchelButton
 @onready var scan_button : Button = $Root/MetaRow/ActionRow/ScanButton
 @onready var shop_button : Button = $Root/MetaRow/ActionRow/ShopButton
@@ -41,11 +44,25 @@ const REWARD_REVEAL_PANEL := preload("res://scripts/ui/reward_reveal_panel.gd")
 @onready var objective_label : Label = $Root/QuestLedger/QuestLedgerVBox/ObjectiveLabel
 @onready var checkpoint_label : Label = $Root/QuestLedger/QuestLedgerVBox/CheckpointLabel
 @onready var lesson_button : Button = $Root/QuestLedger/QuestLedgerVBox/LessonButton
+@onready var quest_ledger: PanelContainer = $Root/QuestLedger
+@onready var player_plate: PanelContainer = $Root/PlayerPlate
+## Authored chrome that previously had no runtime owner: the satchel badge and
+## the level-up banner were dead nodes, and GLINT was a button with no handler.
+@onready var satchel_count: Label = get_node_or_null("Root/MetaRow/ActionRow/SatchelButton/SatchelCount")
+@onready var glint_button: Button = get_node_or_null("Root/MetaRow/ActionRow/GlintButton")
+@onready var level_toast: PanelContainer = get_node_or_null("Root/LevelToast")
+@onready var toast_title: Label = get_node_or_null("Root/LevelToast/ToastVBox/ToastTitle")
+@onready var toast_sub: Label = get_node_or_null("Root/LevelToast/ToastVBox/ToastSub")
+var _level_toast_tween: Tween = null
 var journal_button: Button
 var journal_panel: PanelContainer
 var _reward_history: Array[String] = []
 var _reward_reveal_panel: RewardRevealPanel = null
 const REWARD_HISTORY_CAP := 8
+const MAX_REWARD_POPUPS := 4
+var _reward_popup_queue: Array[Dictionary] = []
+var _reward_popup_active := false
+var _reward_popup_serial := 0
 @onready var skill_buttons : Array = []
 @onready var skill_glyph_labels : Array = []
 @onready var skill_cd_labels : Array = []
@@ -59,6 +76,20 @@ var _last_onboarding_hint := ""
 var _active_boss : Node3D = null
 var _boss_telegraph_until_ms: int = 0
 var _analyzed_enemy_id: int = 0
+var _activity_line: Label = null
+var _activity_poll_in: float = 0.0
+var _actions_toggle: Button = null
+var _compact_actions_open: bool = false
+var _left_handed_applied := false
+
+## Wide-bar frame limits. Narrow portrait viewports clamp these instead of
+## letting the boss bar or the currency row run off the screen edge. Values
+## match the authored desktop layout so nothing moves when there is room.
+const FRAME_MARGIN := 20.0
+const LOOT_TOAST_MARGIN := 24.0
+const BOSS_BAR_MAX_WIDTH := 660.0
+const COMBAT_CARD_MAX_WIDTH := 430.0
+const META_ROW_MAX_WIDTH := 600.0
 
 const SKILL_RUNES := {
 	"aoe": "AOE",
@@ -99,10 +130,25 @@ func _ready() -> void:
 				btn.pressed.connect(func(): input_manager.skill_slot_pressed.emit(idx))
 	_wire_action_buttons()
 	_build_camp_button()
+	_build_compact_actions_toggle()
+	_apply_hud_chrome()
+	_build_activity_line()
 	_build_journal_button()
 	get_viewport().size_changed.connect(_layout_journal_panel)
+	get_viewport().size_changed.connect(_layout_route_ledger)
+	get_viewport().size_changed.connect(_layout_compact_actions)
+	get_viewport().size_changed.connect(_apply_frame_layout)
+	_apply_frame_layout()
+	_layout_route_ledger()
+	_layout_compact_actions()
+	call_deferred("_layout_route_ledger")
+	call_deferred("_apply_frame_layout")
+	_enforce_touch_targets()
 	_connect_signals()
 	_refresh_all()
+	# The world may not be registered as the current scene yet, so confirm the
+	# Glintmonger entry point once the tree has settled.
+	call_deferred("_update_glint_visibility")
 	_queue_onboarding_hint()
 	if combat_card: combat_card.visible = false
 	if boss_health_bar: boss_health_bar.visible = false
@@ -126,17 +172,42 @@ func _on_dungeon_completed(dungeon_id: String) -> void:
 	_show_reward_reveal_entries(entries, "dungeon")
 
 func _show_reward_reveal_entries(entries: Array[Dictionary], source: String) -> void:
-	if _reward_reveal_panel != null and is_instance_valid(_reward_reveal_panel):
-		_reward_reveal_panel.dismiss()
+	_enqueue_reward_popup(entries, source)
+
+func _enqueue_reward_popup(entries: Array, source: String,
+		title_override: String = "", subtitle: String = "") -> void:
+	var active_count: int = 1 if _reward_popup_active else 0
+	if entries.is_empty() or _reward_popup_queue.size() + active_count >= MAX_REWARD_POPUPS:
+		return
+	_reward_popup_queue.append({"entries": entries.duplicate(true), "source": source,
+		"title": title_override, "subtitle": subtitle})
+	_show_next_reward_popup()
+
+func _show_next_reward_popup() -> void:
+	if _reward_popup_active or _reward_popup_queue.is_empty():
+		return
+	var item: Dictionary = _reward_popup_queue.pop_front()
+	var entries: Array = item.get("entries", [])
+	if entries.is_empty():
+		_show_next_reward_popup()
+		return
+	_reward_popup_active = true
 	var wrapper := CenterContainer.new()
-	wrapper.name = "RewardRevealCenter"
+	_reward_popup_serial += 1
+	wrapper.name = "RewardRevealCenter_%d" % _reward_popup_serial
 	wrapper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_reward_reveal_panel = REWARD_REVEAL_PANEL.new()
 	_reward_reveal_panel.custom_minimum_size = Vector2(420.0, 0.0)
 	wrapper.add_child(_reward_reveal_panel)
 	add_child(wrapper)
-	_reward_reveal_panel.dismissed.connect(wrapper.queue_free)
-	_reward_reveal_panel.open_for(entries, source)
+	_reward_reveal_panel.dismissed.connect(func() -> void:
+		if is_instance_valid(wrapper):
+			wrapper.queue_free()
+		_reward_reveal_panel = null
+		_reward_popup_active = false
+		call_deferred("_show_next_reward_popup"))
+	_reward_reveal_panel.open_for(entries, str(item.get("source", "reward")),
+		str(item.get("title", "")), str(item.get("subtitle", "")))
 
 func _apply_mobile_control_preferences() -> void:
 	var config := ConfigFile.new()
@@ -155,13 +226,32 @@ func _apply_mobile_control_preferences() -> void:
 		if control != null:
 			control.scale = Vector2.ONE * action_scale
 			control.modulate.a = opacity
-	if layout == "left_handed" and joystick != null:
-		joystick.anchor_left = 1.0
-		joystick.anchor_right = 1.0
-		joystick.offset_left = -232.0
-		joystick.offset_right = -48.0
-		joystick.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT,
-			Control.PRESET_MODE_MINSIZE, 24)
+	_set_left_handed(layout == "left_handed", joystick, controls)
+
+## Mirror about the screen centre. This is its own inverse, so applying and
+## clearing left-handed mode are the same operation. Replaces the previous
+## sequence of manual anchor writes that `set_anchors_and_offsets_preset`
+## immediately overwrote (the layout silently did nothing).
+func _mirror_horizontally(control: Control) -> void:
+	var anchor_left := control.anchor_left
+	var anchor_right := control.anchor_right
+	var offset_left := control.offset_left
+	var offset_right := control.offset_right
+	control.anchor_left = 1.0 - anchor_right
+	control.anchor_right = 1.0 - anchor_left
+	control.offset_left = -offset_right
+	control.offset_right = -offset_left
+
+func _set_left_handed(enabled: bool, joystick: Control, controls: Array) -> void:
+	if enabled == _left_handed_applied:
+		return
+	_left_handed_applied = enabled
+	if joystick != null:
+		_mirror_horizontally(joystick)
+	for control_value in controls:
+		var control := control_value as Control
+		if control != null:
+			_mirror_horizontally(control)
 
 func _apply_touch_target_scale() -> void:
 	var config := ConfigFile.new()
@@ -186,9 +276,13 @@ func _connect_signals() -> void:
 	game_state.inventory_changed.connect(_on_inventory_changed)
 	if game_state.has_signal("quest_progress"):
 		game_state.quest_progress.connect(_on_quest_progress)
+	if game_state.has_signal("world_activity_changed"):
+		game_state.world_activity_changed.connect(_on_world_activity_changed)
 	var rm := get_node_or_null("/root/RewardManager")
 	if rm and rm.has_signal("reward_granted"):
 		rm.reward_granted.connect(_on_reward_granted)
+	if rm and rm.has_signal("quest_reward_granted"):
+		rm.quest_reward_granted.connect(_on_quest_reward_granted)
 	if rm and rm.has_signal("boss_reward_choice_available"):
 		rm.boss_reward_choice_available.connect(_on_boss_reward_choice_available)
 	if settings_button: settings_button.pressed.connect(_on_settings_pressed)
@@ -203,7 +297,8 @@ func _connect_signals() -> void:
 
 func _build_journal_button() -> void:
 	journal_button = Button.new()
-	journal_button.text = "OPEN EXPEDITION JOURNAL"
+	journal_button.text = "JOURNAL"
+	journal_button.tooltip_text = "Open Expedition Journal"
 	journal_button.custom_minimum_size = Vector2(0, 36)
 	UiKit.style_secondary_button(journal_button)
 	$Root/QuestLedger/QuestLedgerVBox.add_child(journal_button)
@@ -217,6 +312,147 @@ func _build_camp_button() -> void:
 	UiKit.style_secondary_button(camp_button)
 	camp_button.pressed.connect(_on_camp_pressed)
 	$Root/MetaRow/ActionRow.add_child(camp_button)
+
+func _build_compact_actions_toggle() -> void:
+	_actions_toggle = Button.new()
+	_actions_toggle.name = "ActionsToggle"
+	_actions_toggle.text = "ACTIONS"
+	_actions_toggle.tooltip_text = "Show inventory, scan, shop, stats, and camp"
+	_actions_toggle.custom_minimum_size = Vector2(104, 44)
+	UiKit.style_secondary_button(_actions_toggle)
+	_actions_toggle.add_theme_font_size_override("font_size", 14)
+	_actions_toggle.pressed.connect(_toggle_compact_actions)
+	top_row.add_child(_actions_toggle)
+
+func _toggle_compact_actions() -> void:
+	_compact_actions_open = not _compact_actions_open
+	_layout_compact_actions()
+
+func _layout_compact_actions() -> void:
+	if _actions_toggle == null or action_row == null:
+		return
+	var compact := get_viewport().get_visible_rect().size.x < UiKit.COMPACT_BREAKPOINT
+	_actions_toggle.visible = compact
+	if not compact:
+		_compact_actions_open = false
+		action_row.visible = true
+		return
+	_actions_toggle.text = "HIDE" if _compact_actions_open else "ACTIONS"
+	action_row.visible = _compact_actions_open
+	for child in action_row.get_children():
+		var button := child as Button
+		if button == null:
+			continue
+		button.custom_minimum_size.y = 44.0
+		button.add_theme_font_size_override("font_size", 14)
+
+func _build_activity_line() -> void:
+	var strip := PanelContainer.new()
+	strip.name = "RoutePulse"
+	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	strip.custom_minimum_size = Vector2(0, 52)
+	strip.add_theme_stylebox_override("panel",
+		UiKit.item_card_stylebox(UiKit.SAGE_BRIGHT, false))
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_top", 7)
+	margin.add_theme_constant_override("margin_bottom", 7)
+	strip.add_child(margin)
+	var pulse_box := VBoxContainer.new()
+	pulse_box.add_theme_constant_override("separation", 1)
+	margin.add_child(pulse_box)
+	var pulse_heading := Label.new()
+	pulse_heading.text = "ROUTE PULSE"
+	UiKit.style_label(pulse_heading, &"Eyebrow", 10)
+	pulse_heading.add_theme_color_override("font_color", UiKit.SAGE_BRIGHT)
+	pulse_box.add_child(pulse_heading)
+	_activity_line = Label.new()
+	_activity_line.name = "NearbyActivityLabel"
+	_activity_line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_activity_line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UiKit.style_label(_activity_line, &"Body", 13)
+	_activity_line.add_theme_color_override("font_color", UiKit.CREAM_DIM)
+	pulse_box.add_child(_activity_line)
+	$Root/QuestLedger/QuestLedgerVBox.add_child(strip)
+	_refresh_nearby_activity()
+
+func _apply_hud_chrome() -> void:
+	if quest_ledger != null:
+		quest_ledger.add_theme_stylebox_override("panel",
+			UiKit.glass_stylebox(false, 0.62, UiKit.RADIUS_PANEL))
+	if player_plate != null:
+		player_plate.add_theme_stylebox_override("panel",
+			UiKit.item_card_stylebox(UiKit.EMBER, false))
+	UiKit.style_label(chapter_label, &"Eyebrow", 13)
+	UiKit.style_label(title_label, &"Title", 20)
+	UiKit.style_label(instruction_label, &"Body", 15)
+	UiKit.style_label(objective_label, &"Caption", 13)
+	UiKit.style_label(checkpoint_label, &"Caption", 11)
+	chapter_label.add_theme_color_override("font_color", UiKit.SAGE_BRIGHT)
+	title_label.add_theme_color_override("font_color", UiKit.EMBER_BRIGHT)
+	instruction_label.add_theme_color_override("font_color", UiKit.CREAM_DIM)
+	objective_label.add_theme_color_override("font_color", UiKit.CREAM_DIM)
+	checkpoint_label.add_theme_color_override("font_color", UiKit.EMBER)
+
+## Safe-area inset plus narrow-portrait clamping for the HUD's full-width
+## elements. Presentation only: no gameplay timing or telegraph changes.
+func _apply_frame_layout() -> void:
+	var root := get_node_or_null("Root") as Control
+	if root == null:
+		return
+	var viewport_size := get_viewport().get_visible_rect().size
+	UiKit.apply_safe_area(root, viewport_size)
+	_layout_wide_bars(viewport_size)
+
+func _layout_wide_bars(viewport_size: Vector2) -> void:
+	var half_limit := maxf(viewport_size.x * 0.5 - FRAME_MARGIN, 110.0)
+	if boss_health_bar != null and is_instance_valid(boss_health_bar):
+		var boss_half := minf(BOSS_BAR_MAX_WIDTH * 0.5, half_limit)
+		boss_health_bar.offset_left = -boss_half
+		boss_health_bar.offset_right = boss_half
+	if combat_card != null and is_instance_valid(combat_card):
+		var card_half := minf(COMBAT_CARD_MAX_WIDTH * 0.5, half_limit)
+		combat_card.offset_left = -card_half
+		combat_card.offset_right = card_half
+	var meta := top_row.get_parent() as Control if top_row != null else null
+	if meta != null and is_instance_valid(meta):
+		var meta_width := minf(META_ROW_MAX_WIDTH,
+			maxf(viewport_size.x - FRAME_MARGIN * 2.0, 220.0))
+		meta.offset_left = -meta_width
+		meta.offset_right = -FRAME_MARGIN
+	if loot_toast != null and is_instance_valid(loot_toast):
+		loot_toast.offset_right = -LOOT_TOAST_MARGIN
+
+## Authored small controls predate the 48px Android touch token. Growing them
+## here (never shrinking) keeps every tap target reachable on a phone.
+func _enforce_touch_targets() -> void:
+	var targets: Array[Control] = [settings_button, lesson_button, journal_button,
+		_actions_toggle, satchel_button, scan_button, shop_button, stats_button]
+	for control in targets:
+		if control != null and is_instance_valid(control):
+			UiKit.ensure_touch_target(control)
+
+func _layout_route_ledger() -> void:
+	if quest_ledger == null or not is_instance_valid(quest_ledger):
+		return
+	var viewport_size := get_viewport().get_visible_rect().size
+	var compact := viewport_size.x < UiKit.COMPACT_BREAKPOINT
+	var left := 16.0 if compact else 20.0
+	# Measure against the safe-area frame, not the raw viewport: on a phone the
+	# Root is already inset by the notch/gesture bar, so viewport width would let
+	# the ledger run past the right edge.
+	var root := get_node_or_null("Root") as Control
+	var frame_width := root.size.x if root != null and root.size.x > 1.0 else viewport_size.x
+	var width := minf(360.0, maxf(264.0, frame_width * 0.36))
+	width = minf(width, frame_width - left - 20.0)
+	quest_ledger.offset_left = left
+	quest_ledger.offset_right = left + width
+	quest_ledger.offset_top = 342.0 if viewport_size.y >= 720.0 else 260.0
+	var measured_height := quest_ledger.get_combined_minimum_size().y + 8.0
+	var content_height := clampf(measured_height, 360.0, 520.0)
+	var available_height := maxf(220.0, viewport_size.y - quest_ledger.offset_top - 36.0)
+	quest_ledger.offset_bottom = quest_ledger.offset_top + minf(content_height, available_height)
 
 func _on_journal_pressed() -> void:
 	if journal_panel != null and is_instance_valid(journal_panel):
@@ -275,6 +511,18 @@ func _on_journal_pressed() -> void:
 		["elite_gate", "BRAMBLEWOOD", "Elite"],
 		["beacon_relit", "OLD BEACON", "Unlock"],
 	]
+	var expansion: Dictionary = game_state.bramblewood_expansion_snapshot() \
+		if game_state.has_method("bramblewood_expansion_snapshot") else {}
+	if str(game_state.current_realm) == "bramblewood" \
+			and (bool(expansion.get("started", false)) or bool(expansion.get("completed", false))):
+		route_nodes = [
+			["bramblewood_expansion_start", "SPLIT-ROAD OAK", "Landmark"],
+			["rootcut_gully", "ROOTCUT GULLY", "Gather"],
+			["hollow_camp", "HOLLOW CAMP", "Checkpoint"],
+			["beacon_breach", "BEACON BREACH", "Elite"],
+			["rootbound_court", "ROOTBOUND COURT", "Finale"],
+			["rootway_shortcut", "ROOTWAY BEACON", "Shortcut"],
+		]
 	var route_map_lines: Array[String] = ["ROUTE MAP  ·  LAST SAFE PATH"]
 	for route_node in route_nodes:
 		var route_id := str(route_node[0])
@@ -377,7 +625,9 @@ func _on_journal_pressed() -> void:
 	_layout_journal_panel()
 
 func _checkpoint_is_reached(candidate: String, current: String) -> bool:
-	var order := ["grove_arrival", "sprite_found", "elite_gate", "beacon_relit"]
+	var order := ["grove_arrival", "sprite_found", "elite_gate", "beacon_relit",
+		"bramblewood_expansion_start", "rootcut_gully", "hollow_camp",
+		"beacon_breach", "rootbound_court", "rootway_shortcut"]
 	return order.find(candidate) >= 0 and order.find(candidate) < order.find(current)
 
 func _on_objective_pin_pressed(objective_id: String, was_pinned: bool) -> void:
@@ -418,6 +668,8 @@ func _refresh_all() -> void:
 	_on_route_checkpoint_changed(str(game_state.get("route_checkpoint_id")))
 	_on_weapon_changed(game_state.equipped_weapon)
 	_refresh_objectives()
+	_refresh_satchel_count()
+	_update_glint_visibility()
 
 func _on_hp_changed(_old: int, new_hp: int) -> void:
 	var max_hp := game_state.max_hp
@@ -436,6 +688,27 @@ func _on_xp_changed(new_xp: int, new_level: int) -> void:
 
 func _on_level_up(new_level: int, _pts: int) -> void:
 	_push_field_note("LEVEL UP! Now level %d." % new_level)
+	_show_level_toast(new_level)
+
+## The authored level banner now actually fires. Previous builds only pushed a
+## field note, so LevelToast/ToastTitle/ToastSub never appeared.
+func _show_level_toast(new_level: int) -> void:
+	if level_toast == null or not is_instance_valid(level_toast):
+		return
+	if toast_title != null:
+		toast_title.text = "LEVEL %d" % new_level
+	if toast_sub != null:
+		toast_sub.text = "A new rite waits in the satchel."
+	if _level_toast_tween != null and _level_toast_tween.is_valid():
+		_level_toast_tween.kill()
+	level_toast.visible = true
+	level_toast.modulate.a = 1.0
+	_level_toast_tween = create_tween()
+	_level_toast_tween.tween_interval(2.2)
+	_level_toast_tween.tween_property(level_toast, "modulate:a", 0.0, 0.5)
+	_level_toast_tween.tween_callback(func() -> void:
+		if is_instance_valid(level_toast):
+			level_toast.visible = false)
 
 func _on_gold_changed(total: int) -> void:
 	if gold_label: gold_label.text = "GOLD  %d" % total
@@ -496,6 +769,8 @@ func _wire_action_buttons() -> void:
 	if jump_btn != null:
 		jump_btn.set_action_state("available", "Clear terrain and hazards")
 		jump_btn.fight_pressed.connect(func(): input_manager.jump_pressed.emit())
+	if glint_button != null and is_instance_valid(glint_button):
+		glint_button.pressed.connect(_on_glint_pressed)
 	# The whole action row breathes with the lantern mark: pulsing lock
 	# ring on skill + attack buttons while a foe is lit.
 	game_state.mark_locked.connect(func(_t: Node3D): _set_lock_glow(true))
@@ -633,6 +908,9 @@ func show_boss_bar(boss: Node3D, name_str: String) -> void:
 	if boss != null and boss.has_signal("attack_telegraphed") \
 			and not boss.attack_telegraphed.is_connected(_on_boss_attack_telegraphed):
 		boss.attack_telegraphed.connect(_on_boss_attack_telegraphed)
+	# The boss presentation owns the upper combat band. Retire the ordinary
+	# target card immediately so the two hierarchies never compete for focus.
+	if combat_card: combat_card.visible = false
 	if boss_health_bar: boss_health_bar.visible = true
 	if boss_name: boss_name.text = name_str
 
@@ -678,9 +956,43 @@ func _on_route_checkpoint_changed(checkpoint_id: String) -> void:
 		return
 	var names := {"grove_arrival": "GROVE ARRIVAL", "hushling_cleared": "HUSHLING CLEARED", "shard_claimed": "EMBER SHARD CLAIMED", "beacon_relit": "BEACON RELIT"}
 	checkpoint_label.text = "CHECKPOINT  ·  %s" % str(names.get(checkpoint_id, checkpoint_id.to_upper()))
+	_refresh_nearby_activity()
+
+func _on_world_activity_changed(_realm_id: String, _activity_id: String, _status: String) -> void:
+	_refresh_nearby_activity()
+
+func _refresh_nearby_activity() -> void:
+	if _activity_line == null:
+		return
+	var scene := get_tree().current_scene
+	var director := scene.find_child("RealmActivityDirector", true, false) \
+		if scene != null else null
+	if director == null or not director.has_method("nearby_activity_snapshot"):
+		_activity_line.text = "Route is quiet"
+		return
+	var snapshot: Dictionary = director.call("nearby_activity_snapshot")
+	if snapshot.is_empty():
+		_activity_line.text = "Watch for a route marker"
+		return
+	_activity_line.text = "%s\n%s  ·  %dm" % [
+		str(snapshot.get("label", "Activity")).to_upper(),
+		str(snapshot.get("prompt", "AHEAD")),
+		int(roundf(float(snapshot.get("distance", 0.0))))]
 
 func _on_inventory_changed(_notice: String = "", _count: int = 0) -> void:
 	_refresh_objectives()
+	_refresh_satchel_count()
+
+## The satchel badge shipped at "0" and was never updated. Reflect the live
+## carried-item count so the button communicates state.
+func _refresh_satchel_count() -> void:
+	if satchel_count == null or not is_instance_valid(satchel_count):
+		return
+	var inventory: Variant = game_state.get("inventory")
+	var carried := 0
+	if inventory is Array:
+		carried = (inventory as Array).size()
+	satchel_count.text = str(carried)
 
 func _refresh_objectives() -> void:
 	if not game_state.has_method("get_active_objectives"):
@@ -729,10 +1041,18 @@ func _on_loot_received(notice: String, count: int) -> void:
 	_show_loot_toast(3.5)
 
 func _on_reward_granted(summary: Dictionary) -> void:
+	var source := str(summary.get("source", ""))
+	# A chest roll preview has not granted anything yet: it only drives the
+	# reveal, so the currency toast and reward history must stay untouched.
+	var preview := bool(summary.get("preview", false))
+	var persistent_chest := source == "chest" and bool(summary.get("persistent", false))
+	var meaningful_gear: bool = not summary.get("weapons", []).is_empty() \
+		or not summary.get("armors", []).is_empty()
+	var should_reveal := persistent_chest or (source.is_empty() and meaningful_gear)
 	var gold := int(summary.get("gold", 0))
 	var xp   := int(summary.get("xp",   0))
 	var gems := int(summary.get("diamonds", 0))
-	if gold > 0 or xp > 0 or gems > 0:
+	if not preview and (gold > 0 or xp > 0 or gems > 0):
 		var parts := []
 		if gold > 0: parts.append("+%d G" % gold)
 		if xp   > 0: parts.append("+%d XP" % xp)
@@ -745,36 +1065,28 @@ func _on_reward_granted(summary: Dictionary) -> void:
 		if gems > 0 or not summary.get("weapons", []).is_empty() \
 				or not summary.get("armors", []).is_empty():
 			_play_reward_focus()
-		if not summary.get("weapons", []).is_empty() or not summary.get("armors", []).is_empty():
-			_show_reward_reveal(summary)
 		_record_reward_history(" · ".join(parts), 0)
-	elif not summary.get("loot_context", []).is_empty():
+	elif not preview and not summary.get("loot_context", []).is_empty():
 		_append_reward_context(summary, [])
 		if loot_title: loot_title.text = "LOOT"
 		if loot_count: loot_count.text = ""
 		_show_loot_toast(3.0)
 		_record_reward_history(str(summary.get("loot_context", ["Loot context updated"])[0]), 0)
+	if should_reveal:
+		var reveal_title := "CHEST OPENED" if persistent_chest else _reward_reveal_title(summary)
+		_show_reward_reveal(summary, reveal_title, str(summary.get("source_label", "")))
 
-func _show_reward_reveal(summary: Dictionary) -> void:
-	if _reward_reveal_panel != null and is_instance_valid(_reward_reveal_panel):
-		_reward_reveal_panel.dismiss()
-	var wrapper := CenterContainer.new()
-	wrapper.name = "RewardRevealCenter"
-	wrapper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_reward_reveal_panel = REWARD_REVEAL_PANEL.new()
-	_reward_reveal_panel.custom_minimum_size = Vector2(420.0, 0.0)
-	wrapper.add_child(_reward_reveal_panel)
-	add_child(wrapper)
-	_reward_reveal_panel.dismissed.connect(wrapper.queue_free)
-	var entries: Array[Dictionary] = []
-	for key in ["weapons", "armors"]:
-		for raw in summary.get(key, []):
-			if raw is Dictionary:
-				var drop: Dictionary = raw
-				entries.append({"id": str(drop.get("id", "")),
-					"label": str(drop.get("id", "")).replace("_", " ").capitalize(),
-					"quantity": 1, "rarity": _rarity_rank(drop.get("rarity", 0))})
-	_reward_reveal_panel.open_for(entries, "loot")
+func _show_reward_reveal(summary: Dictionary, title_override: String = "",
+		subtitle: String = "") -> void:
+	var entries: Array[Dictionary] = REWARD_REVEAL_MODEL.entries_from_summary(summary)
+	_enqueue_reward_popup(entries, str(summary.get("source", "loot")),
+		title_override, subtitle)
+
+func _on_quest_reward_granted(_completion_id: String, title: String,
+		summary: Dictionary) -> void:
+	var kind := str(summary.get("completion_kind", "quest_objective"))
+	var header := "QUEST COMPLETE" if kind == "quest_stage" else "OBJECTIVE COMPLETE"
+	_show_reward_reveal(summary, header, title)
 
 func _rarity_rank(value: Variant) -> int:
 	if value is int or value is float:
@@ -902,6 +1214,12 @@ func _show_next_field_note() -> void:
 
 func _process(delta: float) -> void:
 	_queue_onboarding_hint()
+	if boss_health_bar and boss_health_bar.visible and combat_card and combat_card.visible:
+		combat_card.visible = false
+	_activity_poll_in -= delta
+	if _activity_poll_in <= 0.0:
+		_activity_poll_in = 0.35
+		_refresh_nearby_activity()
 	if _boss_telegraph_until_ms > 0 and Time.get_ticks_msec() >= _boss_telegraph_until_ms:
 		_boss_telegraph_until_ms = 0
 		if phase_indicator and _active_boss != null and is_instance_valid(_active_boss):
@@ -967,6 +1285,26 @@ func _on_camp_pressed() -> void:
 		camp.open()
 	else:
 		_push_field_note("The camp is not available here.")
+
+## The Glintmonger's Case is a real surface now, so the entry point shows only
+## where the shop is actually instanced in the world — never as a dead button.
+func _update_glint_visibility() -> void:
+	if glint_button == null or not is_instance_valid(glint_button):
+		return
+	glint_button.visible = _glint_shop() != null
+
+func _glint_shop() -> Node:
+	var scene := get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.find_child("DiamondShop", true, false)
+
+func _on_glint_pressed() -> void:
+	var shop := _glint_shop()
+	if shop != null and shop.has_method("open"):
+		shop.call("open")
+	else:
+		_push_field_note("The Glintmonger is not here yet.")
 
 func _on_stats_pressed() -> void:
 	var s := get_tree().current_scene.find_child("SatchelUI", true, false)
