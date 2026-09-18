@@ -21,16 +21,17 @@ const LOADING_SCREEN := preload("res://scripts/ui/loading_screen.gd")
 ## under its file name with the general tip pool.
 const DESTINATIONS := {
 	"main": {"title": "Embervale", "realm": ""},
-	"grove": {"title": "Bramblewood", "realm": "bramblewood"},
-	"moonfen": {"title": "Moonfen", "realm": "moonfen"},
-	"whispergrove": {"title": "Whispergrove", "realm": "whispergrove"},
-	"mistfen": {"title": "Mistfen", "realm": "mistfen"},
-	"heartwood": {"title": "Heartwood", "realm": "heartwood"},
+	"grove": {"title": "Entering Bramblewood", "realm": "bramblewood"},
+	"moonfen": {"title": "Entering Moonfen", "realm": "moonfen"},
+	"whispergrove": {"title": "Entering Whispergrove", "realm": "whispergrove"},
+	"mistfen": {"title": "Entering Mistfen", "realm": "mistfen"},
+	"heartwood": {"title": "Entering Heartwood", "realm": "heartwood"},
 }
 
 var _active: bool = false
 var _pending_path: String = ""
 var _screen: LoadingScreen = null
+var _phase: String = ""
 
 func _ready() -> void:
 	# The overlay must keep animating while a menu holds the world frozen.
@@ -56,6 +57,7 @@ func travel(scene_path: String, title: String = "") -> bool:
 		return false
 	_active = true
 	_pending_path = path
+	_phase = ""
 	var info := destination_info(path)
 	var resolved_title := title if not title.is_empty() else str(info["title"])
 	_show_screen(resolved_title, str(info["realm"]))
@@ -141,5 +143,21 @@ func _retire_screen() -> void:
 	_screen = null
 
 func _report(ratio: float) -> void:
-	if _screen != null and is_instance_valid(_screen):
-		_screen.set_progress(ratio)
+	if _screen == null or not is_instance_valid(_screen):
+		return
+	_screen.set_progress(ratio)
+	var phase := phase_for(ratio)
+	if phase != _phase:
+		_phase = phase
+		_screen.set_status(phase)
+
+## The status line names what the load is doing instead of sitting on one word
+## for the whole wait.
+func phase_for(ratio: float) -> String:
+	if ratio <= 0.0:
+		return "Preparing…"
+	if ratio < 0.6:
+		return "Streaming terrain…"
+	if ratio < 1.0:
+		return "Building the realm…"
+	return "Ready"

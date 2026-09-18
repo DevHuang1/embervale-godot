@@ -61,11 +61,15 @@ func _test_tips_are_realm_aware_and_deterministic() -> void:
 
 func _test_destination_titles() -> void:
 	var moonfen: Dictionary = _loader.destination_info("res://scenes/world/moonfen.tscn")
-	_check(str(moonfen["title"]) == "Moonfen" and str(moonfen["realm"]) == "moonfen",
+	_check(str(moonfen["title"]) == "Entering Moonfen" and str(moonfen["realm"]) == "moonfen",
 		"a realm scene must resolve its own title and tip pool (got %s)" % str(moonfen))
 	var grove: Dictionary = _loader.destination_info("res://scenes/world/grove.tscn")
 	_check(str(grove["realm"]) == "bramblewood",
 		"the grove scene is Bramblewood for the player, not 'Grove' (got %s)" % str(grove))
+	_check(str(_loader.phase_for(0.0)) == "Preparing…", "an unstarted load must say it is preparing")
+	_check(str(_loader.phase_for(0.3)) == "Streaming terrain…", "an early load must name the streaming phase")
+	_check(str(_loader.phase_for(0.8)) == "Building the realm…", "a late load must name the building phase")
+	_check(str(_loader.phase_for(1.0)) == "Ready", "a finished load must report ready")
 	var unknown: Dictionary = _loader.destination_info("res://scenes/world/other.tscn")
 	_check(str(unknown["title"]) == "Other" and str(unknown["realm"]) == "",
 		"an unmapped scene must fall back to its file name and the general pool")
@@ -99,7 +103,7 @@ func _test_screen_finish_frees_the_layer() -> void:
 	screen.finish()
 	screen.finish()
 	await _wait_seconds(SCREEN.HARD_FREE_SECONDS + 0.3)
-	_check(not screen.is_inside_tree(),
+	_check(not is_instance_valid(screen) or not screen.is_inside_tree(),
 		"finish() must retire the overlay even when it is called twice")
 
 func _test_travel_refuses_a_second_request_and_retires_the_overlay() -> void:
@@ -150,7 +154,8 @@ func _settle_world() -> void:
 func _retire(screen: Node) -> void:
 	screen.finish()
 	await _wait_seconds(SCREEN.FINISH_FADE_SECONDS + 0.25)
-	_check(not screen.is_inside_tree(), "finish() must retire the overlay")
+	_check(not is_instance_valid(screen) or not screen.is_inside_tree(),
+		"finish() must retire the overlay")
 
 func _wait_until_overlay_gone() -> bool:
 	var deadline := Time.get_ticks_msec() + 1500
