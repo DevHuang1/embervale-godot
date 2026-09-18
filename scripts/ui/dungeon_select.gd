@@ -143,7 +143,7 @@ func _travel_with_fade(scene_path: String) -> void:
 	$Root.add_child(fade)
 	var tween := fade.create_tween()
 	tween.tween_property(fade, "color:a", 1.0, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tween.tween_callback(get_tree().change_scene_to_file.bind(scene_path))
+	tween.tween_callback(SceneLoader.travel.bind(scene_path))
 
 ## A menu freed while it still holds the world must not leave it paused behind
 ## it. Every freeze-holding surface shares this guarantee, matching the altar's

@@ -569,7 +569,7 @@ func _on_quit_pressed() -> void:
 	game_state.save_game()
 	audio.play_ui_back()
 	game_state.clear_ui_freeze()
-	get_tree().change_scene_to_file("res://scenes/main/main.tscn")
+	SceneLoader.travel("res://scenes/main/main.tscn")
 
 func _on_master_changed(value: float) -> void:
 	audio.set_master_volume(value)

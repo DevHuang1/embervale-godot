@@ -124,7 +124,7 @@ func _fade_to_game() -> void:
 func _load_grove() -> void:
 	var scene_path := "res://scenes/world/grove.tscn"
 	if ResourceLoader.exists(scene_path):
-		get_tree().change_scene_to_file(scene_path)
+		SceneLoader.travel(scene_path)
 	else:
 		# Grove scene not built yet — just hide the menu overlay so whatever is in main.tscn runs
 		visible = false

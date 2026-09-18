@@ -869,11 +869,11 @@ func _check_quest_proximity(pos: Vector3) -> void:
 		if pos.distance_to(moonfen_gate.global_position) < 2.0:
 			game_state.unlock_realm("moonfen")
 			game_state.set_current_realm("moonfen")
-			get_tree().change_scene_to_file("res://scenes/world/moonfen.tscn")
+			SceneLoader.travel("res://scenes/world/moonfen.tscn")
 	elif stage == GameState.QuestStage.COMPLETE and return_gate:
 		if pos.distance_to(return_gate.global_position) < 2.0:
 			game_state.set_current_realm("bramblewood")
-			get_tree().change_scene_to_file("res://scenes/world/grove.tscn")
+			SceneLoader.travel("res://scenes/world/grove.tscn")
 
 	# Practice altar: walk close to re-personalize the Matriarch (1 scan)
 	if stage == GameState.QuestStage.COMPLETE \

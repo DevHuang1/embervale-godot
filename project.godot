@@ -30,6 +30,7 @@ SkillExecutor="*res://scripts/systems/skill_executor.gd"
 QuizManager="*res://scripts/systems/quiz_manager.gd"
 CampProgression="*res://scripts/systems/camp_progression.gd"
 StoreManager="*res://scripts/autoload/store_manager.gd"
+SceneLoader="*res://scripts/autoload/scene_loader.gd"
 
 [debug]
 

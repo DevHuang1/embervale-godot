@@ -1179,7 +1179,7 @@ func _travel_to(dest: String) -> void:
 		return
 	_traveling = true
 	game_state.set_current_realm(dest)
-	get_tree().change_scene_to_file.call_deferred(scene_path)
+	SceneLoader.travel.call_deferred(scene_path)
 
 ## === Quest finale stays out of Mistfen ===
 
