@@ -120,4 +120,5 @@ godot --headless --path . --script tests/test_revenuecat_entitlements.gd
 
 MIT — see [`LICENSE`](LICENSE). Third-party asset packs are **not** covered by
 that license; each keeps its own terms and attribution in
-[`ASSET_CREDITS.md`](ASSET_CREDITS.md).
+[`ASSET_CREDITS.md`](ASSET_CREDITS.md), summarized in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
