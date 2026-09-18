@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dgnegl3araqp4"
-path="res://.godot/imported/Codex Image Aug 29, 2026, 07_11_24 PM.png-1996a97003b17bb11d07368d349e39b8.ctex"
+uid="uid://gl05ot38ymnm"
+path="res://.godot/imported/texture1.png-308879c7a9f13b4eb7dbc9b6446db227.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Codex Image Aug 29, 2026, 07_11_24 PM.png"
-dest_files=["res://.godot/imported/Codex Image Aug 29, 2026, 07_11_24 PM.png-1996a97003b17bb11d07368d349e39b8.ctex"]
+source_file="res://texture1.png"
+dest_files=["res://.godot/imported/texture1.png-308879c7a9f13b4eb7dbc9b6446db227.ctex"]
 
 [params]
 
