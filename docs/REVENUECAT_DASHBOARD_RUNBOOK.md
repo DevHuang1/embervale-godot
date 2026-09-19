@@ -35,10 +35,13 @@ gateway, so you skip setting up Stripe products and importing them.
    **app name** (shown in checkout/emails), **support email**. Leave
    *Redemption Links* off — this integration passes an identified App User ID.
 4. **Create the three products.** *Product catalog → Products* → select your
-   RevenueCat Billing config → **+ New**, once per row above. Use
-   **non-consumable** product type and set a price for your default currency.
-   Product identifiers are yours to choose; the **entitlement** is what the code
-   matches, so name them for humans.
+   RevenueCat Billing config → **+ New**, once per row above. Use the
+   **consumable** product type and set a one-time price for your default
+   currency: a pack stays buyable, and the game keys each grant on the store
+   transaction id, so a repeat purchase grants again. A non-consumable is
+   once-per-customer and would refuse every later purchase. Product identifiers
+   are yours to choose; the **entitlement** is what the code matches, so name
+   them for humans.
 5. **Create the three entitlements.** *Product catalog → Entitlements* →
    **+ New** for each ID in the table. Copy them character-for-character.
 6. **Attach each product to its entitlement.** Open the entitlement →
