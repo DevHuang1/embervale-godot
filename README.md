@@ -1,124 +1,148 @@
-# Embervale Mobile — Godot 4 Port
+# Embervale
 
-A faithful Godot 4 port of the embervale-rpg web game, with mobile camera scanning and boss battles.
+A stylized dark-fantasy action RPG built in **Godot 4.7**, Android-first
+(portrait, arm64-v8a, minSdk 24), playable on desktop for development.
 
-## Features
-
-- **True 3D Grove**: Procedural terrain, moon-shaft lighting, volumetric fog, fireflies, swaying trees
-- **Cinder Warden Class**: Auto-combat + Cinder Lash / Mend Flame skills (exact embervale numbers)
-- **Quest Progression**: I. Seek Sprite → II. Claim Shard → III. Light Beacon → IV. Complete
-- **Inventory & Satchel**: Moss Tonic, Hushling Thorn, Ember Shard with embervale copy
-- **Divining Lens**: Camera → object detection → weapon forge with rarity rolls
-- **Boss System**: Multi-phase Hushling Matriarch with summons, thorn rain, root prison, bramble storm
-- **HUD**: Quest ledger, warmth bar, ember marks, skill cooldowns, loot toasts
-
-## Project Structure
+**Latest build:** [Beta 9](https://github.com/DevHuang1/embervale-godot/releases/latest) —
+sideload the APK on Android 7.0+, no store account needed.
 
 ```
-embervale-godot/
-├── project.godot              # Engine config, autoloads, input map
-├── .gitignore
-├── scenes/
-│   ├── main/main.tscn         # Entry point (loads MainMenu)
-│   ├── world/grove.tscn       # Whispergrove 3D scene
-│   ├── entities/
-│   │   ├── hero.tscn          # Lantern Bearer
-│   │   ├── hushling.tscn      # Bramble Sprite enemy
-│   │   ├── boss_base.tscn     # Boss template
-│   │   └── boss_hushling_matriarch.gd
-│   └── ui/
-│       ├── hud.tscn           # Quest ledger, warmth, skills, loot
-│       ├── satchel.tscn       # Field Satchel (inventory + class)
-│       ├── forge_menu.tscn    # Divining Lens camera → forge
-│       └── main_menu.tscn     # Lantern-bearer intro
-├── scripts/
-│   ├── autoload/
-│   │   ├── game_state.gd      # Central state (embervale port)
-│   │   ├── scan_manager.gd    # Camera → detection → forge
-│   │   ├── audio_manager.gd   # Procedural chimes + SFX
-│   │   └── input_manager.gd   # Tap-to-move, keys, gestures
-│   ├── systems/
-│   │   ├── world_manager.gd   # Grove logic, quest triggers
-│   │   └── camera_rig.gd      # ArcRotateCamera with shake
-│   ├── entities/
-│   │   ├── hero.gd            # Tap-to-move, auto-combat, skills
-│   │   ├── hushling.gd        # Pattern AI (orbit/feint/lunge/recover)
-│   │   ├── boss_base.gd       # Multi-phase boss framework
-│   │   └── boss_hushling_matriarch.gd
-│   └── ui/
-│       ├── hud.gd
-│       ├── satchel.gd
-│       ├── forge_menu.gd
-│       └── main_menu.gd
-├── assets/
-│   ├── shaders/               # hit_flash, lantern_glow, hero_lantern
-│   ├── environments/          # embervale_env, embervale_sky
-│   ├── ui/theme.tres
-│   └── fonts/                 # Press Start 2P, VT323 (add your own)
-└── addons/
+sha256 02f8451e…  Embervale-Beta9-arm64-v8a.apk
 ```
 
-## Running
+## What's in it
 
-1. Open Godot 4.3+
-2. Import project: `project.godot`
-3. Add font files to `assets/fonts/`:
-   - `PressStart2P-Regular.ttf` → import as FontFile
-   - `VT323-Regular.ttf` → import as FontFile
-3. Run `scenes/main/main.tscn`
+- **Five seamless realms** — Whispergrove, Bramblewood, Mistfen, Heartwood,
+  Moonfen — each with its own palette, weather, enemies and landmarks. Terrain
+  carves coherent sand/dirt/grass regions and lays a beach band wherever water
+  meets land.
+- **Combat with readable telegraphs** — telegraphs match their real hitboxes and
+  stay visible under fog and friendly spectacle at every quality tier.
+  Low/Medium/High reduce presentation cost only: timing, damage, collision and
+  telegraph readability are identical across tiers.
+- **Enemies with senses** — orbit/feint/lunge patterns, hearing, anchor leashes,
+  elite variants and multi-phase bosses with summons, hazards and phase
+  escalation.
+- **Forging from blueprints** — the Divining Lens resolves the scan, the forge
+  consumes materials exactly once and reports what is missing, and forged
+  `relic_<base>` weapons mount through the same visual registry as everything
+  else.
+- **Satchel, equipment and discovery codex** — inventory, gear comparison,
+  a player-following minimap with route/water/relief and a persistent discovery
+  fog, and a codex that records what the player has met.
+- **Mobile HUD** — one menu at a time, safe-area-aware layout, touch targets
+  held to a minimum size, and a quality scaler that owns VFX density, pool and
+  trail caps, transient lights, distortion, fog and material detail.
 
-## Controls
+## Playing
 
-| Action | Desktop | Mobile |
-|--------|---------|--------|
-| Move | WASD / Arrow keys | Drag on screen |
-| Attack | LMB / Space | Tap enemy |
-| Interact | RMB / Enter | Double-tap |
-| Cinder Lash | Q | Skill button |
-| Mend Flame | E | Skill button |
-| Scan | F | Scan button |
-| Dodge | Shift (or flick) | Flick quickly |
-| Jump | C / Ctrl | - |
-| Pause | Escape | - |
+**Android:** download the APK from
+[Releases](https://github.com/DevHuang1/embervale-godot/releases/latest), open
+it, allow "install unknown apps" if asked. It installs over any earlier beta
+(same development certificate) and keeps saves.
 
-## Embervale Parity Checklist
-
-- [x] Moss & Candlewax palette
-- [x] Quest stages & copy (verbatim)
-- [x] Auto-combat with approach/strike/retaliation
-- [x] Passive: every 3rd strike +4 ember damage
-- [x] Cinder Lash (16 dmg, 6s cd) + Mend Flame (10 heal, 9s cd)
-- [x] XP: 35 first kill → Lv 2, then +10/kill
-- [x] Loot: guaranteed cache then tonic rolls
-- [x] Quest proximity: shard 1.1 units, beacon 1.45 units
-- [x] Hushling AI: orbit/feint/lunge/recover
-- [x] Boss phases with unique mechanics
-- [x] Camera shake, hit flash, lantern bob
-- [x] Procedural chime audio (UI, loot, heal, hit, victory, defeat)
-
-## Next Steps
-
-1. Add `.glb` models for hero, hushling, boss, terrain
-2. Replace simulated detection in `ScanManager` with real ML (TensorFlow Lite / MediaPipe)
-3. Add particle textures for fireflies, mist, embers
-4. Polish UI theme with parchment/ink textures
-5. Add save/load system
-6. Export templates for iOS/Android
-
-## Store (RevenueCat)
-
-Ember marks are sold through a hosted RevenueCat Funnel backed by Stripe. The
-app confirms ownership through RevenueCat, then records each pack exactly once
-in the gameplay ledger. Setup, the secret-key policy, device configuration, and
-the demo script live in [`docs/REVENUECAT_SETUP.md`](docs/REVENUECAT_SETUP.md).
+**Desktop (development):** open `project.godot` in Godot 4.7 and run the main
+scene `res://scenes/main/main.tscn`, or:
 
 ```sh
-godot --headless --path . --script tests/test_revenuecat_entitlements.gd
+godot --path . scenes/main/main.tscn
 ```
+
+| Action | Desktop | Mobile |
+|---|---|---|
+| Move | WASD / arrows | Virtual stick |
+| Attack | Space / click | Attack button, or tap an enemy |
+| Interact | Enter | Contextual button |
+| Cinder Lash | Q | Skill button |
+| Mend Flame | E | Skill button |
+| Divining Lens | F | Scan button |
+| Dodge | Shift | Dodge button |
+| Jump | C / Ctrl | Jump button |
+
+## Project layout
+
+```
+scenes/
+  main/main.tscn        entry point (menu, then realm)
+  world/                grove, bramblewood, mistfen, heartwood, moonfen
+  entities/             hero, enemies, elites, bosses, structures, props
+  ui/                   HUD, satchel, forge, shop, dialogs, journal
+scripts/
+  autoload/             GameState, SceneLoader, AudioManager, StoreManager, ...
+  systems/              world streaming, combat, terrain relief, quality, store
+  entities/             hero, enemy archetypes, bosses
+  world/                realm-specific flow (waterways, boss compounds, ...)
+  ui/                   HUD and menu behaviour
+assets/
+  branding/app_icon/    launcher, adaptive, monochrome, splash (generated)
+  textures/stylized/    seven surface families with normal/roughness
+  models/               CC0 kits, licence evidence beside each pack
+  ui/, fonts/, shaders/, environments/, materials/
+backend/                FastAPI entitlement proxy for Play-less purchases
+tools/                  offline generators and real-renderer capture harnesses
+tests/                  headless contract suites (route, store, UI, VFX, ...)
+```
+
+## App identity
+
+The launcher icon, adaptive foreground/background, Android 13 monochrome layer
+and boot/splash mark are generated deterministically — no imported art:
+
+```sh
+godot --headless --path . --script tools/generate_app_icon.gd
+godot --headless --path . --script tests/test_app_icon_assets.gd
+```
+
+`export_presets.cfg` is **gitignored** and must be re-pinned before any Android
+build: `gradle_build/min_sdk="24"`, `package/name="Embervale"`, all four
+`launcher_icons/*` slots and `splash_screen/icon` pointing at
+`res://assets/branding/app_icon/*`. Verify every artifact with
+`aapt2 dump badging` (minSdk 24, versionCode, `application-label: Embervale`).
+
+## Store
+
+Ember marks are sold through a **hosted RevenueCat funnel backed by Stripe**.
+A Play-less build cannot confirm a purchase from the client (the provider secret
+must stay server-side), so `backend/` serves the two reads the game needs —
+active entitlements and the transaction page — behind a low-privilege app
+token. An Android build with the native RevenueCat SDK can use the Test Store
+instead, which simulates purchases for device QA.
+
+Rule of thumb: **public artifacts carry no store config** (the shop simply shows
+no buy row); keyed and sandbox builds are private QA builds.
+
+- [`docs/REVENUECAT_SETUP.md`](docs/REVENUECAT_SETUP.md) — web funnel, value map, device configuration
+- [`docs/REVENUECAT_DASHBOARD_RUNBOOK.md`](docs/REVENUECAT_DASHBOARD_RUNBOOK.md) — dashboard steps and the Render deploy
+- [`docs/REVENUECAT_ANDROID_SDK.md`](docs/REVENUECAT_ANDROID_SDK.md) — native Test Store path
+
+## Verification
+
+```sh
+godot --headless --path . --editor --quit              # parse/import check
+godot --headless --path . --script tests/route_end_to_end_validation.gd
+godot --headless --path . --script tests/test_forge_blueprint.gd
+godot --headless --path . --script tests/test_app_icon_assets.gd
+godot --headless --path . --script tests/test_menu_overlay_exclusion.gd
+godot --headless --path . --script tests/test_quality_scaler.gd
+godot --headless --path . --script tests/test_realm_visuals.gd
+godot --headless --path . --script tests/test_visual_vfx_budgets.gd
+python3 -m pytest                                       # backend proxy suite
+```
+
+Real-renderer captures (visual acceptance needs a real renderer, never the dummy
+one): `tools/capture_realms.gd`, `tools/capture_ui_portrait.gd`,
+`tools/capture_weapon_props.gd`, `tools/capture_armor_prop.gd`.
+
+## Docs
+
+Engineering contracts and operator guides live in [`docs/`](docs/):
+realm visual grammar, asset conventions, release checklist, the scan-to-forge
+migration record, the database schema, and the RevenueCat runbooks.
 
 ## License
 
 MIT — see [`LICENSE`](LICENSE). Third-party asset packs are **not** covered by
 that license; each keeps its own terms and attribution in
 [`ASSET_CREDITS.md`](ASSET_CREDITS.md), summarized in
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Checkout terms live in
+[`TERMS.md`](TERMS.md).
