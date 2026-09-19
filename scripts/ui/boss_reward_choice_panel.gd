@@ -29,12 +29,12 @@ func _build() -> void:
 	add_child(_body)
 	var title := Label.new()
 	title.text = "CHOOSE YOUR SPOILS"
-	UiKit.style_label(title, &"MenuTitle", 20)
+	UiKit.style_label(title, &"MenuTitle", 32)
 	_body.add_child(title)
 	var subtitle := Label.new()
 	subtitle.text = "Choose the build direction that shapes your next expedition."
 	subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(subtitle, &"Caption", 13)
+	UiKit.style_label(subtitle, &"Caption", 18)
 	_body.add_child(subtitle)
 	for choice in _choices:
 		var button := Button.new()

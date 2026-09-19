@@ -12,5 +12,15 @@ func _init() -> void:
 		push_error("Realm migration failed: %s" % realms)
 		quit(1)
 		return
+	var analysis: Dictionary = schema.migrate_analysis_state({"Swarm": 3, "brute": -2, "": 9})
+	if int(analysis.get("swarm", 0)) != 3 or int(analysis.get("brute", 0)) != 0 \
+			or analysis.has("") or analysis.has("Swarm"):
+		push_error("Analysis migration failed: %s" % analysis)
+		quit(1)
+		return
+	if not schema.migrate_analysis_state("garbage").is_empty():
+		push_error("Analysis migration accepted a non-dictionary")
+		quit(1)
+		return
 	print("ALL CONTENT SCAN MIGRATION TESTS PASSED")
 	quit()

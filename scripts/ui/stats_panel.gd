@@ -40,7 +40,7 @@ func _build_ui() -> void:
 	add_theme_constant_override("separation", 10)
 	_points_label = Label.new()
 	_points_label.name = "PointsLabel"
-	UiKit.style_label(_points_label, &"Subtitle", 18)
+	UiKit.style_label(_points_label, &"Subtitle", 24)
 	add_child(_points_label)
 
 	_rows_grid = GridContainer.new()
@@ -53,7 +53,7 @@ func _build_ui() -> void:
 	var derived_title := Label.new()
 	derived_title.name = "DerivedTitle"
 	derived_title.text = "DERIVED POWER"
-	UiKit.style_label(derived_title, &"Eyebrow", 13)
+	UiKit.style_label(derived_title, &"Eyebrow", 20)
 	add_child(derived_title)
 	_derived_grid = GridContainer.new()
 	_derived_grid.name = "Derived"
@@ -66,13 +66,13 @@ func _build_ui() -> void:
 	cap_note.name = "SoftCapNote"
 	cap_note.text = "FIRST 20 POINTS: FULL VALUE · AFTER 20: 50% EFFECTIVE VALUE"
 	cap_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(cap_note, &"Caption", 12)
+	UiKit.style_label(cap_note, &"Caption", 18)
 	add_child(cap_note)
 
 	_status_label = Label.new()
 	_status_label.name = "Status"
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(_status_label, &"Caption", 13)
+	UiKit.style_label(_status_label, &"Caption", 18)
 	add_child(_status_label)
 
 	var footer := HBoxContainer.new()
@@ -166,7 +166,7 @@ func _refresh() -> void:
 		tag.text = str(row.get("tag", "STAT"))
 		tag.custom_minimum_size = Vector2(54, 0)
 		tag.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		UiKit.style_label(tag, &"Eyebrow", 12)
+		UiKit.style_label(tag, &"Eyebrow", 20)
 		tag.add_theme_color_override("font_color", UiKit.EMBER)
 		line.add_child(tag)
 		var info := VBoxContainer.new()
@@ -174,11 +174,11 @@ func _refresh() -> void:
 		line.add_child(info)
 		var title := Label.new()
 		title.text = str(row.get("label", "Stat"))
-		UiKit.style_label(title, &"RowLabel", 15)
+		UiKit.style_label(title, &"RowLabel", 22)
 		info.add_child(title)
 		var effect := Label.new()
 		effect.text = str(row.get("effect", ""))
-		UiKit.style_label(effect, &"Caption", 11)
+		UiKit.style_label(effect, &"Caption", 18)
 		info.add_child(effect)
 		var value := Label.new()
 		var base := _base_value(str(row.get("key", "")))
@@ -187,7 +187,7 @@ func _refresh() -> void:
 		value.custom_minimum_size = Vector2(76, 0)
 		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		value.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		UiKit.style_label(value, &"RowLabel", 16)
+		UiKit.style_label(value, &"RowLabel", 22)
 		value.add_theme_color_override("font_color", UiKit.SAGE_BRIGHT if total != base else UiKit.CREAM)
 		line.add_child(value)
 		var add := Button.new()
@@ -207,7 +207,7 @@ func _refresh() -> void:
 		var label := Label.new()
 		label.text = "%s\n%s" % [str(entry[0]), str(entry[1])]
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		UiKit.style_label(label, &"Caption", 13)
+		UiKit.style_label(label, &"Caption", 18)
 		label.add_theme_color_override("font_color", entry[2])
 		_derived_grid.add_child(label)
 	_confirm_button.disabled = _pending.is_empty()

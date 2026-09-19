@@ -63,7 +63,7 @@ custom_minimum_size = Vector2(110, 56)
 focus_mode = 0
 text = "CLOSE"
 tooltip_text = "Close settings"
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 18
 
 [node name="Margin" type="MarginContainer" parent="Root/Panel"]
 layout_mode = 1

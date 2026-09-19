@@ -3,7 +3,6 @@ class_name ElementalHud
 
 const ELEMENTS := ["fire", "frost", "shock", "nature"]
 const LABELS := {"fire": "FIRE", "frost": "FROST", "shock": "SHOCK", "nature": "NATURE"}
-const ICONS := {"fire": "✦", "frost": "❄", "shock": "ϟ", "nature": "✿"}
 const COLORS := {
     "fire": Color(1.0, 0.30, 0.10),
     "frost": Color(0.38, 0.84, 1.0),
@@ -13,6 +12,7 @@ const COLORS := {
 const MAX_STACKS := {"fire": 3, "frost": 1, "shock": 2, "nature": 2}
 
 var _weapon_label: Label
+var _weapon_icon: Control
 var _target_label: Label
 var _meters: Dictionary = {}
 var _target: Node3D = null
@@ -40,18 +40,38 @@ func set_target(target: Node3D) -> void:
     _target = target
     _refresh_target()
 
+## Element marks are authored icons, not language glyphs: a font symbol renders
+## differently on every device and cannot be tinted reliably.
+func _element_icon(element: String, icon_size: float) -> Control:
+    var texture := UiKit.icon_texture(element)
+    if texture == null:
+        return UiKit.diamond_marker(COLORS.get(element, UiKit.EMBER), icon_size * 0.55)
+    var rect := TextureRect.new()
+    rect.texture = texture
+    rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+    rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+    rect.custom_minimum_size = Vector2(icon_size, icon_size)
+    rect.self_modulate = COLORS.get(element, UiKit.EMBER).lightened(0.22)
+    return rect
+
 func _build() -> void:
+    var weapon_row := HBoxContainer.new()
+    weapon_row.name = "WeaponElementRow"
+    weapon_row.add_theme_constant_override("separation", 8)
+    _weapon_icon = _element_icon("fire", 26.0)
+    weapon_row.add_child(_weapon_icon)
     _weapon_label = Label.new()
     _weapon_label.name = "WeaponElement"
-    _weapon_label.text = "ELEMENT  ·  FIRE"
-    _weapon_label.add_theme_font_size_override("font_size", 15)
+    _weapon_label.text = "FIRE ELEMENT"
+    _weapon_label.add_theme_font_size_override("font_size", 20)
     _weapon_label.add_theme_color_override("font_color", Color(1.0, 0.76, 0.34))
-    add_child(_weapon_label)
+    weapon_row.add_child(_weapon_label)
+    add_child(weapon_row)
 
     _target_label = Label.new()
     _target_label.name = "TargetBuildup"
     _target_label.text = "ELEMENTAL BUILDUP"
-    _target_label.add_theme_font_size_override("font_size", 11)
+    _target_label.add_theme_font_size_override("font_size", 20)
     _target_label.add_theme_color_override("font_color", Color(0.62, 0.72, 0.64))
     add_child(_target_label)
 
@@ -63,16 +83,18 @@ func _build() -> void:
     add_child(grid)
     for element in ELEMENTS:
         var row := HBoxContainer.new()
-        row.custom_minimum_size = Vector2(118, 17)
+        row.custom_minimum_size = Vector2(158, 28)
+        row.add_theme_constant_override("separation", 6)
+        row.add_child(_element_icon(element, 22.0))
         var label := Label.new()
-        label.custom_minimum_size = Vector2(52, 17)
-        label.text = "%s %s" % [ICONS[element], LABELS[element]]
-        label.add_theme_font_size_override("font_size", 10)
+        label.custom_minimum_size = Vector2(64, 24)
+        label.text = LABELS[element]
+        label.add_theme_font_size_override("font_size", 18)
         label.add_theme_color_override("font_color", COLORS[element].lightened(0.18))
         row.add_child(label)
         var meter := ProgressBar.new()
         meter.name = "%sBuildup" % element.capitalize()
-        meter.custom_minimum_size = Vector2(48, 12)
+        meter.custom_minimum_size = Vector2(76, 16)
         meter.max_value = int(MAX_STACKS[element])
         meter.value = 0
         meter.show_percentage = false
@@ -80,9 +102,9 @@ func _build() -> void:
         meter.add_theme_stylebox_override("fill", _bar_style(Color(COLORS[element].r, COLORS[element].g, COLORS[element].b, 0.9), COLORS[element]))
         row.add_child(meter)
         var value := Label.new()
-        value.custom_minimum_size = Vector2(22, 17)
+        value.custom_minimum_size = Vector2(34, 24)
         value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-        value.add_theme_font_size_override("font_size", 10)
+        value.add_theme_font_size_override("font_size", 18)
         value.add_theme_color_override("font_color", Color(0.82, 0.84, 0.78))
         row.add_child(value)
         grid.add_child(row)
@@ -107,8 +129,13 @@ func _refresh_weapon() -> void:
         element = str(GameState.equipped_weapon.get("element", "fire"))
     if not LABELS.has(element):
         element = "fire"
-    _weapon_label.text = "%s  %s ELEMENT" % [ICONS[element], LABELS[element]]
+    _weapon_label.text = "%s ELEMENT" % LABELS[element]
     _weapon_label.add_theme_color_override("font_color", COLORS[element].lightened(0.12))
+    if _weapon_icon != null:
+        if _weapon_icon is TextureRect:
+            (_weapon_icon as TextureRect).self_modulate = COLORS[element].lightened(0.22)
+        elif _weapon_icon.has_method("queue_redraw"):
+            _weapon_icon.queue_redraw()
 
 func _refresh_target() -> void:
     var snapshot: Dictionary = {}

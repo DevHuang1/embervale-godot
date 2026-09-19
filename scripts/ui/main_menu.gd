@@ -49,7 +49,10 @@ func _ready() -> void:
 	UiKit.style_secondary_button(settings_button)
 	UiKit.style_danger_button(quit_button)
 	$Root/VersionChip.add_theme_color_override("font_color", UiKit.SAGE_BRIGHT)
+	_build_crest()
 	_check_continue_availability()
+	_apply_responsive_frame()
+	get_viewport().size_changed.connect(_apply_responsive_frame)
 
 	# Button connections
 	if cta_button:      cta_button.pressed.connect(_on_cta_pressed)
@@ -63,6 +66,76 @@ func _ready() -> void:
 	$Root.modulate = Color(1, 1, 1, 0)
 	var tw := create_tween()
 	tw.tween_property($Root, "modulate:a", 1.0, 0.65).set_trans(Tween.TRANS_QUAD)
+
+## The authored card was a fixed 920 x 700, so on a 720 px phone both edges sat
+## off-screen and the hero title was cut in half. The frame keeps the card and
+## the footer hint inside the viewport and the device safe area.
+func _apply_responsive_frame() -> void:
+	var viewport := get_viewport().get_visible_rect().size
+	var insets := UiKit.safe_area_insets(viewport)
+	var margin_x := clampf(viewport.x * 0.05, 14.0, 60.0) + float(insets["left"])
+	var margin_y := clampf(viewport.y * 0.045, 14.0, 64.0) + float(insets["top"])
+	var width := maxf(280.0, viewport.x - margin_x * 2.0)
+	var height := maxf(280.0, viewport.y - margin_y * 2.0)
+	var card := get_node_or_null("Root/HeroCard") as Control
+	if card != null:
+		var card_width := minf(920.0, width)
+		var card_height := minf(700.0, height)
+		card.anchor_left = 0.5
+		card.anchor_right = 0.5
+		card.anchor_top = 0.5
+		card.anchor_bottom = 0.5
+		card.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		card.grow_vertical = Control.GROW_DIRECTION_BOTH
+		card.offset_left = -card_width * 0.5
+		card.offset_right = card_width * 0.5
+		card.offset_top = -card_height * 0.5
+		card.offset_bottom = card_height * 0.5
+	var footer := get_node_or_null("Root/FooterHint") as Control
+	if footer != null:
+		var footer_width := minf(1000.0, width)
+		footer.anchor_left = 0.5
+		footer.anchor_right = 0.5
+		footer.anchor_top = 1.0
+		footer.anchor_bottom = 1.0
+		footer.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		footer.offset_left = -footer_width * 0.5
+		footer.offset_right = footer_width * 0.5
+		footer.offset_top = -(76.0 + float(insets["bottom"]))
+		footer.offset_bottom = footer.offset_top + 64.0
+
+## The crest was authored as "— ◈ —", a font glyph that renders differently in
+## every locale. It is drawn chrome now: two hairlines around a copper inlay.
+func _build_crest() -> void:
+	var crest := get_node_or_null("Root/HeroCard/HeroVBox/Crest") as Label
+	if crest == null:
+		return
+	crest.visible = false
+	var row := HBoxContainer.new()
+	row.name = "CrestRow"
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 14)
+	crest.get_parent().add_child(row)
+	crest.get_parent().move_child(row, crest.get_index() + 1)
+	row.add_child(_crest_rule())
+	row.add_child(UiKit.diamond_marker(UiKit.EMBER, 12.0))
+	row.add_child(_crest_rule())
+
+func _crest_rule() -> Control:
+	var rule := Control.new()
+	rule.custom_minimum_size = Vector2(84, 6)
+	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var line := ColorRect.new()
+	line.color = Color(UiKit.COPPER.r, UiKit.COPPER.g, UiKit.COPPER.b, 0.34)
+	line.anchor_left = 0.0
+	line.anchor_right = 1.0
+	line.anchor_top = 0.5
+	line.anchor_bottom = 0.5
+	line.offset_top = -1.0
+	line.offset_bottom = 1.0
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rule.add_child(line)
+	return rule
 
 func _check_continue_availability() -> void:
 	_has_save = GameState.has_save()

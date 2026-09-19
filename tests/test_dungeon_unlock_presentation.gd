@@ -12,7 +12,7 @@ func _run() -> void:
 	var selector := scene.instantiate()
 	root.add_child(selector)
 	await process_frame
-	var cards: VBoxContainer = selector.get_node("Root/Center/Panel/VBox/CardsScroll/Cards")
+	var cards: VBoxContainer = selector.get_node("Root/Panel/VBox/CardsScroll/Cards")
 	if cards.get_child_count() != 3:
 		print("FAIL: expected three dungeon cards")
 		quit(1)

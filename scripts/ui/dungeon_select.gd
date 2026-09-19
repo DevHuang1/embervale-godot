@@ -7,19 +7,38 @@ const INSTANCES := [
 	{"id": "heartwood_core", "realm_id": "heartwood", "name": "HEARTWOOD CORE", "realm": "HEARTWOOD", "glyph": "✦", "difficulty": "ELITE", "power": 5, "reward": "220 GOLD · LEGENDARY CHEST", "desc": "Face the living ember beneath the ancient forest."}
 ]
 
-@onready var cards: VBoxContainer = $Root/Center/Panel/VBox/CardsScroll/Cards
-@onready var close_button: Button = $Root/Center/Panel/VBox/Header/Close
-@onready var title: Label = $Root/Center/Panel/VBox/Header/Title
-@onready var status: Label = $Root/Center/Panel/VBox/Status
+@onready var cards: VBoxContainer = $Root/Panel/VBox/CardsScroll/Cards
+@onready var close_button: Button = $Root/Panel/VBox/Header/Close
+@onready var title: Label = $Root/Panel/VBox/Header/Title
+@onready var status: Label = $Root/Panel/VBox/Status
+
+## Realm sigils double as instance marks, so a locked door still shows where it
+## leads instead of a bare glyph character.
+const REALM_ICONS := {
+	"whispergrove": "sigil_bramble",
+	"bramblewood": "sigil_bramble",
+	"mistfen": "sigil_wave",
+	"moonfen": "sigil_moon",
+	"heartwood": "sigil_root",
+}
 var _freeze_was_visible := false
 var _freeze_held := false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	UiKit.apply_glass($Root/Center/Panel, 18.0, 0.14)
+	UiKit.apply_glass($Root/Panel, 18.0, 0.14)
 	UiKit.style_button(close_button, UiKit.SAGE)
 	close_button.pressed.connect(close)
+	_apply_responsive_frame()
+	get_viewport().size_changed.connect(_apply_responsive_frame)
 	_build_cards()
+	_build_footer()
+
+## The authored panel was a fixed 900 px wide, which pushed both edges off a
+## 720 px phone. The frame keeps it inside the screen and the safe area.
+func _apply_responsive_frame() -> void:
+	UiKit.apply_menu_frame(get_node_or_null("Root/Panel") as Control,
+		get_viewport().get_visible_rect().size, 48.0, 60.0)
 
 func _process(_delta: float) -> void:
 	if visible == _freeze_was_visible:
@@ -41,6 +60,25 @@ func close() -> void:
 	visible = false
 	AudioManager.play_ui_back()
 
+## A quiet footer that fills the space under a short instance list and states
+## the one rule a player needs before committing to a run.
+func _build_footer() -> void:
+	var vbox := get_node_or_null("Root/Panel/VBox") as VBoxContainer
+	if vbox == null or vbox.get_node_or_null("ClearedFooter") != null:
+		return
+	var cleared := 0
+	for instance in INSTANCES:
+		if bool(GameState.quest_reward_claims.get("dungeon_%s_complete" % str(instance.id), false)):
+			cleared += 1
+	var footer := Label.new()
+	footer.name = "ClearedFooter"
+	footer.text = "CACHES CLAIMED %d / %d · a cleared cache cannot be claimed twice." % [cleared, INSTANCES.size()]
+	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiKit.style_label(footer, &"Caption", 18)
+	footer.add_theme_color_override("font_color", Color(UiKit.CREAM.r, UiKit.CREAM.g, UiKit.CREAM.b, 0.55))
+	vbox.add_child(footer)
+
 func _build_cards() -> void:
 	for child in cards.get_children():
 		child.queue_free()
@@ -48,48 +86,72 @@ func _build_cards() -> void:
 		cards.add_child(_build_card(instance))
 
 func _build_card(instance: Dictionary) -> Control:
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(0, 126)
-	var sb := UiKit.parchment_stylebox(UiKit.RADIUS_BUTTON)
-	panel.add_theme_stylebox_override("panel", sb)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 16)
-	panel.add_child(row)
-	var glyph := Label.new()
-	glyph.text = str(instance.glyph)
-	glyph.custom_minimum_size = Vector2(58, 0)
-	glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	UiKit.style_label(glyph, &"MenuTitle", 34)
-	glyph.add_theme_color_override("font_color", UiKit.EMBER)
-	row.add_child(glyph)
-	var info := VBoxContainer.new()
-	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(info)
-	var name_label := Label.new()
-	name_label.text = "%s  ·  %s" % [str(instance.name), str(instance.difficulty)]
-	UiKit.style_label(name_label, &"MenuTitle", 22)
-	info.add_child(name_label)
-	var realm_label := Label.new()
 	var unlocked := str(instance.get("id", "")) == "embervault" or str(instance.get("realm_id", "")) in GameState.unlocked_realms
 	var current := str(instance.get("realm_id", "")) == str(GameState.current_realm)
 	var cleared := bool(GameState.quest_reward_claims.get("dungeon_%s_complete" % str(instance.id), false))
+	var accent := UiKit.VERDIGRIS if current else (UiKit.COPPER if unlocked else UiKit.BLOOD)
+
+	var panel := PanelContainer.new()
+	panel.name = "Instance_%s" % str(instance.id)
+	panel.add_theme_stylebox_override("panel",
+		UiKit.glass_stylebox(false, 0.30 if unlocked else 0.50))
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	panel.add_child(box)
+
+	# Name first, marks after: a long instance name wraps the difficulty badge
+	# instead of being clipped to an ellipsis.
+	var head := HFlowContainer.new()
+	head.add_theme_constant_override("h_separation", 10)
+	head.add_theme_constant_override("v_separation", 6)
+	box.add_child(head)
+	head.add_child(UiKit.icon_well(str(REALM_ICONS.get(str(instance.get("realm_id", "")), "relic")),
+		accent, 56.0))
+	var name_label := Label.new()
+	name_label.text = str(instance.name)
+	name_label.custom_minimum_size = Vector2(150, 0)
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	UiKit.style_label(name_label, &"RowLabel", 26)
+	name_label.add_theme_color_override("font_color", UiKit.EMBER_BRIGHT if unlocked else UiKit.CREAM_DIM)
+	head.add_child(name_label)
+	head.add_child(UiKit.badge(str(instance.difficulty), accent))
+	if current:
+		head.add_child(UiKit.badge("Current realm", UiKit.VERDIGRIS))
+	elif cleared:
+		head.add_child(UiKit.badge("Cleared", UiKit.MOON))
+
 	var realm_state := UiKit.action_state("equipped" if current else ("owned" if unlocked else "locked"),
 		"CURRENT REALM" if current else ("AVAILABLE" if unlocked else "UNLOCK TO ENTER"))
-	realm_label.text = "%s  ·  RECOMMENDED POWER %d  ·  %s%s" % [str(instance.realm), int(instance.power), str(realm_state.get("detail", "")), "  ·  CLEARED" if cleared else ""]
-	UiKit.style_label(realm_label, &"Eyebrow", 14)
-	info.add_child(realm_label)
+	var meta := Label.new()
+	meta.text = "%s · RECOMMENDED POWER %d · %s" % [str(instance.realm), int(instance.power),
+		str(realm_state.get("detail", ""))]
+	meta.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	UiKit.style_label(meta, &"Caption", 18)
+	meta.add_theme_color_override("font_color", Color(UiKit.CREAM.r, UiKit.CREAM.g, UiKit.CREAM.b, 0.62))
+	box.add_child(meta)
+
 	var desc_label := Label.new()
 	desc_label.text = str(instance.desc)
 	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(desc_label, &"Caption", 15)
-	info.add_child(desc_label)
+	UiKit.style_label(desc_label, &"Caption", 18)
+	box.add_child(desc_label)
+
+	var foot := HBoxContainer.new()
+	foot.add_theme_constant_override("separation", 12)
+	box.add_child(foot)
 	var reward := Label.new()
-	reward.text = "REWARDS  ·  %s" % str(instance.reward)
-	UiKit.style_label(reward, &"Caption", 14)
+	reward.text = str(instance.reward)
+	reward.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	reward.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	reward.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	UiKit.style_label(reward, &"Caption", 18)
 	reward.add_theme_color_override("font_color", UiKit.EMBER_BRIGHT)
-	info.add_child(reward)
+	foot.add_child(reward)
+
 	var enter := Button.new()
-	enter.custom_minimum_size = Vector2(190, 58)
+	enter.name = "Enter"
+	enter.custom_minimum_size = Vector2(168, 56)
 	if unlocked:
 		enter.text = "ENTER" if not current else "CURRENT REALM"
 		enter.tooltip_text = "Travel to this realm" if not current else "You are already here"
@@ -99,11 +161,11 @@ func _build_card(instance: Dictionary) -> Control:
 			enter.pressed.connect(_on_enter.bind(str(instance.id)))
 	else:
 		var locked_state := UiKit.action_state("locked", "UNLOCK %s" % str(instance.realm))
-		enter.text = "%s  ·  %s" % [locked_state.get("label", "LOCKED"), locked_state.get("detail", "")]
+		enter.text = str(locked_state.get("label", "LOCKED"))
 		enter.disabled = true
 		enter.tooltip_text = "Complete the required progression to unlock this realm"
 		UiKit.style_secondary_button(enter)
-	row.add_child(enter)
+	foot.add_child(enter)
 	return panel
 
 func _on_enter(instance_id: String) -> void:

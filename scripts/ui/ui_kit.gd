@@ -36,11 +36,33 @@ const CHIP_BG := Color(0.055, 0.078, 0.062, 0.82)
 # Fullscreen dimmer behind floating sheets / confirm overlays.
 const MODAL_DIM := Color(0.002, 0.006, 0.005, 0.88)
 
-const RADIUS_PANEL := 16
-const RADIUS_BUTTON := 11
-const RADIUS_CARD := 9
-## Minimum interactive size for Android touch targets.
-const TOUCH_TARGET_MIN := 48.0
+## === Emberglass metal + arcane family ===
+## The base surfaces stay forest-dark so UI never fights the world, but chrome
+## now has a warm metal (copper) and a cool patina (verdigris) to carry hierarchy
+## without repeating gold on every edge. Accents are per-section, not global.
+const COPPER := Color(0.847, 0.549, 0.318, 1.0)
+const COPPER_BRIGHT := Color(0.973, 0.706, 0.435, 1.0)
+const COPPER_DEEP := Color(0.545, 0.322, 0.169, 1.0)
+const VERDIGRIS := Color(0.353, 0.706, 0.639, 1.0)
+const VERDIGRIS_BRIGHT := Color(0.502, 0.878, 0.804, 1.0)
+const VERDIGRIS_DEEP := Color(0.129, 0.310, 0.290, 1.0)
+const MOON := Color(0.545, 0.667, 0.980, 1.0)
+const MOON_BRIGHT := Color(0.729, 0.812, 1.0, 1.0)
+const BLOOD := Color(0.796, 0.239, 0.243, 1.0)
+## Sunken wells (item icons, equipment slots, stat rows) sit below the sheet.
+const INK_SLOT := Color(0.012, 0.020, 0.017, 1.0)
+const INK_SLOT_RAISED := Color(0.039, 0.055, 0.047, 1.0)
+## Hairline separators; copper for structure, cream for copy grouping.
+const HAIRLINE := Color(0.847, 0.549, 0.318, 0.28)
+const HAIRLINE_STRONG := Color(0.847, 0.549, 0.318, 0.62)
+
+const RADIUS_PANEL := 18
+const RADIUS_BUTTON := 12
+const RADIUS_CARD := 10
+const RADIUS_SLOT := 14
+## Minimum interactive size for Android touch targets. The 4px above the Android
+## 48dp floor is deliberate: portrait thumbs miss by more than the spec allows.
+const TOUCH_TARGET_MIN := 52.0
 ## Portrait Android builds often expose a 1080px logical width. Treat that as
 ## compact so modal controls wrap before they become unreadable.
 const COMPACT_BREAKPOINT := 1200.0
@@ -143,8 +165,12 @@ static func theme_tokens() -> Dictionary:
 			"xs": 6.0, "sm": 8.0, "md": 12.0, "lg": 18.0, "xl": 28.0,
 		},
 		"typography": {
-			"caption": 16, "body": 20, "button": 23, "heading": 30,
-			"display": 42,
+			"micro": 16, "caption": 18, "body": 22, "button": 25,
+			"title": 30, "heading": 34, "display": 46, "hero": 58,
+		},
+		"roles": {
+			"primary": "ember", "secondary": "verdigris", "ghost": "copper",
+			"danger": "blood", "arcane": "moon",
 		},
 		"surfaces": {
 			"deep": BG_DEEP, "panel": GLASS_BG, "raised": GLASS_BG_RAISED,
@@ -160,6 +186,12 @@ static func theme_tokens() -> Dictionary:
 		"focus": {
 			"outline": EMBER_BRIGHT, "outline_width": 2,
 			"minimum_touch": TOUCH_TARGET_MIN,
+		},
+		"slot": {
+			"size": 104.0, "gap": 14.0, "empty_alpha": 0.30,
+		},
+		"rhythm": {
+			"row_gap": 12.0, "section_gap": 22.0, "screen_pad": 28.0,
 		},
 		"safe_area": {
 			"compact_margin": SAFE_MARGIN_COMPACT,
@@ -226,10 +258,10 @@ static func button_stylebox(state: String, accent: Color = EMBER,
 	if state == "pressed":
 		sb.set_border_width_all(2)
 	sb.set_corner_radius_all(RADIUS_BUTTON)
-	sb.content_margin_left = 30
-	sb.content_margin_right = 30
-	sb.content_margin_top = 18
-	sb.content_margin_bottom = 18
+	sb.content_margin_left = 34
+	sb.content_margin_right = 34
+	sb.content_margin_top = 20
+	sb.content_margin_bottom = 20
 	return sb
 
 static func focus_stylebox(accent: Color = EMBER) -> StyleBoxFlat:
@@ -284,7 +316,7 @@ static func style_button(b: Button, accent: Color = EMBER) -> void:
 		b.add_theme_stylebox_override(state, button_stylebox(state, accent))
 	b.add_theme_stylebox_override("focus", focus_stylebox(accent))
 	b.add_theme_color_override("font_color", CREAM)
-	b.add_theme_font_size_override("font_size", 23)
+	b.add_theme_font_size_override("font_size", 25)
 	b.add_theme_color_override("font_hover_color", EMBER_BRIGHT)
 	b.add_theme_color_override("font_pressed_color", EMBER)
 	b.add_theme_color_override("font_disabled_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.30))
@@ -315,7 +347,7 @@ static func style_primary_button(b: Button) -> void:
 	b.add_theme_color_override("font_hover_color", Color(1, 1, 0.94))
 	b.add_theme_color_override("font_pressed_color", Color(0.96, 0.86, 0.64))
 	b.add_theme_color_override("font_disabled_color", Color(0.9, 0.87, 0.78, 0.35))
-	b.add_theme_font_size_override("font_size", 23)
+	b.add_theme_font_size_override("font_size", 25)
 	b.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
 	b.add_theme_constant_override("shadow_offset_y", 2)
 
@@ -441,7 +473,7 @@ static func style_secondary_button(b: Button) -> void:
 	b.add_theme_color_override("font_pressed_color", SAGE)
 	b.add_theme_color_override("font_disabled_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.25))
 	b.add_theme_constant_override("outline_size", 1)
-	b.add_theme_font_size_override("font_size", 23)
+	b.add_theme_font_size_override("font_size", 25)
 	b.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
 	b.add_theme_constant_override("shadow_offset_y", 2)
 
@@ -461,7 +493,7 @@ static func style_danger_button(b: Button) -> void:
 	b.add_theme_color_override("font_pressed_color", DANGER)
 	b.add_theme_color_override("font_disabled_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.25))
 	b.add_theme_constant_override("outline_size", 1)
-	b.add_theme_font_size_override("font_size", 23)
+	b.add_theme_font_size_override("font_size", 25)
 	b.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
 	b.add_theme_constant_override("shadow_offset_y", 2)
 
@@ -535,3 +567,431 @@ static func style_chip(lbl: Label, tint: Color) -> void:
 	# draw it) AND tint the text so colored emoji/labels always read.
 	chip_style(lbl, tint)
 	lbl.add_theme_color_override("font_color", tint.lightened(0.08))
+
+## === Role surfaces ===
+## One vocabulary for every button in the game. Screens pick a role and an
+## accent; they never hand-roll a stylebox, which is what let buttons drift out
+## of alignment and out of the palette.
+
+## Accent for a named role, so a caller can style text/chips to match a button.
+static func role_accent(role: String) -> Color:
+	match role.strip_edges().to_lower():
+		"primary", "ember":
+			return EMBER
+		"secondary", "verdigris":
+			return VERDIGRIS
+		"danger", "blood":
+			return BLOOD
+		"arcane", "moon":
+			return MOON
+		"ghost", "copper", "tab", "icon":
+			return COPPER
+		_:
+			return COPPER
+
+## Surface for a role + state. `flat` roles (ghost/tab/icon) stay translucent so
+## a row of them reads as one bar instead of a stack of cards.
+static func role_stylebox(role: String, state: String, accent: Color) -> StyleBoxFlat:
+	var key := role.strip_edges().to_lower()
+	var sb := StyleBoxFlat.new()
+	var flat := key in ["ghost", "tab", "icon"]
+	var base_alpha := 0.55 if flat else 1.0
+	match state:
+		"hover":
+			sb.bg_color = Color(accent.r, accent.g, accent.b, 0.18 if flat else 0.24)
+			sb.border_color = Color(accent.r, accent.g, accent.b, 0.80)
+		"pressed":
+			sb.bg_color = Color(0.0, 0.0, 0.0, 0.55 if flat else 0.42)
+			sb.border_color = Color(accent.r, accent.g, accent.b, 1.0)
+		"disabled":
+			sb.bg_color = Color(0.020, 0.028, 0.024, 0.55 if flat else 0.85)
+			sb.border_color = Color(accent.r, accent.g, accent.b, 0.14)
+		"selected":
+			sb.bg_color = Color(accent.r, accent.g, accent.b, 0.26)
+			sb.border_color = Color(accent.r, accent.g, accent.b, 1.0)
+		_:
+			if key == "primary":
+				sb.bg_color = Color(0.741, 0.478, 0.157, 0.98)
+				sb.border_color = Color(EMBER_BRIGHT.r, EMBER_BRIGHT.g, EMBER_BRIGHT.b, 0.70)
+			else:
+				sb.bg_color = Color(0.043, 0.062, 0.055, base_alpha)
+				sb.border_color = Color(accent.r, accent.g, accent.b, 0.42)
+	sb.set_border_width_all(2 if state in ["selected", "pressed"] else 1)
+	sb.set_corner_radius_all(RADIUS_SLOT if key == "icon" else RADIUS_BUTTON)
+	sb.content_margin_left = 14 if key == "icon" else 32
+	sb.content_margin_right = 14 if key == "icon" else 32
+	sb.content_margin_top = 14 if key == "icon" else 19
+	sb.content_margin_bottom = 14 if key == "icon" else 19
+	return sb
+
+## Applies a full role button: surfaces, focus, type, and a press dip. The dip
+## is a bounded one-shot tween, so no state leaks between taps.
+static func style_role_button(b: Button, role: String = "ghost",
+		accent: Color = COPPER, font_size: int = -1) -> void:
+	ensure_touch_target(b)
+	var key := role.strip_edges().to_lower()
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		b.add_theme_stylebox_override(state, role_stylebox(key, state, accent))
+	b.add_theme_stylebox_override("focus", focus_stylebox(accent))
+	var size := font_size if font_size > 0 else (
+		25 if key in ["primary", "secondary", "danger"] else 23)
+	b.add_theme_font_size_override("font_size", size)
+	b.add_theme_color_override("font_color", CREAM)
+	b.add_theme_color_override("font_hover_color", accent.lightened(0.25))
+	b.add_theme_color_override("font_pressed_color", accent.lightened(0.05))
+	b.add_theme_color_override("font_disabled_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.30))
+	b.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.55))
+	b.add_theme_constant_override("outline_size", 2)
+	if not b.pressed.is_connected(_on_role_button_pressed.bind(b)):
+		b.pressed.connect(_on_role_button_pressed.bind(b))
+	b.add_theme_constant_override("h_separation", 10)
+
+## One-shot press dip. Guarded so a re-styled button never stacks tweens.
+static func _on_role_button_pressed(b: Button) -> void:
+	if b == null or not is_instance_valid(b) or not b.is_inside_tree():
+		return
+	if b.has_meta("role_press_tween"):
+		var existing := b.get_meta("role_press_tween") as Tween
+		if existing != null and existing.is_valid():
+			existing.kill()
+	b.pivot_offset = b.size * 0.5
+	var tw := b.create_tween()
+	b.set_meta("role_press_tween", tw)
+	tw.tween_property(b, "scale", Vector2(0.965, 0.965), 0.06) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(b, "scale", Vector2.ONE, 0.10) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+## === Equipment slots ===
+## A slot is a sunken well with a metal frame: filled slots light the frame with
+## the item's rarity accent, empty slots stay dark with a dashed-feeling inner
+## rim. Callers own the contents (icon + name), the kit owns the chrome.
+static func slot_stylebox(filled: bool, accent: Color = COPPER,
+		state: String = "normal") -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = INK_SLOT_RAISED if filled else INK_SLOT
+	match state:
+		"hover":
+			sb.border_color = Color(accent.r, accent.g, accent.b, 0.95)
+		"drop":
+			sb.bg_color = Color(accent.r, accent.g, accent.b, 0.22)
+			sb.border_color = Color(accent.r, accent.g, accent.b, 1.0)
+		_:
+			sb.border_color = Color(accent.r, accent.g, accent.b, 0.85 if filled else 0.32)
+	sb.set_border_width_all(2 if state in ["hover", "drop"] else 1)
+	sb.set_corner_radius_all(RADIUS_SLOT)
+	sb.shadow_color = Color(0, 0, 0, 0.45)
+	sb.shadow_size = 6
+	sb.shadow_offset = Vector2(0, 2)
+	sb.content_margin_left = 10
+	sb.content_margin_right = 10
+	sb.content_margin_top = 8
+	sb.content_margin_bottom = 8
+	return sb
+
+## A framed slot control with a caption under it, ready for an icon child.
+## Returns the column; the framed slot is its "Slot" child and callers add their
+## icon into the slot's "Well" child.
+static func equipment_slot(caption: String, size: float = 104.0,
+		accent: Color = COPPER) -> VBoxContainer:
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 6)
+	var slot := PanelContainer.new()
+	slot.name = "Slot"
+	slot.custom_minimum_size = Vector2(size, size)
+	slot.add_theme_stylebox_override("panel", slot_stylebox(false, accent))
+	var well := Control.new()
+	well.name = "Well"
+	well.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	slot.add_child(well)
+	column.add_child(slot)
+	var label := Label.new()
+	label.name = "Caption"
+	label.text = caption.to_upper()
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	style_label(label, &"Caption", 18)
+	label.add_theme_color_override("font_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.62))
+	column.add_child(label)
+	slot.set_meta("caption_label", label)
+	return column
+
+## === Structure ===
+## Section header: a copper diamond, the title, then a hairline that fades out.
+## Returns a Control so screens can drop it into any VBox.
+static func section_header(title: String, accent: Color = COPPER,
+		trailing: String = "") -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	row.add_child(diamond_marker(accent, 12.0))
+	var label := Label.new()
+	label.text = title.to_upper()
+	style_label(label, &"Eyebrow", 24)
+	label.add_theme_color_override("font_color", accent.lightened(0.18))
+	row.add_child(label)
+	var rule := Control.new()
+	rule.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rule.custom_minimum_size = Vector2(0, 4)
+	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var line := ColorRect.new()
+	line.color = Color(accent.r, accent.g, accent.b, 0.34)
+	# A hairline: pinned to the row's vertical center instead of stretched to
+	# fill it, which is what turned the rule into a solid bar.
+	line.anchor_left = 0.0
+	line.anchor_right = 1.0
+	line.anchor_top = 0.5
+	line.anchor_bottom = 0.5
+	line.offset_top = -1.0
+	line.offset_bottom = 1.0
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rule.add_child(line)
+	row.add_child(rule)
+	if not trailing.is_empty():
+		var tail := Label.new()
+		tail.text = trailing
+		style_label(tail, &"Caption", 18)
+		tail.add_theme_color_override("font_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.66))
+		row.add_child(tail)
+	return row
+
+## A rotated square reads as an inlay instead of a font glyph, so it renders
+## identically in every locale and never looks like an emoji.
+static func diamond_marker(accent: Color = COPPER, size: float = 12.0) -> Control:
+	var host := Control.new()
+	host.custom_minimum_size = Vector2(size, size)
+	host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var dot := ColorRect.new()
+	dot.color = accent
+	dot.size = Vector2(size * 0.72, size * 0.72)
+	dot.position = Vector2(size * 0.14, size * 0.14)
+	dot.pivot_offset = dot.size * 0.5
+	dot.rotation_degrees = 45.0
+	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	host.add_child(dot)
+	return host
+
+## Hairline divider between rows of a sheet.
+static func divider(accent: Color = COPPER, alpha: float = 0.28) -> Control:
+	var line := ColorRect.new()
+	line.color = Color(accent.r, accent.g, accent.b, alpha)
+	line.custom_minimum_size = Vector2(0, 1)
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return line
+
+## Four corner brackets on a panel: the cheapest way to make a flat sheet read as
+## a crafted frame. Idempotent, layout-neutral, and ignores input.
+static func ornament_corners(panel: Control, accent: Color = COPPER,
+		size: float = 16.0, thickness: float = 2.0, alpha: float = 0.75) -> void:
+	if panel == null or panel.get_node_or_null("OrnamentCorners") != null:
+		return
+	var host := Control.new()
+	host.name = "OrnamentCorners"
+	host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	host.set_anchors_preset(Control.PRESET_FULL_RECT)
+	panel.add_child(host)
+	var tint := Color(accent.r, accent.g, accent.b, alpha)
+	for corner in [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]:
+		var ax := float(corner[0])
+		var ay := float(corner[1])
+		var right_side := is_equal_approx(ax, 1.0)
+		var bottom_side := is_equal_approx(ay, 1.0)
+		var h := ColorRect.new()
+		h.color = tint
+		h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		h.anchor_left = ax
+		h.anchor_right = ax
+		h.anchor_top = ay
+		h.anchor_bottom = ay
+		h.offset_left = -size if right_side else 0.0
+		h.offset_right = 0.0 if right_side else size
+		h.offset_top = -thickness if bottom_side else 0.0
+		h.offset_bottom = 0.0 if bottom_side else thickness
+		host.add_child(h)
+		var v := ColorRect.new()
+		v.color = tint
+		v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		v.anchor_left = ax
+		v.anchor_right = ax
+		v.anchor_top = ay
+		v.anchor_bottom = ay
+		v.offset_left = -thickness if right_side else 0.0
+		v.offset_right = 0.0 if right_side else thickness
+		v.offset_top = -size if bottom_side else 0.0
+		v.offset_bottom = 0.0 if bottom_side else size
+		host.add_child(v)
+
+## A label/value pair for stat readouts, aligned on a shared right edge.
+static func stat_row(label_text: String, value_text: String,
+		accent: Color = CREAM) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	var name_label := Label.new()
+	name_label.text = label_text.to_upper()
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	style_label(name_label, &"Caption", 18)
+	name_label.add_theme_color_override("font_color", Color(CREAM.r, CREAM.g, CREAM.b, 0.66))
+	row.add_child(name_label)
+	var value_label := Label.new()
+	value_label.text = value_text
+	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	style_label(value_label, &"RowLabel", 22)
+	value_label.add_theme_color_override("font_color", accent)
+	row.add_child(value_label)
+	return row
+
+## Delta text with an explicit sign, so an upgrade reads as an upgrade without
+## relying on color alone.
+static func delta_text(value: float, suffix: String = "") -> Dictionary:
+	var rounded := roundf(value * 10.0) / 10.0
+	if is_zero_approx(rounded):
+		return {"text": "—", "better": false, "worse": false}
+	var better := rounded > 0.0
+	return {
+		"text": "%s%s%s" % ["+" if better else "", str(rounded), suffix],
+		"better": better,
+		"worse": not better,
+	}
+
+## === Shared item presentation ===
+## Rarity, icons, and wells are read by the inventory, shop, forge and hero
+## panels. They live here so one item cannot look like three different things.
+
+static func rarity_color(rarity: int, fallback: Color = EMBER) -> Color:
+	var family: Dictionary = theme_tokens().get("rarity", {})
+	var key: String = ["common", "uncommon", "rare", "epic", "legendary"][clampi(rarity, 0, 4)]
+	var value: Variant = family.get(key, fallback)
+	return value as Color if value is Color else fallback
+
+static func icon_texture(item_id: String) -> Texture2D:
+	if item_id.strip_edges().is_empty():
+		return null
+	var loop := Engine.get_main_loop() as SceneTree
+	if loop == null:
+		return null
+	var registry := loop.root.get_node_or_null("IconRegistry")
+	if registry == null:
+		return null
+	return registry.call("icon_for", item_id) as Texture2D
+
+## A sunken well for one icon. Falls back to a diamond inlay rather than a
+## lettered placeholder, so a missing icon still reads as deliberate chrome.
+static func icon_well(item_id: String, accent: Color, size: float = 72.0) -> PanelContainer:
+	var well := PanelContainer.new()
+	well.custom_minimum_size = Vector2(size, size)
+	well.add_theme_stylebox_override("panel", icon_well_stylebox(accent))
+	well.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var icon := icon_texture(item_id)
+	if icon != null:
+		var image := TextureRect.new()
+		image.name = "Icon"
+		image.texture = icon
+		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		image.custom_minimum_size = Vector2(size - 20.0, size - 20.0)
+		image.self_modulate = accent.lightened(0.35)
+		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		well.add_child(image)
+	else:
+		var center := CenterContainer.new()
+		center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		center.add_child(diamond_marker(Color(CREAM.r, CREAM.g, CREAM.b, 0.32), size * 0.30))
+		well.add_child(center)
+	return well
+
+## A short status badge (EQUIPPED, CRAFTED, NEW) that never relies on color
+## alone: the word is always present.
+static func badge(text: String, accent: Color = VERDIGRIS, font_size: int = 16) -> PanelContainer:
+	var pill := PanelContainer.new()
+	var sb := pill_stylebox(accent)
+	sb.bg_color = Color(accent.r, accent.g, accent.b, 0.20)
+	sb.content_margin_left = 10
+	sb.content_margin_right = 10
+	sb.content_margin_top = 3
+	sb.content_margin_bottom = 3
+	pill.add_theme_stylebox_override("panel", sb)
+	pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var label := Label.new()
+	label.text = text.to_upper()
+	style_label(label, &"Caption", font_size)
+	label.add_theme_color_override("font_color", accent.lightened(0.25))
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pill.add_child(label)
+	return pill
+
+## A thin progress track for mastery and objective readouts. The filled part
+## always carries the accent; the unfilled part stays a sunken ink slot so the
+## bar reads as chrome rather than a bright rectangle on the glass.
+static func progress_bar(value: float, maximum: float, accent: Color = VERDIGRIS,
+		height: float = 10.0) -> PanelContainer:
+	var track := PanelContainer.new()
+	track.custom_minimum_size = Vector2(0, height)
+	track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = INK_SLOT
+	sb.set_corner_radius_all(int(height * 0.5))
+	sb.set_border_width_all(1)
+	sb.border_color = Color(accent.r, accent.g, accent.b, 0.28)
+	track.add_theme_stylebox_override("panel", sb)
+	var ratio := 0.0
+	if maximum > 0.0:
+		ratio = clampf(value / maximum, 0.0, 1.0)
+	if ratio > 0.0:
+		var fill := PanelContainer.new()
+		fill.name = "Fill"
+		fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var fsb := StyleBoxFlat.new()
+		fsb.bg_color = accent
+		fsb.set_corner_radius_all(int(height * 0.5))
+		fill.add_theme_stylebox_override("panel", fsb)
+		var host := Control.new()
+		host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		host.anchor_right = ratio
+		host.anchor_bottom = 1.0
+		host.add_child(fill)
+		fill.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		track.add_child(host)
+	else:
+		var empty := Control.new()
+		empty.name = "Fill"
+		empty.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		track.add_child(empty)
+	track.set_meta("ratio", ratio)
+	return track
+
+## One active skill: icon, name, and its live cooldown state, sized for a thumb.
+static func skill_chip(index: int, skill: Dictionary, cooldown_text: String,
+		accent: Color = EMBER) -> PanelContainer:
+	var chip := PanelContainer.new()
+	chip.name = "Skill%d" % index
+	chip.custom_minimum_size = Vector2(0, 92)
+	chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var sb := role_stylebox("ghost", "normal", accent)
+	sb.content_margin_left = 12
+	sb.content_margin_right = 12
+	sb.content_margin_top = 10
+	sb.content_margin_bottom = 10
+	chip.add_theme_stylebox_override("panel", sb)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	chip.add_child(row)
+	var skill_id := str(skill.get("id", skill.get("type", "")))
+	var icon := icon_texture(skill_id)
+	if icon == null:
+		icon = icon_texture(str(skill.get("type", "")))
+	var well := icon_well(skill_id, accent, 56.0) if icon != null else icon_well("", accent, 56.0)
+	row.add_child(well)
+	var info := VBoxContainer.new()
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info.add_theme_constant_override("separation", 2)
+	row.add_child(info)
+	var name_label := Label.new()
+	name_label.text = "%d · %s" % [index + 1, str(skill.get("name", "RITE")).to_upper()]
+	style_label(name_label, &"RowLabel", 22)
+	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.add_child(name_label)
+	var state := Label.new()
+	state.text = cooldown_text
+	style_label(state, &"Caption", 18)
+	state.add_theme_color_override("font_color",
+		Color(CREAM.r, CREAM.g, CREAM.b, 0.70) if cooldown_text.contains("READY") else accent)
+	info.add_child(state)
+	return chip

@@ -5,10 +5,10 @@ class_name StatsScreen
 ## Rendering and allocation live in the same StatsPanel used by SatchelUI.
 
 @onready var game_state: Node = get_node("/root/GameState")
-@onready var panel: Control = $Root/Center/Panel
-@onready var title: Label = $Root/Center/Panel/Header/Title
-@onready var close_button: Button = $Root/Center/Panel/Header/CloseButton
-@onready var stats_panel: StatsPanel = $Root/Center/Panel/VBox/StatsPanel
+@onready var panel: Control = $Root/Panel
+@onready var title: Label = $Root/Panel/Header/Title
+@onready var close_button: Button = $Root/Panel/Header/CloseButton
+@onready var stats_panel: StatsPanel = $Root/Panel/VBox/StatsPanel
 var _freeze_was_visible := false
 var _freeze_held := false
 
@@ -31,14 +31,13 @@ func _process(_delta: float) -> void:
 	else:
 		_release_world_freeze()
 
+## The panel was centered at a fixed size while its stat rows kept their own
+## minimum height, so on a phone the rows drew over the header. The frame insets
+## the panel and the rows scroll inside it instead.
 func _apply_responsive_layout() -> void:
 	var viewport_size := get_viewport().get_visible_rect().size
 	var compact := viewport_size.x < UiKit.COMPACT_BREAKPOINT
-	panel.custom_minimum_size = Vector2(
-		minf(740.0, maxf(320.0, viewport_size.x - 56.0)),
-		minf(680.0, maxf(420.0, viewport_size.y - 56.0)))
-	if compact:
-		panel.custom_minimum_size.x = maxf(320.0, viewport_size.x - 56.0)
+	UiKit.apply_menu_frame(panel, viewport_size, 28.0 if compact else 40.0, 60.0)
 
 func open() -> void:
 	title.text = "STATS · LV %02d" % game_state.level

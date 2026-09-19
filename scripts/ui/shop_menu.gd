@@ -29,7 +29,7 @@ func _ready() -> void:
 	$Root.add_theme_stylebox_override("panel", UiKit.glass_stylebox())
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	UiKit.style_button(close_button, UiKit.SAGE)
-	close_button.add_theme_font_size_override("font_size", 16)
+	close_button.add_theme_font_size_override("font_size", 18)
 	close_button.pressed.connect(close)
 	game_state.gold_changed.connect(_on_gold_changed)
 	game_state.inventory_changed.connect(_on_inventory_changed)
@@ -49,6 +49,7 @@ func _apply_responsive_layout() -> void:
 	root_panel.offset_right = width * 0.5
 	root_panel.offset_top = -height * 0.5
 	root_panel.offset_bottom = height * 0.5
+	_layout_header(root_panel, bool(metrics.get("compact", false)))
 	if _tabs != null:
 		var compact := bool(metrics.get("compact", false))
 		_tabs.columns = int(metrics.get("columns", 2))
@@ -56,6 +57,50 @@ func _apply_responsive_layout() -> void:
 		for button in _tabs.get_children():
 			if button is Button:
 				(button as Button).custom_minimum_size.x = tab_width
+
+## The authored header used absolute offsets that only worked at one width: the
+## title overflowed both edges and ran under the purse and close button. Lay it
+## out from the measured controls instead, so it holds on a phone in portrait.
+func _layout_header(root_panel: Control, compact: bool) -> void:
+	var header := root_panel.get_node_or_null("Header") as Control
+	if header == null:
+		return
+	var title := header.get_node_or_null("Title") as Label
+	var gold := header.get_node_or_null("GoldLabel") as Label
+	var close := header.get_node_or_null("CloseButton") as Button
+	var mark := header.get_node_or_null("MerchantMark") as Label
+	var close_width := close.custom_minimum_size.x if close != null else 110.0
+	var gold_width := 130.0
+	var gap := 12.0
+	if title != null:
+		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		title.clip_text = true
+		title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		title.offset_left = 0.0
+		title.offset_right = -(gold_width + close_width + gap * 2.0)
+		UiKit.style_label(title, &"MenuTitle", 34 if compact else 44)
+	if gold != null:
+		gold.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		gold.offset_left = -(close_width + gap + gold_width)
+		gold.offset_right = -(close_width + gap)
+		UiKit.style_label(gold, &"RowLabel", 20)
+	if mark != null:
+		# The merchant mark is a second line of copy sharing one header row: it
+		# only fits beside the title on a wide screen, so on compact it is
+		# dropped rather than stacked on top of the title it used to collide with.
+		mark.visible = not compact
+		mark.text = str(mark.text).replace("◈", "").strip_edges().to_upper()
+		mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		mark.clip_text = true
+		mark.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		mark.offset_left = -(close_width + gap + gold_width + gap + 220.0)
+		mark.offset_right = -(close_width + gap + gold_width + gap)
+		UiKit.style_label(mark, &"Eyebrow", 20)
+		if compact:
+			title.offset_right = -(gold_width + close_width + gap * 2.0)
+	if close != null:
+		close.offset_left = -close_width
+		close.offset_right = 0.0
 
 func _build_tabs() -> void:
 	_tabs = GridContainer.new()
@@ -85,7 +130,7 @@ func _build_tabs() -> void:
 	_ownership_label = Label.new()
 	_ownership_label.name = "OwnershipLedgerSummary"
 	_ownership_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	UiKit.style_label(_ownership_label, &"Caption", 14)
+	UiKit.style_label(_ownership_label, &"Caption", 18)
 	$Root/VBox.add_child(_ownership_label)
 	_history_button = Button.new()
 	_history_button.name = "ViewOwnershipHistory"
@@ -174,7 +219,7 @@ func _on_inventory_changed(_notice: String = "", _count: int = 0) -> void:
 	_refresh()
 
 func _refresh() -> void:
-	gold_label.text = "◆  %d  GOLD" % game_state.gold
+	gold_label.text = "%d  GOLD" % game_state.gold
 	if _ownership_label != null:
 		var ledger: Array[Dictionary] = game_state.get_purchase_ledger()
 		var latest := "NONE YET"
@@ -191,7 +236,7 @@ func _refresh() -> void:
 			var empty := Label.new()
 			empty.text = "NO STOCK IN THIS CATEGORY"
 			empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			UiKit.style_label(empty, &"Caption", 17)
+			UiKit.style_label(empty, &"Caption", 18)
 			items_vbox.add_child(empty)
 	else:
 		_build_sell_rows()
@@ -226,63 +271,54 @@ func _build_buy_row(stock: Dictionary) -> Control:
 	var kind := str(stock.get("kind", "item"))
 	var accent := UiKit.EMBER if kind == "weapon" else (Color(0.42, 0.76, 0.96) if kind == "armor" else UiKit.SAGE_BRIGHT)
 	panel.add_theme_stylebox_override("panel", UiKit.item_card_stylebox(accent))
+	var card := VBoxContainer.new()
+	card.add_theme_constant_override("separation", 10)
+	panel.add_child(card)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
-	panel.add_child(row)
+	card.add_child(row)
+	var actions := HBoxContainer.new()
+	actions.name = "Actions"
+	actions.add_theme_constant_override("separation", 10)
+	card.add_child(actions)
 	var id := str(stock.get("id", ""))
 	var def: Dictionary = GameState.WEAPON_DEFS.get(id, {}) if kind == "weapon" else (GameState.ARMOR_DEFS.get(id, {}) if kind == "armor" else game_state.get_item(id))
-	var glyph_well := PanelContainer.new()
-	glyph_well.custom_minimum_size = Vector2(66, 66)
-	glyph_well.add_theme_stylebox_override("panel", UiKit.icon_well_stylebox(accent))
-	row.add_child(glyph_well)
-	var icon := IconRegistry.icon_for(id)
-	if icon != null:
-		var image := TextureRect.new()
-		image.texture = icon
-		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		image.custom_minimum_size = Vector2(54, 54)
-		glyph_well.add_child(image)
-	else:
-		var glyph := Label.new()
-		glyph.text = str(def.get("glyph", "ITEM"))
-		glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		glyph.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		UiKit.style_label(glyph, "", 20)
-		glyph_well.add_child(glyph)
+	row.add_child(UiKit.icon_well(id, accent, 72.0))
 	var info := VBoxContainer.new()
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(info)
 	var title := Label.new()
 	title.text = str(def.get("name", id))
-	UiKit.style_label(title, &"MenuTitle", 19)
+	UiKit.style_label(title, &"MenuTitle", 32)
 	info.add_child(title)
 	var stat := Label.new()
 	stat.text = "%s  •  %s" % [kind.to_upper(), _stat_line(kind, def)]
-	UiKit.style_label(stat, &"Caption", 15)
+	UiKit.style_label(stat, &"Caption", 18)
 	stat.add_theme_color_override("font_color", accent.lightened(0.12))
 	info.add_child(stat)
 	var comparison := Label.new()
 	comparison.text = _comparison_line(kind, def)
 	comparison.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(comparison, &"Caption", 13)
+	UiKit.style_label(comparison, &"Caption", 18)
 	comparison.add_theme_color_override("font_color", Color(0.78, 0.86, 0.72))
 	info.add_child(comparison)
 	var desc := Label.new()
 	desc.text = str(def.get("description", def.get("desc", "")))
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(desc, &"Caption", 14)
+	UiKit.style_label(desc, &"Caption", 18)
 	info.add_child(desc)
 	var price := GameState.gear_buy_price(id, kind)
 	if kind == "weapon" or kind == "armor":
 		var preview := Button.new()
 		preview.text = "PREVIEW"
-		preview.custom_minimum_size = Vector2(126, 48)
-		UiKit.style_secondary_button(preview)
+		preview.custom_minimum_size = Vector2(0, 52)
+		preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		UiKit.style_role_button(preview, "ghost", UiKit.COPPER, 20)
 		preview.pressed.connect(_on_preview_pressed.bind(kind, def.duplicate(true)))
-		row.add_child(preview)
+		actions.add_child(preview)
 	var button := Button.new()
-	button.custom_minimum_size = Vector2(190, 48)
+	button.custom_minimum_size = Vector2(0, 52)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if kind != "potion" and game_state.owns_shop_item(id):
 		var equipped := (kind == "weapon" and str(game_state.equipped_weapon.get("id", "")) == id) \
 			or (kind == "armor" and str(game_state.equipped_armor.get("id", "")) == id)
@@ -290,7 +326,7 @@ func _build_buy_row(stock: Dictionary) -> Control:
 		button.text = str(owned_state.get("label", "OWNED / EQUIP"))
 		button.disabled = equipped
 		button.tooltip_text = "Currently equipped" if equipped else "Equip this owned item"
-		UiKit.style_secondary_button(button)
+		UiKit.style_role_button(button, "primary", UiKit.EMBER, 20)
 		if not equipped:
 			button.pressed.connect(_on_equip_pressed.bind(id, kind))
 	else:
@@ -298,12 +334,14 @@ func _build_buy_row(stock: Dictionary) -> Control:
 		var purchase_state := UiKit.action_state("unavailable" if missing_gold > 0 else "purchased",
 			"%d GOLD" % (missing_gold if missing_gold > 0 else price))
 		button.text = ("NEED " if missing_gold > 0 else "BUY  ") + str(purchase_state.get("detail", ""))
+		UiKit.style_role_button(button, "ghost" if missing_gold > 0 else "primary",
+			UiKit.COPPER if missing_gold > 0 else UiKit.EMBER, 20)
 		button.disabled = game_state.gold < price
 		button.tooltip_text = "Earn %d more gold to afford this item." % missing_gold if missing_gold > 0 else "Purchase this item for %d gold." % price
 		UiKit.style_primary_button(button)
 		if not button.disabled:
 			button.pressed.connect(_on_buy_pressed.bind(id))
-	row.add_child(button)
+	actions.add_child(button)
 	return panel
 
 func _on_preview_pressed(kind: String, definition: Dictionary) -> void:
@@ -330,7 +368,7 @@ func _build_sell_rows() -> void:
 	if items_vbox.get_child_count() == 0:
 		var empty := Label.new()
 		empty.text = "No eligible goods to sell."
-		UiKit.style_label(empty, &"Caption", 17)
+		UiKit.style_label(empty, &"Caption", 18)
 		items_vbox.add_child(empty)
 
 func _build_sell_row(kind: String, item: Dictionary) -> Control:
@@ -338,47 +376,37 @@ func _build_sell_row(kind: String, item: Dictionary) -> Control:
 	var rarity := clampi(int(item.get("rarity", 0)), 0, RARITY_COLORS.size() - 1)
 	var accent: Color = RARITY_COLORS[rarity]
 	panel.add_theme_stylebox_override("panel", UiKit.item_card_stylebox(accent))
+	var card := VBoxContainer.new()
+	card.add_theme_constant_override("separation", 10)
+	panel.add_child(card)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
-	panel.add_child(row)
-	var glyph_well := PanelContainer.new()
-	glyph_well.custom_minimum_size = Vector2(66, 66)
-	glyph_well.add_theme_stylebox_override("panel", UiKit.icon_well_stylebox(accent))
-	row.add_child(glyph_well)
-	var icon := IconRegistry.icon_for(str(item.get("id", "")))
-	if icon != null:
-		var image := TextureRect.new()
-		image.texture = icon
-		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		image.custom_minimum_size = Vector2(54, 54)
-		glyph_well.add_child(image)
-	else:
-		var glyph := Label.new()
-		glyph.text = str(item.get("glyph", "ITEM"))
-		glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		glyph.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		UiKit.style_label(glyph, "", 20)
-		glyph_well.add_child(glyph)
+	card.add_child(row)
+	var actions := HBoxContainer.new()
+	actions.name = "Actions"
+	actions.add_theme_constant_override("separation", 10)
+	card.add_child(actions)
+	row.add_child(UiKit.icon_well(str(item.get("id", "")), accent, 72.0))
 	var info := VBoxContainer.new()
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(info)
 	var id := str(item.get("id", ""))
 	var title := Label.new()
 	title.text = "%s  ×%d" % [str(item.get("name", id)), int(item.get("quantity", 1))] if kind == "potion" else str(item.get("name", id))
-	UiKit.style_label(title, &"MenuTitle", 18)
+	UiKit.style_label(title, &"MenuTitle", 32)
 	info.add_child(title)
 	var value := _sell_value(kind, id)
 	var meta := Label.new()
 	meta.text = "SELL VALUE  %d GOLD" % value
-	UiKit.style_label(meta, &"Caption", 14)
+	UiKit.style_label(meta, &"Caption", 18)
 	info.add_child(meta)
 	var button := Button.new()
 	button.text = "SELL  %d GOLD" % value
-	button.custom_minimum_size = Vector2(190, 48)
-	UiKit.style_secondary_button(button)
+	button.custom_minimum_size = Vector2(0, 52)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UiKit.style_role_button(button, "danger", UiKit.BLOOD, 20)
 	button.pressed.connect(_on_sell_pressed.bind(id, kind))
-	row.add_child(button)
+	actions.add_child(button)
 	return panel
 
 func _sell_value(kind: String, id: String) -> int:

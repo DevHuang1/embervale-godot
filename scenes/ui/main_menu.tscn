@@ -83,7 +83,7 @@ text = "EMBERVALE"
 theme_override_font_sizes/font_size = 32
 
 [node name="HeroCard" type="PanelContainer" parent="Root"]
-custom_minimum_size = Vector2(720, 620)
+custom_minimum_size = Vector2(320, 0)
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
@@ -99,7 +99,7 @@ grow_vertical = 2
 
 [node name="HeroVBox" type="VBoxContainer" parent="Root/HeroCard"]
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 14
 
 [node name="Eyebrow" type="Label" parent="Root/HeroCard/HeroVBox"]
 layout_mode = 2
@@ -119,13 +119,13 @@ layout_mode = 2
 theme_type_variation = &"Title"
 text = "THE LANTERN BEARER"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 78
+autowrap_mode = 2
+theme_override_font_sizes/font_size = 58
 
 [node name="SubtitleLabel" type="Label" parent="Root/HeroCard/HeroVBox"]
 layout_mode = 2
 theme_type_variation = &"Subtitle"
-text = "Night has settled over the Whispergrove. Take up the lantern,
-walk the pale path, and wake what sleeps beneath the moss."
+text = "Night has settled over the Whispergrove. Take up the lantern, walk the pale path, and wake what sleeps beneath the moss."
 horizontal_alignment = 1
 autowrap_mode = 2
 
@@ -137,7 +137,7 @@ custom_minimum_size = Vector2(0, 4)
 layout_mode = 2
 
 [node name="CTAButton" type="Button" parent="Root/HeroCard/HeroVBox"]
-custom_minimum_size = Vector2(0, 124)
+custom_minimum_size = Vector2(0, 96)
 layout_mode = 2
 theme_override_font_sizes/font_size = 32
 text = "BEGIN A NEW TALE"
@@ -180,20 +180,20 @@ alignment = 1
 theme_override_constants/separation = 14
 
 [node name="ContinueButton" type="Button" parent="Root/HeroCard/HeroVBox/SecondaryRow"]
-custom_minimum_size = Vector2(190, 72)
+custom_minimum_size = Vector2(168, 64)
 layout_mode = 2
 disabled = true
 text = "CONTINUE"
 theme_override_font_sizes/font_size = 23
 
 [node name="SettingsButton" type="Button" parent="Root/HeroCard/HeroVBox/SecondaryRow"]
-custom_minimum_size = Vector2(190, 72)
+custom_minimum_size = Vector2(168, 64)
 layout_mode = 2
 text = "SETTINGS"
 theme_override_font_sizes/font_size = 23
 
 [node name="QuitButton" type="Button" parent="Root/HeroCard/HeroVBox/SecondaryRow"]
-custom_minimum_size = Vector2(190, 72)
+custom_minimum_size = Vector2(168, 64)
 layout_mode = 2
 text = "QUIT"
 theme_override_font_sizes/font_size = 23
@@ -211,6 +211,7 @@ offset_right = 500.0
 offset_bottom = -84.0
 grow_horizontal = 2
 grow_vertical = 0
+autowrap_mode = 2
 theme_type_variation = &"Caption"
 text = "WASD / drag to move · tap an enemy to engage\nQ · CINDER LASH · E · MEND FLAME · F · DIVINING LENS"
 horizontal_alignment = 1

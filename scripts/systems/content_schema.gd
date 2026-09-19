@@ -74,6 +74,17 @@ static func migrate_scan_state(scans: Variant, fragments: Variant,
 	return {"scans": clampi(int(scans), 0, max_scans),
 		"fragments": clampi(int(fragments), 0, maxi(0, fragments_per_scan - 1))}
 
+static func migrate_analysis_state(saved: Variant) -> Dictionary:
+	var result: Dictionary = {}
+	if not saved is Dictionary:
+		return result
+	for raw_key in saved:
+		var key := str(raw_key).strip_edges().to_lower()
+		if key.is_empty():
+			continue
+		result[key] = maxi(0, int(saved[raw_key]))
+	return result
+
 static func migrate_gear(record: Dictionary, category: String) -> Dictionary:
 	var migrated := migrate_content_record(record, category)
 	migrated["id"] = normalize_content_id(migrated.get("id", ""))

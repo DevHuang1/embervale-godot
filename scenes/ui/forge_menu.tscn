@@ -74,14 +74,13 @@ stretch_mode = 6
 
 [node name="CameraStatus" type="Label" parent="Root/VBox/CameraView" unique_id=2044104766]
 layout_mode = 2
-theme_override_font_sizes/font_size = 15
+theme_override_font_sizes/font_size = 18
 text = "CAMERA PREVIEW · OFFLINE FALLBACK AVAILABLE"
 horizontal_alignment = 1
 vertical_alignment = 2
 
 [node name="Pipeline" type="PanelContainer" parent="Root/VBox" unique_id=997263700]
 layout_mode = 2
-size_flags_vertical = 2
 
 [node name="PipelineVBox" type="VBoxContainer" parent="Root/VBox/Pipeline" unique_id=7280098]
 layout_mode = 2

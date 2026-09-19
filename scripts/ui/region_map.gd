@@ -83,7 +83,7 @@ func _draw_realms() -> void:
 		var label := Label.new()
 		label.text = data.name
 		label.position = data.pos * Vector2(800, 500) + Vector2(16, -8)
-		label.add_theme_font_size_override("font_size", 12)
+		label.add_theme_font_size_override("font_size", 18)
 		_map_container.add_child(label)
 		_realm_labels.append(label)
 
@@ -94,7 +94,7 @@ func _draw_landmarks() -> void:
 		glyph.name = "LM_%s" % lm_id
 		glyph.text = data.glyph
 		glyph.position = data.pos * Vector2(800, 500) - Vector2(6, 6)
-		glyph.add_theme_font_size_override("font_size", 16)
+		glyph.add_theme_font_size_override("font_size", 18)
 		glyph.modulate = Color(1, 0.85, 0.3)
 		glyph.visible = false
 		_map_container.add_child(glyph)

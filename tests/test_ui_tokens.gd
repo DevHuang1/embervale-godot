@@ -123,6 +123,40 @@ func _init() -> void:
 		return
 	big_panel.free()
 	small_panel.free()
+	# === Section rule must stay a hairline ===
+	# The rule once stretched to the row's full height and read as a solid bar.
+	var header := kit.section_header("Satchel", kit.COPPER, "hint")
+	var rule: Control = null
+	for child in header.get_children():
+		if child is Control and not (child is Label) and child.size_flags_horizontal == Control.SIZE_EXPAND_FILL:
+			rule = child as Control
+			break
+	if rule == null or rule.get_child_count() != 1:
+		push_error("Section header is missing its rule line")
+		quit(1)
+		return
+	var line := rule.get_child(0) as ColorRect
+	if line == null or absf(line.offset_bottom - line.offset_top - 2.0) > 0.01:
+		push_error("Section rule is not a 2px hairline: %s" % str(line.offset_bottom - line.offset_top if line else -1.0))
+		quit(1)
+		return
+	header.free()
+	# === Inventory chrome: wrapping filters and a bounded hero preview ===
+	root.size = Vector2i(1080, 1920)
+	var satchel := (load("res://scenes/ui/satchel.tscn") as PackedScene).instantiate()
+	root.add_child(satchel)
+	await process_frame
+	var toggler := satchel.get_node("Root/VBox/TabContent/ItemsPage/ItemsContent/CategoryToggler") as GridContainer
+	if toggler == null or toggler.columns != 3:
+		push_error("Compact satchel filter bar must wrap into 3 columns")
+		quit(1)
+		return
+	var content := satchel.get_node("Root/VBox/TabContent/ItemsPage/ItemsContent") as Control
+	if toggler.size.x > content.size.x + 1.0:
+		push_error("Satchel filter bar overflows its panel: %s > %s" % [toggler.size.x, content.size.x])
+		quit(1)
+		return
+	satchel.queue_free()
 	print("ALL UI TOKEN TESTS PASSED")
 	button.free()
 	quit()

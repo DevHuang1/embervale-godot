@@ -11,8 +11,8 @@ func _initialize() -> void:
 	state.purchase_ledger.append({
 		"id": "ember_cache", "kind": "provider_embermarks", "price": 180,
 		"currency": "diamonds", "provider": "revenuecat",
-		"provider_record_id": "revenuecat:embermarks_cache:one_time",
-		"provider_entitlement": "embermarks_cache", "provider_expires_at": -1})
+		"provider_record_id": "revenuecat:embermarks_cache:txn:txn_export",
+		"provider_transaction": "txn_export", "provider_product": "embermarks_cache"})
 	var payload: Dictionary = state.build_data_export()
 	# A support diagnostic must never carry a credential or provider secret.
 	var serialized := JSON.stringify(payload)

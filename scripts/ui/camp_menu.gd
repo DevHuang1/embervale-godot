@@ -3,6 +3,23 @@ class_name CampMenu
 
 @onready var cards: VBoxContainer = $Root/VBox/CardsScroll/Cards
 @onready var status: Label = $Root/VBox/Status
+@onready var title: Label = $Root/Header/Title
+@onready var intro: Label = $Root/VBox/Intro
+
+## Facilities carry an authored icon where one exists; the rest fall back to the
+## shared diamond inlay so a missing glyph never reads as a bug.
+const FACILITY_ICONS := {
+	"forge": "ore",
+	"gatherer_grove": "sigil_bramble",
+	"lantern_beacon": "fire",
+	"rootway_beacon": "sigil_root",
+}
+const MASTERY_TRACKS := [
+	{"key": "kills", "label": "Kills"},
+	{"key": "boss", "label": "Bosses"},
+	{"key": "gather", "label": "Gathered"},
+	{"key": "discover", "label": "Discovered"},
+]
 var pending_id: String = ""
 var _freeze_was_visible: bool = false
 var _freeze_held: bool = false
@@ -64,30 +81,149 @@ func close() -> void:
 	visible = false
 
 func _refresh() -> void:
-	$Root/Header/Title.text = "LANTERN CAMP · LEVEL %d" % CampProgression.camp_level
+	title.text = "LANTERN CAMP"
+	intro.text = "Level %d · Strengthen the light you carry between realms." % CampProgression.camp_level
 	if pending_id.is_empty():
 		_hide_confirm()
 	for child in cards.get_children():
 		child.queue_free()
+	cards.add_child(UiKit.section_header("Facilities", UiKit.COPPER,
+		"%d / %d ACTIVE" % [_unlocked_count(), CampProgression.FACILITIES.size()]))
 	for id in CampProgression.FACILITIES:
-		var definition: Dictionary = CampProgression.facility_definition(str(id))
-		var button := Button.new()
-		var unlocked := CampProgression.facility_unlocked(str(id))
-		var cost: Dictionary = definition.get("cost", {})
-		var costs: Array[String] = []
-		for material in cost:
-			costs.append("%d/%d %s" % [int(GameState.call("get_material_qty", str(material))), int(cost[material]), str(material).replace("_", " ")])
-		button.text = ("✓ " if unlocked else "◇ ") + str(definition.get("name", id)).to_upper() + "\n" + str(definition.get("benefit", "")) + ("\nFACILITY ACTIVE" if unlocked else "\nCOST: " + ", ".join(costs))
-		button.disabled = unlocked
-		button.custom_minimum_size = Vector2(0, 108)
-		button.pressed.connect(_purchase.bind(str(id)))
-		cards.add_child(button)
+		cards.add_child(_build_facility_card(str(id)))
+	if not CampProgression.REALMS.is_empty():
+		cards.add_child(UiKit.section_header("Realm Mastery", UiKit.VERDIGRIS,
+			"EARN CAMP LEVELS"))
 	for realm in CampProgression.REALMS:
-		var mastery: Dictionary = CampProgression.mastery_for(realm)
-		var label := Label.new()
-		label.text = "%s MASTERY · %d/4\nKills %d/%d · Boss %d/%d · Gather %d/%d · Discover %d/%d" % [realm.to_upper(), CampProgression.mastery_total(realm), mastery.kills, CampProgression.target_for(realm, "kills"), mastery.boss, CampProgression.target_for(realm, "boss"), mastery.gather, CampProgression.target_for(realm, "gather"), mastery.discover, CampProgression.target_for(realm, "discover")]
-		UiKit.style_label(label, &"Body", 16)
-		cards.add_child(label)
+		cards.add_child(_build_mastery_card(str(realm)))
+
+func _unlocked_count() -> int:
+	var count := 0
+	for id in CampProgression.FACILITIES:
+		if CampProgression.facility_unlocked(str(id)):
+			count += 1
+	return count
+
+## One facility reads as a card, not a paragraph: icon, name, what it unlocks,
+## its material costs as chips, and a single action whose label says what will
+## happen. A story-granted facility shows why it has no button instead of an
+## empty cost line.
+func _build_facility_card(id: String) -> Control:
+	var definition := CampProgression.facility_definition(id)
+	var unlocked := CampProgression.facility_unlocked(id)
+	var grant_only := bool(definition.get("grant_only", false))
+	var cost: Dictionary = definition.get("cost", {})
+	var missing: Array[String] = []
+	for material in cost:
+		if int(GameState.call("get_material_qty", str(material))) < int(cost[material]):
+			missing.append(str(material))
+	var affordable := missing.is_empty()
+
+	var panel := PanelContainer.new()
+	panel.name = "Facility_%s" % id
+	panel.add_theme_stylebox_override("panel",
+		UiKit.glass_stylebox(false, 0.30 if unlocked else 0.55))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	panel.add_child(row)
+	row.add_child(UiKit.icon_well(str(FACILITY_ICONS.get(id, id)),
+		UiKit.VERDIGRIS if unlocked else UiKit.COPPER, 64.0))
+
+	var info := VBoxContainer.new()
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	info.add_theme_constant_override("separation", 6)
+	row.add_child(info)
+	# A flow container lets the state badge drop to a second line instead of
+	# squeezing the facility name into an ellipsis on a narrow phone.
+	var head := HFlowContainer.new()
+	head.add_theme_constant_override("h_separation", 10)
+	head.add_theme_constant_override("v_separation", 6)
+	info.add_child(head)
+	var name_label := Label.new()
+	name_label.text = str(definition.get("name", id))
+	name_label.custom_minimum_size = Vector2(170, 0)
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	UiKit.style_label(name_label, &"RowLabel", 24)
+	head.add_child(name_label)
+	if unlocked:
+		head.add_child(UiKit.badge("Active", UiKit.VERDIGRIS))
+	elif grant_only:
+		head.add_child(UiKit.badge("Story unlock", UiKit.MOON))
+	elif affordable:
+		head.add_child(UiKit.badge("Ready", UiKit.EMBER))
+	else:
+		head.add_child(UiKit.badge("Missing materials", UiKit.COPPER))
+	var benefit := Label.new()
+	benefit.text = str(definition.get("benefit", ""))
+	benefit.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	UiKit.style_label(benefit, &"Caption", 18)
+	benefit.add_theme_color_override("font_color", Color(UiKit.CREAM.r, UiKit.CREAM.g, UiKit.CREAM.b, 0.72))
+	info.add_child(benefit)
+	if not cost.is_empty():
+		var costs := HFlowContainer.new()
+		costs.add_theme_constant_override("h_separation", 8)
+		costs.add_theme_constant_override("v_separation", 6)
+		info.add_child(costs)
+		for material in cost:
+			var have := int(GameState.call("get_material_qty", str(material)))
+			var need := int(cost[material])
+			costs.add_child(UiKit.badge("%s %d/%d" % [str(material).replace("_", " "), have, need],
+				UiKit.VERDIGRIS if have >= need else UiKit.BLOOD))
+
+	var action := Button.new()
+	action.name = "Action"
+	action.custom_minimum_size = Vector2(136, 56)
+	action.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	if unlocked:
+		action.text = "ACTIVE"
+		action.disabled = true
+		UiKit.style_secondary_button(action)
+	elif grant_only:
+		action.text = "EARN IN STORY"
+		action.disabled = true
+		action.tooltip_text = "This facility is granted by progress, not purchased."
+		UiKit.style_secondary_button(action)
+	else:
+		action.text = "UNLOCK"
+		action.disabled = not affordable
+		if affordable:
+			UiKit.style_primary_button(action)
+			action.tooltip_text = "Spend the listed materials to unlock this facility."
+			action.pressed.connect(_purchase.bind(id))
+		else:
+			UiKit.style_secondary_button(action)
+			action.tooltip_text = "Still missing: %s" % ", ".join(missing).replace("_", " ")
+	row.add_child(action)
+	return panel
+
+## Mastery reads as progress, not a wall of counters: one header, one bar, and a
+## single compact track line underneath.
+func _build_mastery_card(realm: String) -> Control:
+	var mastery: Dictionary = CampProgression.mastery_for(realm)
+	var total := CampProgression.mastery_total(realm)
+	var panel := PanelContainer.new()
+	panel.name = "Mastery_%s" % realm
+	panel.add_theme_stylebox_override("panel", UiKit.glass_stylebox(false, 0.38))
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	panel.add_child(box)
+	box.add_child(UiKit.section_header(realm.replace("_", " "), UiKit.VERDIGRIS,
+		"%d / 4" % total))
+	box.add_child(UiKit.progress_bar(float(total), 4.0, UiKit.VERDIGRIS))
+	var parts: Array[String] = []
+	for track in MASTERY_TRACKS:
+		var key := str(track["key"])
+		parts.append("%s %d/%d" % [str(track["label"]).to_upper(),
+			int(mastery.get(key, 0)), CampProgression.target_for(realm, key)])
+	var line := Label.new()
+	line.text = " · ".join(parts)
+	line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	UiKit.style_label(line, &"Caption", 18)
+	line.add_theme_color_override("font_color", Color(UiKit.CREAM.r, UiKit.CREAM.g, UiKit.CREAM.b, 0.62))
+	box.add_child(line)
+	return panel
 
 func _purchase(id: String) -> void:
 	pending_id = id

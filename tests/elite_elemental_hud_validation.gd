@@ -36,22 +36,31 @@ func _run_validation() -> void:
 
     var elemental_hud := hud.get_node_or_null("Root/CombatCard/CombatVBox/ElementalHud")
     _assert_true(elemental_hud != null, "HUD builds the elemental indicator")
-    hud._on_combat_started(elite)
+    hud.show_combat_card(elite)
     GameState.enemy_target = elite
     elite.apply_elemental_status("shock", 1)
     await get_tree().process_frame
     await get_tree().process_frame
     if elemental_hud != null:
-        var weapon_label: Label = elemental_hud.get_node_or_null("WeaponElement")
+        var weapon_label: Label = elemental_hud.find_child("WeaponElement", true, false) as Label
         var target_label: Label = elemental_hud.get_node_or_null("TargetBuildup")
         _assert_true(weapon_label != null and weapon_label.text.contains("FIRE"), "HUD shows the default weapon element")
         _assert_true(target_label != null and target_label.text.contains("BUILDUP"), "HUD labels targeted elemental buildup")
         var meters := elemental_hud.get_node_or_null("BuildupMeters")
         var shock_value := -1.0
         if meters != null:
+            # Each buildup row is icon + name + meter + value; find them by type
+            # so adding presentation to a row never invalidates the reading.
             for row in meters.get_children():
-                if row.get_child_count() >= 2 and str(row.get_child(0).text).contains("SHOCK"):
-                    shock_value = (row.get_child(1) as ProgressBar).value
+                var row_label := ""
+                var row_meter: ProgressBar = null
+                for child in row.get_children():
+                    if child is ProgressBar:
+                        row_meter = child as ProgressBar
+                    elif child is Label and row_label.is_empty():
+                        row_label = (child as Label).text
+                if row_label.contains("SHOCK") and row_meter != null:
+                    shock_value = row_meter.value
         _assert_true(shock_value == 1.0, "HUD shows one Shock buildup stack")
         _assert_true(target_label != null and target_label.text.contains("IMMUNE FIRE,NATURE"), "HUD shows elite immunities")
 

@@ -39,20 +39,41 @@ func _ready() -> void:
 	quit_game_button.pressed.connect(_on_quit_pressed)
 	if InputManager.has_signal("pause_pressed"):
 		InputManager.pause_pressed.connect(_on_pause_pressed)
+	_insert_audio_section()
+	_add_settings_section("Video", UiKit.COPPER)
 	_build_quality_row()
 	_build_world_view_row()
 	_build_frame_rate_row()
+	_add_settings_section("Controls", UiKit.COPPER)
 	_build_camera_row()
 	_build_motion_row()
+	_build_mobile_controls_row()
+	_build_key_bindings_section()
+	_add_settings_section("Combat Feedback", UiKit.COPPER)
 	_build_landing_fx_row()
 	_build_recovery_assist_row()
 	_build_telegraph_assist_row()
 	_build_color_safe_telegraph_row()
+	_add_settings_section("Accessibility", UiKit.MOON)
 	_build_touch_target_row()
-	_build_mobile_controls_row()
 	_build_text_scale_row()
-	_build_key_bindings_section()
 	_build_data_export_row()
+
+## Settings groups its rows under headers so a long scroll reads as sections
+## instead of one undifferentiated list of dropdowns.
+func _add_settings_section(title: String, accent: Color) -> void:
+	if rows_box == null:
+		return
+	rows_box.add_child(UiKit.section_header(title, accent))
+
+## The three volume sliders are authored in the scene, so their header is
+## inserted ahead of them rather than appended after the runtime rows.
+func _insert_audio_section() -> void:
+	if rows_box == null:
+		return
+	var header := UiKit.section_header("Audio", UiKit.COPPER)
+	rows_box.add_child(header)
+	rows_box.move_child(header, 0)
 
 func _apply_responsive_layout() -> void:
 	var viewport_size := get_viewport().get_visible_rect().size
@@ -98,10 +119,6 @@ func _on_pause_pressed() -> void:
 
 func _build_mobile_controls_row() -> void:
 	var vbox: VBoxContainer = rows_box
-	var title := Label.new()
-	title.text = "Mobile controls"
-	title.add_theme_color_override("font_color", Color(0.96, 0.72, 0.29))
-	vbox.add_child(title)
 	_add_mobile_slider(vbox, "Joystick size", "joystick_scale", 0.75, 1.45, 1.0)
 	_add_mobile_slider(vbox, "Action button size", "action_scale", 0.75, 1.35, 1.0)
 	_add_mobile_slider(vbox, "Control opacity", "opacity", 0.55, 1.0, 0.92)
@@ -188,6 +205,15 @@ func _build_camera_row() -> void:
 		audio.play_ui_blip())
 	row.add_child(option)
 	vbox.add_child(row)
+	_move_hint_below(row)
+
+## The camera help paragraph is authored in the scene above the runtime rows, so
+## it is re-seated directly under the row it actually explains.
+func _move_hint_below(row: Control) -> void:
+	var hint := get_node_or_null("Root/Panel/Margin/VBox/Scroll/Rows/HintLabel") as Control
+	if hint == null or row == null or hint.get_parent() != row.get_parent():
+		return
+	hint.get_parent().move_child(hint, row.get_index() + 1)
 
 ## Adaptive-quality picker: Low / Auto / High, persisted by QualityScaler.
 func _build_quality_row() -> void:
@@ -493,14 +519,11 @@ func _build_key_bindings_section() -> void:
 	var section := VBoxContainer.new()
 	section.name = "KeyBindingsSection"
 	_binding_section = section
-	var heading := Label.new()
-	heading.text = "KEY BINDINGS"
-	UiKit.style_label(heading, &"Section", 13)
-	section.add_child(heading)
+	section.add_child(UiKit.section_header("Key Bindings", UiKit.COPPER))
 	_binding_status = Label.new()
 	_binding_status.text = "Select an action, then press a key"
 	_binding_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(_binding_status, &"Caption", 11)
+	UiKit.style_label(_binding_status, &"Caption", 18)
 	section.add_child(_binding_status)
 	var labels := {"scan": "Scan", "skill_0": "Skill 1", "skill_1": "Skill 2",
 		"skill_2": "Skill 3", "interact": "Interact", "pause": "Pause",
@@ -538,10 +561,11 @@ func _build_data_export_row() -> void:
 	var vbox: VBoxContainer = rows_box
 	var section := VBoxContainer.new()
 	section.name = "DataExportSection"
+	section.add_child(UiKit.section_header("Support Data", UiKit.COPPER))
 	var note := Label.new()
-	note.text = "SUPPORT DATA\nLocal progress exports are diagnostic. Paid ownership is revalidated by your account provider.\nA local reset clears this device's progress only; it cannot cancel or restore provider-owned purchases."
+	note.text = "Local progress exports are diagnostic. Paid ownership is revalidated by your account provider.\nA local reset clears this device's progress only; it cannot cancel or restore provider-owned purchases."
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(note, &"Caption", 12)
+	UiKit.style_label(note, &"Caption", 18)
 	section.add_child(note)
 	var button := Button.new()
 	button.name = "CopySupportExport"
@@ -552,7 +576,7 @@ func _build_data_export_row() -> void:
 	button.pressed.connect(func() -> void:
 		var payload := game_state.build_data_export()
 		DisplayServer.clipboard_set(JSON.stringify(payload))
-		note.text = "SUPPORT DATA\nCopied. Do not share payment receipts or secrets in screenshots."
+		note.text = "Copied. Do not share payment receipts or secrets in screenshots."
 		audio.play_ui_blip())
 	section.add_child(button)
 	vbox.add_child(section)

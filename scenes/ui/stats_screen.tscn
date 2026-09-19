@@ -22,17 +22,19 @@ anchor_bottom = 1.0
 mouse_filter = 2
 color = Color(0.002, 0.006, 0.005, 0.88)
 
-[node name="Center" type="CenterContainer" parent="Root"]
+[node name="Panel" type="Panel" parent="Root"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 60.0
+offset_right = -40.0
+offset_bottom = -60.0
+grow_horizontal = 2
+grow_vertical = 2
 
-[node name="Panel" type="Panel" parent="Root/Center"]
-custom_minimum_size = Vector2(740, 680)
-layout_mode = 2
-
-[node name="Header" type="Control" parent="Root/Center/Panel"]
+[node name="Header" type="Control" parent="Root/Panel"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -43,7 +45,7 @@ offset_right = -24.0
 offset_bottom = 84.0
 grow_horizontal = 2
 
-[node name="Title" type="Label" parent="Root/Center/Panel/Header"]
+[node name="Title" type="Label" parent="Root/Panel/Header"]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
@@ -52,7 +54,7 @@ grow_horizontal = 2
 theme_type_variation = &"MenuTitle"
 text = "STATS"
 
-[node name="CloseButton" type="Button" parent="Root/Center/Panel/Header"]
+[node name="CloseButton" type="Button" parent="Root/Panel/Header"]
 layout_mode = 1
 anchor_left = 1.0
 anchor_right = 1.0
@@ -62,9 +64,9 @@ custom_minimum_size = Vector2(110, 56)
 focus_mode = 0
 text = "CLOSE"
 tooltip_text = "Close stats"
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 18
 
-[node name="VBox" type="VBoxContainer" parent="Root/Center/Panel"]
+[node name="VBox" type="ScrollContainer" parent="Root/Panel"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -75,9 +77,10 @@ offset_right = -24.0
 offset_bottom = -24.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/separation = 10
+horizontal_scroll_mode = 0
 
-[node name="StatsPanel" type="VBoxContainer" parent="Root/Center/Panel/VBox"]
+[node name="StatsPanel" type="VBoxContainer" parent="Root/Panel/VBox"]
 layout_mode = 2
+size_flags_horizontal = 3
 size_flags_vertical = 3
 script = ExtResource("2_stats")

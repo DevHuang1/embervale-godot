@@ -224,7 +224,11 @@ func _refresh(force: bool) -> void:
 	visible = not defeated
 	var is_locked := false
 	if show_name_when_targeted:
-		var game_state := get_node_or_null("/root/GameState")
+		# A detached bar (enemy freed mid-frame) is outside the active scene
+		# tree, where an absolute get_node() is an engine error.
+		var game_state: Node = null
+		if is_inside_tree():
+			game_state = get_tree().root.get_node_or_null("GameState")
 		var target = game_state.enemy_target if game_state != null else null
 		is_locked = target == _source
 		_name_label.visible = is_locked or hp < max_hp

@@ -9,7 +9,7 @@ func _run() -> void:
 	root.size = Vector2i(1080, 1920)
 	var cases: Array[Dictionary] = [
 		{"scene": "res://scenes/ui/satchel.tscn", "header": "Root/Header", "close": "Root/Header/CloseButton"},
-		{"scene": "res://scenes/ui/stats_screen.tscn", "header": "Root/Center/Panel/Header", "close": "Root/Center/Panel/Header/CloseButton"},
+		{"scene": "res://scenes/ui/stats_screen.tscn", "header": "Root/Panel/Header", "close": "Root/Panel/Header/CloseButton"},
 		{"scene": "res://scenes/ui/forge_menu.tscn", "header": "Root/Header", "close": "Root/Header/CloseButton"},
 		{"scene": "res://scenes/ui/shop_menu.tscn", "header": "Root/Header", "close": "Root/Header/CloseButton"},
 		{"scene": "res://scenes/ui/camp_menu.tscn", "header": "Root/Header", "close": "Root/Header/Close"},

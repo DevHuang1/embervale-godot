@@ -13,11 +13,11 @@ const WORLD_SCENES: Array[String] = [
 ]
 ## Every path the shop script resolves with @onready or get_node.
 const REQUIRED_PATHS: Array[String] = [
-	"Root/Center/Panel/VBox/Header/DiamondsLabel",
-	"Root/Center/Panel/VBox/Scroll/ItemsVBox",
-	"Root/Center/Panel/VBox/Message",
-	"Root/Center/Panel/VBox/Footer/Close",
-	"Root/Center/Panel/VBox/Footer/UnequipAll",
+	"Root/Panel/VBox/Header/DiamondsLabel",
+	"Root/Panel/VBox/Scroll/ItemsVBox",
+	"Root/Panel/VBox/Message",
+	"Root/Panel/VBox/Footer/Close",
+	"Root/Panel/VBox/Footer/UnequipAll",
 ]
 
 func _initialize() -> void:
@@ -49,9 +49,27 @@ func _check_scene_loads(failures: Array[String]) -> void:
 	for path in REQUIRED_PATHS:
 		if shop.get_node_or_null(path) == null:
 			failures.append("The diamond shop is missing node path: %s" % path)
+	# Every $Path the script resolves must exist in the scene. A reparented scene
+	# silently nulls the script's @onready refs otherwise, which no path list
+	# kept in a separate file can catch.
+	for path in _script_node_paths():
+		if shop.get_node_or_null(path) == null:
+			failures.append("The shop script resolves a missing node path: %s" % path)
 	if not shop.has_method("open"):
 		failures.append("The diamond shop must expose an open() entry point")
 	shop.free()
+
+## Pulls every `$Root/...` node path out of the shop script.
+func _script_node_paths() -> Array[String]:
+	var source := FileAccess.get_file_as_string("res://scripts/ui/diamond_shop.gd")
+	var paths: Array[String] = []
+	var regex := RegEx.new()
+	regex.compile("\\$([A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)+)")
+	for found in regex.search_all(source):
+		var path := found.get_string(1)
+		if not paths.has(path):
+			paths.append(path)
+	return paths
 
 func _check_hud_wiring(failures: Array[String]) -> void:
 	var hud := FileAccess.get_file_as_string("res://scripts/ui/hud.gd")

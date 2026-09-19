@@ -25,6 +25,7 @@ var _weapon_slot: EquipmentSlot
 var _chest_slot: EquipmentSlot
 var _status: Label
 var _skills: HBoxContainer
+var _stats_box: VBoxContainer
 
 func _ready() -> void:
 	game_state = get_node("/root/GameState")
@@ -42,19 +43,17 @@ func _ready() -> void:
 func _build_ui() -> void:
 	var outer := VBoxContainer.new()
 	outer.name = "HeroContent"
-	outer.add_theme_constant_override("separation", 8)
+	outer.add_theme_constant_override("separation", 16)
 	add_child(outer)
-	var title := Label.new()
-	title.text = "HERO LOADOUT"
-	UiKit.style_label(title, &"Eyebrow", 13)
-	outer.add_child(title)
+	outer.add_child(UiKit.section_header("Hero Loadout", UiKit.EMBER,
+		"drag gear onto a slot"))
 	var body := HBoxContainer.new()
 	body.name = "PreviewAndSlots"
-	body.add_theme_constant_override("separation", 12)
+	body.add_theme_constant_override("separation", 18)
 	outer.add_child(body)
 	var viewport_container := SubViewportContainer.new()
 	viewport_container.name = "HeroPreview"
-	viewport_container.custom_minimum_size = Vector2(280, 360)
+	viewport_container.custom_minimum_size = Vector2(300, 380)
 	viewport_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# Keep the viewport at its authored render size; the surrounding Control
 	# adapts instead of scaling the 3D render target on every layout pass.
@@ -62,15 +61,20 @@ func _build_ui() -> void:
 	viewport_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_viewport = SubViewport.new()
 	_viewport.name = "HeroViewport"
-	_viewport.size = Vector2i(560, 720)
+	_viewport.size = Vector2i(420, 520)
 	_viewport.transparent_bg = true
-	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	# The preview rig must live in its own World3D: a SubViewport otherwise
+	# shares the game's world, which left a duplicate hero and two omni lights
+	# standing at the realm origin, and rendered the rig a second time.
+	_viewport.own_world_3d = true
+	# Render only while the satchel is on screen, not every frame while closed.
+	_viewport.render_target_update_mode = SubViewport.UPDATE_WHEN_PARENT_VISIBLE
 	viewport_container.add_child(_viewport)
 	body.add_child(viewport_container)
 	var slots := VBoxContainer.new()
 	slots.name = "EquipmentSlots"
-	slots.custom_minimum_size = Vector2(156, 0)
-	slots.add_theme_constant_override("separation", 8)
+	slots.custom_minimum_size = Vector2(172, 0)
+	slots.add_theme_constant_override("separation", 16)
 	body.add_child(slots)
 	_weapon_slot = EquipmentSlot.new()
 	_weapon_slot.name = "WeaponSlot"
@@ -80,18 +84,24 @@ func _build_ui() -> void:
 	_chest_slot.name = "ChestSlot"
 	_chest_slot.item_dropped.connect(_on_slot_item_dropped)
 	slots.add_child(_chest_slot)
+	var stats_panel := PanelContainer.new()
+	stats_panel.name = "LoadoutStats"
+	stats_panel.add_theme_stylebox_override("panel", UiKit.glass_stylebox(true, 0.32))
+	outer.add_child(stats_panel)
+	_stats_box = VBoxContainer.new()
+	_stats_box.add_theme_constant_override("separation", 6)
+	stats_panel.add_child(_stats_box)
 	_status = Label.new()
 	_status.name = "DropStatus"
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(_status, &"Caption", 13)
+	UiKit.style_label(_status, &"Body", 20)
+	_status.add_theme_color_override("font_color",
+		Color(UiKit.CREAM.r, UiKit.CREAM.g, UiKit.CREAM.b, 0.78))
 	outer.add_child(_status)
-	var skill_title := Label.new()
-	skill_title.text = "ACTIVE SKILLS"
-	UiKit.style_label(skill_title, &"Eyebrow", 12)
-	outer.add_child(skill_title)
+	outer.add_child(UiKit.section_header("Active Rites", UiKit.MOON, "tap to cast in combat"))
 	_skills = HBoxContainer.new()
 	_skills.name = "ActiveSkills"
-	_skills.add_theme_constant_override("separation", 8)
+	_skills.add_theme_constant_override("separation", 10)
 	outer.add_child(_skills)
 
 func _apply_layout() -> void:
@@ -101,7 +111,8 @@ func _apply_layout() -> void:
 	var outer := get_node_or_null("HeroContent") as VBoxContainer
 	var body := outer.get_node_or_null("PreviewAndSlots") as HBoxContainer if outer != null else null
 	if body != null:
-		body.get_node("HeroPreview").custom_minimum_size = Vector2(280 if compact else 360, 340 if compact else 400)
+		body.get_node("HeroPreview").custom_minimum_size = Vector2(
+			300 if compact else 380, 380 if compact else 440)
 
 func _slot_for_item(item: Dictionary) -> StringName:
 	var kind := str(item.get("kind", ""))
@@ -132,7 +143,7 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 	if not game_state.equip_item_to_slot(str(item.get("id", "")), slot):
 		_reject("This item is not available to equip.")
 		return
-	_status.text = "EQUIPPED · %s" % str(item.get("name", item.get("id", "GEAR")))
+	_set_status("EQUIPPED · %s" % str(item.get("name", item.get("id", "GEAR"))), true)
 	_refresh()
 	equip_requested.emit(str(item.get("id", "")), slot)
 
@@ -142,7 +153,7 @@ func _on_slot_item_dropped(item_id: String, slot: StringName) -> void:
 		_reject("That item does not fit this hero slot.")
 		return
 	if game_state.equip_item_to_slot(item_id, slot):
-		_status.text = "EQUIPPED · %s" % str(item.get("name", item_id))
+		_set_status("EQUIPPED · %s" % str(item.get("name", item_id)), true)
 		_refresh()
 		equip_requested.emit(item_id, slot)
 	else:
@@ -158,27 +169,46 @@ func _find_owned_item(item_id: String) -> Dictionary:
 	return {}
 
 func _reject(message: String) -> void:
-	_status.text = "REJECTED · %s" % message
+	_set_status("REJECTED · %s" % message, false)
 	drop_rejected.emit(message)
+
+## Status copy is colored by outcome and always carries the word, so the state
+## survives a color-blind reading.
+func _set_status(message: String, ok: bool) -> void:
+	if _status == null:
+		return
+	_status.text = message
+	_status.add_theme_color_override("font_color",
+		UiKit.VERDIGRIS_BRIGHT if ok else UiKit.DANGER_BRIGHT)
 
 func _refresh() -> void:
 	if _weapon_slot == null:
 		return
 	_weapon_slot.configure(&"weapon", game_state.get_equipment_for_slot(&"weapon"), UiKit.EMBER)
-	_chest_slot.configure(&"chest", game_state.get_equipment_for_slot(&"chest"), Color(0.42, 0.76, 0.96))
+	_chest_slot.configure(&"chest", game_state.get_equipment_for_slot(&"chest"), UiKit.MOON)
+	_refresh_stats()
 	for child in _skills.get_children():
 		child.queue_free()
 	var skills: Array = game_state.equipped_weapon.get("skills", [])
 	for index in mini(3, skills.size()):
 		var skill := skills[index] as Dictionary
-		var label := Label.new()
-		label.text = "%d  %s\n%s" % [index + 1, str(skill.get("name", "RITE")), game_state.get_slot_cooldown_text(index)]
-		label.custom_minimum_size = Vector2(0, 48)
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		UiKit.style_label(label, &"Caption", 12)
-		_skills.add_child(label)
+		_skills.add_child(UiKit.skill_chip(index, skill,
+			game_state.get_slot_cooldown_text(index), UiKit.MOON))
 	_refresh_preview()
+
+## The hero's live numbers, read from the same accessors combat uses so the
+## panel can never advertise a stat the fight does not have.
+func _refresh_stats() -> void:
+	if _stats_box == null:
+		return
+	for child in _stats_box.get_children():
+		child.queue_free()
+	var weapon: Dictionary = game_state.equipped_weapon
+	_stats_box.add_child(UiKit.stat_row("Attack", "%d" % int(weapon.get("atk", 0)), UiKit.EMBER_BRIGHT))
+	_stats_box.add_child(UiKit.stat_row("Defense", "%d" % game_state.armor_defense(), UiKit.MOON_BRIGHT))
+	_stats_box.add_child(UiKit.stat_row("Move Speed", "×%.2f" % game_state.armor_speed_mult(), UiKit.VERDIGRIS_BRIGHT))
+	_stats_box.add_child(UiKit.stat_row("Weapon",
+		str(weapon.get("name", "UNARMED")).to_upper(), UiKit.CREAM))
 
 func _refresh_preview() -> void:
 	if _viewport == null:

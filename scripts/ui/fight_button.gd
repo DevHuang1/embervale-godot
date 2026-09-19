@@ -50,7 +50,12 @@ var semantic_action: Dictionary = {}
 var skill_kind := "":
 	set(value):
 		skill_kind = value
+		_refresh_icon()
 		queue_redraw()
+## Authored icon for the current skill. The procedural fallback below still
+## covers kinds that have no authored mark yet.
+var _icon_tex: Texture2D = null
+var _key_chip: StyleBoxFlat = null
 var dimmed := false:
 	set(value):
 		if dimmed == value:
@@ -80,6 +85,18 @@ func set_action_state(state: String, detail: String = "") -> void:
 	tooltip_text = "%s%s" % [str(semantic_action.get("label", "")),
 		(" · " + detail) if not detail.is_empty() else ""]
 	queue_redraw()
+
+## Authored marks live in IconRegistry; "bleed" and "heavy_aoe" are the two
+## kinds whose registry key differs from the gameplay kind.
+const ICON_KEYS: Dictionary = {
+	"bleed": "strike", "heavy_aoe": "aoe", "aoe": "aoe",
+	"strike": "strike", "whirl": "whirl", "dash_strike": "dash_strike",
+	"heal_bloom": "heal_bloom", "comet": "comet", "explosion": "explosion",
+}
+
+func _refresh_icon() -> void:
+	var key := str(ICON_KEYS.get(skill_kind, skill_kind))
+	_icon_tex = UiKit.icon_texture(key) if not key.is_empty() else null
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -172,21 +189,27 @@ func _draw() -> void:
 	var r := minf(size.x, size.y) * 0.5 - 2.0
 	if r <= 0.0:
 		return
+	var rim := accent.lightened(0.35) if _pressed else accent
+	# Contact shadow, then the base disc: a flat circle read as a sticker; the
+	# layered version reads as a pressed metal medallion.
+	draw_circle(center + Vector2(0.0, 2.0), r, Color(0, 0, 0, 0.38))
 	draw_circle(center, r, BACKING)
+	draw_circle(center, r * 0.92, Color(accent.r, accent.g, accent.b,
+		0.06 if dimmed else 0.16))
+	draw_circle(center + Vector2(0.0, -r * 0.26), r * 0.66, Color(1.0, 1.0, 1.0, 0.05))
 	match shape:
 		Shape.AXE:
 			_draw_axe_head(center, r)
 		Shape.SLASH:
 			_draw_slash(center, r)
 		_:
-			var fill := accent
-			fill.a = 0.05 if dimmed else 0.12
-			draw_circle(center, r * 0.80, fill)
 			if not skill_kind.is_empty():
 				_draw_skill_icon(center, r * 0.58)
-	var rim := accent.lightened(0.35) if _pressed else accent
-	draw_arc(center, r, 0.0, TAU, 64,
-		Color(rim.r, rim.g, rim.b, 0.55 if dimmed else 0.9), 3.0, true)
+	draw_arc(center, r - 1.0, 0.0, TAU, 64, Color(0, 0, 0, 0.55), 5.0, true)
+	draw_arc(center, r - 3.0, 0.0, TAU, 64,
+		Color(rim.r, rim.g, rim.b, 0.55 if dimmed else 0.95), 3.0, true)
+	draw_arc(center, r - 6.0, PI * 0.82, PI * 1.48, 24,
+		Color(1.0, 1.0, 1.0, 0.05 if dimmed else 0.12), 2.0, true)
 	if _lock_glow > 0.01:
 		# Pulsing lantern-orange ring: "a foe is lit" — breathes in time with
 		# the ground mark so button row and world ring share one language.
@@ -232,12 +255,49 @@ func _draw() -> void:
 		flash_col.a = 0.85 * _ready_flash
 		draw_arc(center, r * (1.04 + 0.12 * (1.0 - _ready_flash)),
 			0.0, TAU, 64, flash_col, 4.0 + 3.0 * _ready_flash, true)
+	if not _key_label().is_empty():
+		_draw_key_chip(center, r)
+
+## The keyboard/gamepad binding shown on the control itself.
+func _key_label() -> String:
+	return str(tooltip_data.get("key", "")).strip_edges()
+
+func _draw_key_chip(center: Vector2, r: float) -> void:
+	if _key_chip == null:
+		_key_chip = StyleBoxFlat.new()
+		_key_chip.bg_color = Color(0.02, 0.03, 0.03, 0.86)
+		_key_chip.border_color = Color(accent.r, accent.g, accent.b, 0.55)
+		_key_chip.set_border_width_all(1)
+		_key_chip.set_corner_radius_all(6)
+		_key_chip.content_margin_left = 5
+		_key_chip.content_margin_right = 5
+		_key_chip.content_margin_top = 1
+		_key_chip.content_margin_bottom = 1
+	var label := _key_label()
+	var font := ThemeDB.fallback_font
+	var font_size := int(clampf(r * 0.34, 13.0, 20.0))
+	var text_size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size)
+	var chip_size := text_size + Vector2(14.0, 6.0)
+	var chip_pos := center + Vector2(r * 0.30, r * 0.30)
+	draw_style_box(_key_chip, Rect2(chip_pos, chip_size))
+	draw_string(font, chip_pos + Vector2(7.0, chip_size.y - 4.0), label,
+		HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size,
+		Color(1.0, 0.94, 0.80, 0.92))
 
 func _draw_skill_icon(c: Vector2, r: float) -> void:
 	var ink := accent.lightened(0.34)
 	if dimmed:
 		ink = ink.darkened(0.42)
 	var dark := BACKING.lightened(0.08)
+	if _icon_tex != null:
+		# A dark medallion behind the mark keeps it legible over the cooldown
+		# pie, then the authored silhouette is drawn on top in the rite's accent.
+		draw_circle(c, r * 0.94, Color(0.02, 0.03, 0.03, 0.75))
+		var side := r * 1.72
+		var rect := Rect2(c - Vector2(side, side) * 0.5, Vector2(side, side))
+		var tint := Color(1.0, 1.0, 1.0, 0.42 if dimmed else 1.0)
+		draw_texture_rect(_icon_tex, rect, false, tint)
+		return
 	match skill_kind:
 		"bleed":
 			# Three descending cuts plus a falling droplet: readable as a
@@ -382,7 +442,7 @@ func _make_custom_tooltip(_for_text: String) -> Control:
 	var key := str(d.get("key", ""))
 	var title := Label.new()
 	title.text = "%s  %s" % [name_str, ("(%s)" % key) if key != "" else ""]
-	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_font_size_override("font_size", 24)
 	title.add_theme_color_override("font_color", TT_TITLE)
 	title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
 	title.add_theme_constant_override("shadow_offset_x", 1)
@@ -393,14 +453,14 @@ func _make_custom_tooltip(_for_text: String) -> Control:
 	var cooldown := float(d.get("cooldown", 0.0))
 	var meta := Label.new()
 	meta.text = "%s   ·   CD %0.1fs" % [type_str, cooldown]
-	meta.add_theme_font_size_override("font_size", 14)
+	meta.add_theme_font_size_override("font_size", 20)
 	meta.add_theme_color_override("font_color", TT_ACCENT)
 	vbox.add_child(meta)
 	var state_label := str(d.get("state_label", ""))
 	if not state_label.is_empty():
 		var state := Label.new()
 		state.text = state_label
-		state.add_theme_font_size_override("font_size", 13)
+		state.add_theme_font_size_override("font_size", 20)
 		state.add_theme_color_override("font_color", TT_ACCENT)
 		vbox.add_child(state)
 	var state_detail := str(d.get("state_detail", ""))
@@ -408,7 +468,7 @@ func _make_custom_tooltip(_for_text: String) -> Control:
 		var state_note := Label.new()
 		state_note.text = state_detail
 		state_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		state_note.add_theme_font_size_override("font_size", 13)
+		state_note.add_theme_font_size_override("font_size", 18)
 		state_note.add_theme_color_override("font_color", TT_DIM)
 		vbox.add_child(state_note)
 
@@ -417,8 +477,8 @@ func _make_custom_tooltip(_for_text: String) -> Control:
 		var dl := Label.new()
 		dl.text = desc
 		dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		dl.custom_minimum_size = Vector2(240, 0)
-		dl.add_theme_font_size_override("font_size", 14)
+		dl.custom_minimum_size = Vector2(280, 0)
+		dl.add_theme_font_size_override("font_size", 20)
 		dl.add_theme_color_override("font_color", TT_BODY)
 		vbox.add_child(dl)
 
@@ -426,7 +486,7 @@ func _make_custom_tooltip(_for_text: String) -> Control:
 	if effect != "":
 		var el := Label.new()
 		el.text = effect
-		el.add_theme_font_size_override("font_size", 14)
+		el.add_theme_font_size_override("font_size", 20)
 		el.add_theme_color_override("font_color", TT_DIM)
 		vbox.add_child(el)
 
@@ -434,7 +494,7 @@ func _make_custom_tooltip(_for_text: String) -> Control:
 	if target != "":
 		var tl := Label.new()
 		tl.text = target
-		tl.add_theme_font_size_override("font_size", 13)
+		tl.add_theme_font_size_override("font_size", 18)
 		tl.add_theme_color_override("font_color",
 			Color(0.62, 0.85, 0.45) if target.begins_with("✓") else Color(0.96, 0.62, 0.35))
 		vbox.add_child(tl)

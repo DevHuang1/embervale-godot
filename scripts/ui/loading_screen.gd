@@ -82,9 +82,14 @@ func finish() -> void:
 	_kill_tip_tween()
 	if _finish_tween != null and _finish_tween.is_valid():
 		_finish_tween.kill()
-	_finish_tween = create_tween()
-	_finish_tween.tween_property(self, "modulate:a", 0.0, FINISH_FADE_SECONDS)
-	_finish_tween.tween_callback(queue_free)
+	_finish_tween = create_tween().set_parallel()
+	# A CanvasLayer has no modulate, so fade every canvas child (backdrop,
+	# labels, logo) in parallel; fading the layer itself used to raise a
+	# "modulate does not exist" error and leave the screen opaque.
+	for child in get_children():
+		if child is CanvasItem:
+			_finish_tween.tween_property(child, "modulate:a", 0.0, FINISH_FADE_SECONDS)
+	_finish_tween.chain().tween_callback(queue_free)
 	# Hard cap: the fade must never be the only way this layer leaves the tree.
 	# The timer is a child node, so it dies with the layer instead of outliving it.
 	if _hard_free_timer != null:
