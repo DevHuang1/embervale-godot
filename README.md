@@ -7,7 +7,7 @@ A stylized dark-fantasy action RPG built in **Godot 4.7**, Android-first
 sideload the APK on Android 7.0+, no store account needed.
 
 ```
-sha256 02f8451e…  Embervale-Beta9-arm64-v8a.apk
+sha256 54022a24…  Embervale-Beta9-arm64-v8a.apk
 ```
 
 ## What's in it
@@ -30,7 +30,8 @@ sha256 02f8451e…  Embervale-Beta9-arm64-v8a.apk
 - **Satchel, equipment and discovery codex** — inventory, gear comparison,
   a player-following minimap with route/water/relief and a persistent discovery
   fog, and a codex that records what the player has met.
-- **Mobile HUD** — one menu at a time, safe-area-aware layout, touch targets
+- **Mobile HUD** — one menu at a time, a quest tracker that folds to one line so
+  the joystick can grow into the corner, safe-area-aware layout, touch targets
   held to a minimum size, and a quality scaler that owns VFX density, pool and
   trail caps, transient lights, distortion, fog and material detail.
 

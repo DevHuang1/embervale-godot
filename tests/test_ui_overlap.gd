@@ -91,6 +91,34 @@ func _run() -> void:
 	var hud := grove.get_node("HUD")
 	failures += await _audit(hud, HUD_NODES, "HUD")
 
+	# Folded quest ledger: the strip must keep the non-overlap contract and
+	# actually free vertical space for the thumb controls.
+	var ledger := hud.get_node("Root/QuestLedger") as Control
+	var expanded_height := ledger.size.y
+	hud.call("_set_ledger_minimized", true, false)
+	await _frames(4)
+	if ledger.size.y >= expanded_height - 120.0:
+		failures += 1
+		print("FAIL: minimized quest ledger kept its expanded height ",
+			ledger.size.y, " (was ", expanded_height, ")")
+	var summary := hud.get_node_or_null(
+		"Root/QuestLedger/QuestLedgerVBox/LedgerHeader/LedgerSummary") as Label
+	if summary == null or not summary.visible or summary.text.strip_edges().is_empty():
+		failures += 1
+		print("FAIL: minimized quest ledger did not show its objective strip")
+	var details := hud.get_node_or_null(
+		"Root/QuestLedger/QuestLedgerVBox/InstructionLabel") as Control
+	if details != null and details.visible:
+		failures += 1
+		print("FAIL: minimized quest ledger kept its detail rows visible")
+	failures += await _audit(hud, HUD_NODES, "HUD-LEDGER-FOLDED")
+	hud.call("_set_ledger_minimized", false, false)
+	await _frames(4)
+	if absf(ledger.size.y - expanded_height) > 2.0:
+		failures += 1
+		print("FAIL: expanding the quest ledger did not restore its height ",
+			ledger.size.y, " (expected ", expanded_height, ")")
+
 	# Expanded realm map: the map grows, the vitals plate yields to it, and no
 	# visible chrome overlaps while it is open. Constants are read off the
 	# script so this stays a plain Control reference (no early class load).

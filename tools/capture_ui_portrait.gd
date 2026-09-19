@@ -25,9 +25,14 @@ func _run() -> void:
 		gs.add_material("spore_dust", 4)
 	await _capture_forge()
 	await _capture_altar()
+	await _capture_hud_ledger()
 	if gs != null:
 		gs.delete_save()
 	quit()
+
+func _frames(n: int) -> void:
+	for i in n:
+		await process_frame
 
 func _capture_forge() -> void:
 	var instance := (load("res://scenes/ui/forge_menu.tscn") as PackedScene).instantiate()
@@ -48,6 +53,33 @@ func _capture_altar() -> void:
 	await process_frame
 	await process_frame
 	await _save_capture("boss_altar_portrait.png")
+	instance.queue_free()
+	await process_frame
+
+## Quest-ledger fold over the live grove HUD: expanded tracker, the one-line
+## strip it folds into, and the enlarged joystick the freed corner allows. The
+## preference is applied directly (never through the player's settings file).
+func _capture_hud_ledger() -> void:
+	var instance := (load("res://scenes/world/grove.tscn") as PackedScene).instantiate()
+	get_root().add_child(instance)
+	await _frames(30)
+	var hud := instance.get_node_or_null("HUD") as Node
+	if hud == null:
+		print("FAIL: grove HUD missing for quest-ledger capture")
+		instance.queue_free()
+		return
+	hud.call("_set_ledger_minimized", false, false)
+	await _frames(4)
+	await _save_capture("hud_quest_ledger_expanded.png")
+	hud.call("_set_ledger_minimized", true, false)
+	await _frames(4)
+	await _save_capture("hud_quest_ledger_folded.png")
+	var joystick := hud.get_node_or_null("Root/MoveJoystick") as Control
+	if joystick != null:
+		joystick.scale = Vector2.ONE * 1.45
+		hud.call("_sync_joystick_pivot")
+		await _frames(4)
+		await _save_capture("hud_joystick_large_folded.png")
 	instance.queue_free()
 	await process_frame
 

@@ -97,6 +97,17 @@ var _interact_poll_in: float = 0.0
 var _actions_toggle: Button = null
 var _compact_actions_open: bool = false
 var _left_handed_applied := false
+## The left-side quest ledger folds down to a one-line objective strip so the
+## player can reclaim the corner for the touch controls. The folded state is a
+## presentation preference and persists beside the mobile-control settings.
+var _ledger_header: HBoxContainer = null
+var _ledger_summary: Label = null
+var _ledger_toggle: Button = null
+var _route_pulse: PanelContainer = null
+var _ledger_minimized := false
+## Redirectable settings path, the same seam QualityScaler and CameraRig expose
+## so tests never write the player's real preferences.
+var settings_path: String = AudioManager.SETTINGS_PATH
 
 ## The contextual interact button is the only visible affordance for opening
 ## chests and starting gathers on touch: keyboard Space and an on-screen
@@ -105,6 +116,11 @@ var _left_handed_applied := false
 const INTERACT_POLL_SECONDS := 0.2
 ## Authored slot directly left of the JUMP button, clear of the skill row.
 const INTERACT_BUTTON_RECT := Rect2(-308.0, -480.0, 100.0, 100.0)
+
+## Minimized-ledger preference. Lives in the settings file's own section so it
+## survives across sessions without touching save progress.
+const LEDGER_SETTINGS_SECTION := "hud"
+const LEDGER_MINIMIZED_KEY := "quest_ledger_minimized"
 
 ## Wide-bar frame limits. Narrow portrait viewports clamp these instead of
 ## letting the boss bar or the currency row run off the screen edge. Values
@@ -173,9 +189,11 @@ func _ready() -> void:
 	_wire_action_buttons()
 	_build_camp_button()
 	_build_compact_actions_toggle()
+	_build_quest_ledger_toggle()
 	_apply_hud_chrome()
 	_build_activity_line()
 	_build_journal_button()
+	_restore_ledger_preference()
 	get_viewport().size_changed.connect(_layout_journal_panel)
 	get_viewport().size_changed.connect(_layout_route_ledger)
 	get_viewport().size_changed.connect(_layout_compact_actions)
@@ -363,7 +381,7 @@ func _show_next_reward_popup() -> void:
 
 func _apply_mobile_control_preferences() -> void:
 	var config := ConfigFile.new()
-	config.load(AudioManager.SETTINGS_PATH)
+	config.load(settings_path)
 	var joystick_scale := clampf(float(config.get_value("mobile_controls", "joystick_scale", 1.0)), 0.75, 1.45)
 	var action_scale := clampf(float(config.get_value("mobile_controls", "action_scale", 1.0)), 0.75, 1.35)
 	var opacity := clampf(float(config.get_value("mobile_controls", "opacity", 0.92)), 0.55, 1.0)
@@ -407,7 +425,7 @@ func _set_left_handed(enabled: bool, joystick: Control, controls: Array) -> void
 
 func _apply_touch_target_scale() -> void:
 	var config := ConfigFile.new()
-	config.load(AudioManager.SETTINGS_PATH)
+	config.load(settings_path)
 	var scale := clampf(float(config.get_value("accessibility", "touch_target_scale", 1.0)), 1.0, 1.5)
 	for control in get_tree().get_nodes_in_group("combat_action_controls"):
 		if control is FightButton:
@@ -482,6 +500,94 @@ func _build_compact_actions_toggle() -> void:
 func _toggle_compact_actions() -> void:
 	_compact_actions_open = not _compact_actions_open
 	_layout_compact_actions()
+
+## Folds the quest tracker into a one-line objective strip. The control lives in
+## the ledger's own header so the thumb that would otherwise fight the panel can
+## reach it. Building the header here keeps the authored scene untouched while
+## still giving the chapter label and the toggle one aligned row.
+func _build_quest_ledger_toggle() -> void:
+	var vbox := get_node_or_null("Root/QuestLedger/QuestLedgerVBox") as VBoxContainer
+	if vbox == null or chapter_label == null:
+		return
+	_ledger_header = HBoxContainer.new()
+	_ledger_header.name = "LedgerHeader"
+	_ledger_header.add_theme_constant_override("separation", 8)
+	vbox.add_child(_ledger_header)
+	vbox.move_child(_ledger_header, 0)
+	vbox.remove_child(chapter_label)
+	_ledger_header.add_child(chapter_label)
+	chapter_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chapter_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_ledger_summary = Label.new()
+	_ledger_summary.name = "LedgerSummary"
+	_ledger_summary.visible = false
+	_ledger_summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_ledger_summary.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_ledger_summary.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	UiKit.style_label(_ledger_summary, &"Caption", 20)
+	_ledger_header.add_child(_ledger_summary)
+	_ledger_toggle = Button.new()
+	_ledger_toggle.name = "LedgerMinimizeButton"
+	_ledger_toggle.text = "▲"
+	_ledger_toggle.tooltip_text = "Minimize quest tracker"
+	UiKit.style_secondary_button(_ledger_toggle)
+	_ledger_toggle.pressed.connect(_on_ledger_toggle_pressed)
+	_ledger_header.add_child(_ledger_toggle)
+	UiKit.ensure_touch_target(_ledger_toggle)
+	_refresh_ledger_summary()
+
+func _on_ledger_toggle_pressed() -> void:
+	_set_ledger_minimized(not _ledger_minimized)
+
+func _set_ledger_minimized(minimized: bool, persist: bool = true) -> void:
+	_ledger_minimized = minimized
+	_apply_ledger_minimized_state()
+	if persist:
+		_save_ledger_preference()
+
+## Hides the tracker's detail rows while the header keeps the live objective and
+## the toggle, so folding never costs the player their next step.
+func _apply_ledger_minimized_state() -> void:
+	if chapter_label != null:
+		chapter_label.visible = not _ledger_minimized
+	if _ledger_summary != null:
+		_ledger_summary.visible = _ledger_minimized
+	if _ledger_toggle != null:
+		_ledger_toggle.text = "▲" if not _ledger_minimized else "▼"
+		_ledger_toggle.tooltip_text = "Minimize quest tracker" if not _ledger_minimized \
+			else "Expand quest tracker"
+	for value in [title_label, instruction_label, objective_label, checkpoint_label,
+			lesson_button, journal_button, _route_pulse]:
+		var detail := value as CanvasItem
+		if detail != null:
+			detail.visible = not _ledger_minimized
+	if _ledger_minimized:
+		_refresh_ledger_summary()
+	_layout_route_ledger()
+
+## The folded strip states the current objective; the chapter rides in the
+## tooltip, where there is room for it.
+func _refresh_ledger_summary() -> void:
+	if _ledger_summary == null:
+		return
+	var chapter := chapter_label.text.strip_edges() if chapter_label != null else ""
+	var title := title_label.text.strip_edges() if title_label != null else ""
+	_ledger_summary.text = title
+	_ledger_summary.tooltip_text = "%s · %s" % [chapter, title] \
+		if not chapter.is_empty() else title
+
+func _restore_ledger_preference() -> void:
+	var config := ConfigFile.new()
+	if config.load(settings_path) != OK:
+		return
+	_set_ledger_minimized(bool(config.get_value(
+		LEDGER_SETTINGS_SECTION, LEDGER_MINIMIZED_KEY, false)), false)
+
+func _save_ledger_preference() -> void:
+	var config := ConfigFile.new()
+	config.load(settings_path)
+	config.set_value(LEDGER_SETTINGS_SECTION, LEDGER_MINIMIZED_KEY, _ledger_minimized)
+	config.save(settings_path)
 
 ## Installs the elemental buildup indicator inside the combat card. It polls the
 ## live target itself, so the card only has to hand it the current enemy.
@@ -596,6 +702,7 @@ func _build_activity_line() -> void:
 	UiKit.style_label(_activity_line, &"Body", 20)
 	_activity_line.add_theme_color_override("font_color", UiKit.CREAM_DIM)
 	pulse_box.add_child(_activity_line)
+	_route_pulse = strip
 	$Root/QuestLedger/QuestLedgerVBox.add_child(strip)
 	_refresh_nearby_activity()
 
@@ -626,6 +733,7 @@ func _apply_hud_chrome() -> void:
 func _apply_frame_layout() -> void:
 	_layout_action_cluster()
 	_layout_field_note()
+	_sync_joystick_pivot()
 
 	var root := get_node_or_null("Root") as Control
 	if root == null:
@@ -633,6 +741,20 @@ func _apply_frame_layout() -> void:
 	var viewport_size := get_viewport().get_visible_rect().size
 	UiKit.apply_safe_area(root, viewport_size)
 	_layout_wide_bars(viewport_size)
+
+## Control.scale pivots on the control's top-left by default, which pushed an
+## enlarged stick off the bottom edge and pulled a shrunken one out of the thumb
+## corner. Pin the pivot to the screen corner the stick is anchored to so the
+## joystick grows and shrinks in place as its size preference changes.
+func _sync_joystick_pivot() -> void:
+	var joystick := get_node_or_null("Root/MoveJoystick") as Control
+	if joystick == null:
+		return
+	var stick_size := joystick.size
+	if stick_size.x <= 1.0 or stick_size.y <= 1.0:
+		stick_size = joystick.custom_minimum_size
+	joystick.pivot_offset = Vector2(
+		stick_size.x if _left_handed_applied else 0.0, stick_size.y)
 
 ## Field notes used to sit in a fixed 640px band across the bottom, which ran
 ## straight over the joystick on a phone. They now sit above the stick, wrap,
@@ -644,8 +766,11 @@ func _layout_field_note() -> void:
 	var joystick := get_node_or_null("Root/MoveJoystick") as Control
 	var joystick_height := 208.0
 	if joystick != null:
-		joystick_height = absf(joystick.offset_top) if joystick.offset_top < 0.0 \
-			else maxf(joystick.size.y, joystick.custom_minimum_size.y)
+		# The stick is scaled about its bottom anchor, so its visual height is
+		# the layout height times the size preference, not the authored offset.
+		var stick_scale := maxf(joystick.scale.x, joystick.scale.y)
+		var stick_base := maxf(joystick.size.y, joystick.custom_minimum_size.y)
+		joystick_height = absf(joystick.offset_bottom) + stick_base * stick_scale
 	var cluster := _cluster_metrics()
 	var cluster_top := float(cluster["margin"]) + float(cluster["attack"]) \
 		+ float(cluster["gap"]) + float(cluster["skill"])
@@ -709,7 +834,10 @@ func _layout_route_ledger() -> void:
 	quest_ledger.offset_right = left + width
 	quest_ledger.offset_top = 342.0 if viewport_size.y >= 720.0 else 260.0
 	var measured_height := quest_ledger.get_combined_minimum_size().y + 8.0
-	var content_height := clampf(measured_height, 360.0, 520.0)
+	# Folded, the ledger is exactly its header: the 360px expanded floor would
+	# defeat the whole point of reclaiming the corner for a larger joystick.
+	var content_height := measured_height if _ledger_minimized \
+		else clampf(measured_height, 360.0, 520.0)
 	var available_height := maxf(220.0, viewport_size.y - quest_ledger.offset_top - 36.0)
 	quest_ledger.offset_bottom = quest_ledger.offset_top + minf(content_height, available_height)
 
@@ -1326,6 +1454,7 @@ func _on_stage_changed(stage: int) -> void:
 	if chapter_label: chapter_label.text = str(copy.get("chapter", "Chapter I"))
 	if title_label: title_label.text = str(copy.get("title", "Quest"))
 	if instruction_label: instruction_label.text = str(copy.get("instruction", ""))
+	_refresh_ledger_summary()
 	_refresh_objectives()
 
 func _on_route_checkpoint_changed(checkpoint_id: String) -> void:

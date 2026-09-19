@@ -4,9 +4,9 @@
 **Package:** `com.devhuang1.embervale` · **App label:** Embervale
 **versionCode:** `9` · **versionName:** `Beta 9`
 
-**Artifact:** `exports/beta9/Embervale-Beta9-arm64-v8a.apk` (182.5 MB / 191,365,198 bytes)
+**Artifact:** `exports/beta9/Embervale-Beta9-arm64-v8a.apk` (182.5 MB / 191,370,434 bytes)
 **Checksums:** `exports/beta9/SHA256SUMS.txt`
-(SHA-256: `02f8451eb79ebbd80096425c5a647ed4a99725177c3950597229ed45925fb2f4`)
+(SHA-256: `54022a243e17e6fb0a382deb0d7c781817575628eb5ee9dd2812c35e087feff9`)
 
 > Signed with Godot's bundled development certificate — the **same certificate as
 > Beta 1–8**, so this installs straight over any earlier beta and keeps existing
@@ -43,6 +43,23 @@
   granted once per purchase, so the backend proxy gained
   `GET /transactions?customer_id=…` (see the runbook). Without it a completed
   checkout granted nothing.
+
+**A quest tracker you can fold, and a joystick that actually grows**
+
+- The left-side quest ledger now folds to a single line: tap the chevron in its
+  header and the tracker collapses to the current objective (chapter stays in
+  the tooltip), freeing the whole left column. The folded state persists across
+  sessions, and the strip still names the next step while it is closed.
+- The joystick size setting used to scale the stick from its top-left corner, so
+  a bigger stick slid off the bottom edge and a smaller one pulled away from the
+  thumb corner. It now scales from the corner it is anchored to and grows into
+  the space the folded tracker frees; the field-guide line yields to the larger
+  stick instead of being overlapped by it.
+- Regression coverage: `tests/test_ui_overlap.gd` re-audits the real HUD with
+  the ledger folded, and `tests/test_hud_compact_actions.gd` round-trips the
+  folded preference and asserts the enlarged stick keeps its bottom anchor.
+  Real-renderer evidence: `tools/capture_ui_portrait.gd` writes
+  `hud_quest_ledger_expanded/folded` and `hud_joystick_large_folded` captures.
 
 ## Install (Android)
 

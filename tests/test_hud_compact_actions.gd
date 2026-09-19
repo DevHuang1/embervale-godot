@@ -69,6 +69,51 @@ func _run() -> void:
 		push_error("reward popup queue did not advance after dismissal")
 		quit(1)
 		return
+
+	# Folded quest tracker: the preference round-trips through the settings file
+	# and the strip leaves the objective readable.
+	hud.settings_path = "/tmp/embervale_hud_ledger_pref.cfg"
+	DirAccess.remove_absolute(hud.settings_path)
+	hud.call("_set_ledger_minimized", true, true)
+	await process_frame
+	var pref := ConfigFile.new()
+	if pref.load(hud.settings_path) != OK \
+			or not bool(pref.get_value("hud", "quest_ledger_minimized", false)):
+		push_error("minimized quest ledger preference did not persist")
+		quit(1)
+		return
+	var summary := hud.get_node_or_null(
+		"Root/QuestLedger/QuestLedgerVBox/LedgerHeader/LedgerSummary") as Label
+	if summary == null or not summary.visible or summary.text.strip_edges().is_empty():
+		push_error("folded quest ledger lost its objective strip")
+		quit(1)
+		return
+
+	# Joystick growth: the size preference must scale the stick about the corner
+	# it is anchored to, so a bigger stick fills the freed space instead of
+	# sliding off the bottom edge.
+	var joystick := hud.get_node_or_null("Root/MoveJoystick") as Control
+	if joystick == null:
+		push_error("joystick missing from the compact HUD")
+		quit(1)
+		return
+	joystick.scale = Vector2.ONE * 1.45
+	hud.call("_sync_joystick_pivot")
+	await process_frame
+	var left_handed := bool(hud.get("_left_handed_applied"))
+	var expected_pivot_x := joystick.size.x if left_handed else 0.0
+	if not is_equal_approx(joystick.pivot_offset.y, joystick.size.y) \
+			or not is_equal_approx(joystick.pivot_offset.x, expected_pivot_x):
+		push_error("joystick scale pivot left its anchored corner")
+		quit(1)
+		return
+	var stick_bottom := joystick.global_position.y + joystick.size.y * joystick.scale.y
+	if absf(stick_bottom - (1920.0 - 24.0)) > 2.0:
+		push_error("enlarged joystick slid off its bottom anchor (%s)" % stick_bottom)
+		quit(1)
+		return
+	hud.call("_set_ledger_minimized", false, false)
+	DirAccess.remove_absolute(hud.settings_path)
 	scene.queue_free()
 	# Process the free before quitting so the scene is torn down while the
 	# tree is still alive.
