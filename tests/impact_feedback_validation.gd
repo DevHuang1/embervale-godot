@@ -115,6 +115,10 @@ func _run_environment(environment: Dictionary) -> void:
 		_assert_true(float(camera.get("distance")) <= 17.5,
 			label + " boss camera pulls into a readable combat frame")
 		camera.set_boss_combat(false)
+	if camera != null and "feedback_mode" in camera:
+		# This suite measures raw feedback amplitude, so a locally saved
+		# motion-feedback preference (e.g. "mobile") must not scale the result.
+		camera.set("feedback_mode", "full")
 	if hero == null or camera == null:
 		world.queue_free()
 		await _wait_frames(2)
@@ -181,8 +185,11 @@ func _run_impact_case(world: Node, hero: Node3D, camera: Node,
 	camera.add_shake(expected_amplitude)
 
 	var peak := 0.0
-	for _frame in 10:
-		await get_tree().process_frame
+	# current_shake is recomputed in CameraRig._physics_process, so sample on
+	# physics frames: idle-frame sampling can skip every step until the shake
+	# has already decayed below the visibility threshold on a heavy scene.
+	for _frame in 12:
+		await get_tree().physics_frame
 		Engine.time_scale = 1.0
 		var shake_value = camera.get("current_shake")
 		var current: float = shake_value.length() if shake_value is Vector3 else 0.0

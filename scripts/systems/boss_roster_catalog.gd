@@ -212,6 +212,70 @@ const DEFINITIONS := {
 		"diamond_reward": 10,
 		"rewards": {"xp": 680, "loot": {"moonmoss": 7, "crystal_fragment": 4}, "first_kill_materials": {"crystal_fragment": 4}},
 	},
+	# === Enterable-structure bosses ===
+	# These three are spawned by StructureInterior inside a structure's own boss
+	# hall, so they are intentionally outside CANONICAL_IDS: they borrow CC0
+	# Quaternius rigs instead of the shared Boss V2 atlas, and the roster
+	# validation's atlas/socket contract does not apply to them. Their ids are
+	# stable save keys; `definition_for` resolves them like any other boss.
+	"bramble_keep_warden": {
+		"name": "KEEP WARDEN",
+		"title": "the Last Watch",
+		"realm": "bramblewood",
+		"scene": ARTICULATED_SCENE,
+		"hp": 640, "atk": 15, "speed": 3.4, "scale": 1.08,
+		"body_height": 4.4, "body_width": 1.8, "limb_style": "greatsword_guard",
+		"palette": [Color(0.16, 0.15, 0.13), Color(0.92, 0.62, 0.24), Color(0.58, 0.62, 0.68)],
+		"movement_mode": "chase", "attack_style": "sword",
+		"attack_range": 5.0, "chase_player": true, "can_fly": false, "can_roll": false,
+		"form_count": 2, "armor_profile": [4, 7, 10, 13], "flash_level": 0.4,
+		"sfx_profile": "hollow_resin",
+		"skills": [
+			{"id": "regent_cleave", "kind": "sword", "cooldown": 3.4, "range": 5.2, "damage": 24, "radius": 3.2, "anticipation": 0.72, "active": 0.20, "recovery": 0.40, "sfx": "sword", "color": Color(1.0, 0.70, 0.24)},
+			{"id": "root_crash", "kind": "area", "cooldown": 8.5, "range": 7.5, "damage": 28, "radius": 4.0, "anticipation": 0.95, "active": 0.22, "recovery": 0.52, "sfx": "slam", "color": Color(0.92, 0.56, 0.18), "min_form": 1},
+		],
+		"diamond_reward": 6,
+		"rewards": {"xp": 320, "loot": {"hushling_thorn": 5}, "first_kill_materials": {"bramble_wood": 4, "iron_shard": 3}},
+	},
+	"hollowroot_matron": {
+		"name": "HOLLOWROOT MATRON",
+		"title": "the Spore Broodmother",
+		"realm": "whispergrove",
+		"scene": ARTICULATED_SCENE,
+		"hp": 560, "atk": 13, "speed": 2.6, "scale": 1.14,
+		"body_height": 3.2, "body_width": 2.6, "limb_style": "thorn_blades",
+		"palette": [Color(0.14, 0.22, 0.12), Color(0.62, 0.94, 0.52), Color(0.78, 0.58, 0.92)],
+		"movement_mode": "chase", "attack_style": "hybrid",
+		"attack_range": 4.0, "chase_player": true, "can_fly": false, "can_roll": false,
+		"form_count": 2, "armor_profile": [2, 4, 6, 8], "flash_level": 0.7,
+		"sfx_profile": "grave_moss",
+		"skills": [
+			{"id": "seed_burst", "kind": "projectile", "cooldown": 5.2, "range": 14.0, "damage": 15, "projectile_count": 4, "spread": 0.26, "anticipation": 0.68, "active": 0.12, "recovery": 0.36, "sfx": "projectile", "color": Color(0.52, 1.0, 0.56), "element": "nature"},
+			{"id": "briar_mine", "kind": "area", "cooldown": 8.0, "range": 12.0, "damage": 20, "radius": 3.2, "anticipation": 0.82, "active": 0.20, "recovery": 0.44, "sfx": "cast", "color": Color(0.72, 0.42, 0.94), "min_form": 1},
+		],
+		"diamond_reward": 5,
+		"rewards": {"xp": 280, "loot": {"hushling_thorn": 4}, "first_kill_materials": {"bramble_wood": 3, "moonmoss": 2}},
+	},
+	"pyramid_sealed_one": {
+		"name": "THE SEALED ONE",
+		"title": "Bound Beneath the Steps",
+		"realm": "moonfen",
+		"scene": ARTICULATED_SCENE,
+		"hp": 780, "atk": 17, "speed": 3.8, "scale": 1.18,
+		"body_height": 5.0, "body_width": 2.4, "limb_style": "leviathan_wings",
+		"palette": [Color(0.10, 0.12, 0.24), Color(0.62, 0.72, 1.0), Color(1.0, 0.78, 0.42)],
+		"movement_mode": "chase", "attack_style": "hybrid",
+		"attack_range": 6.5, "chase_player": true, "can_fly": false, "can_roll": false,
+		"form_count": 3, "armor_profile": [5, 8, 11, 15], "flash_level": 0.8,
+		"sfx_profile": "grave_moss",
+		"skills": [
+			{"id": "lunar_breath", "kind": "projectile", "cooldown": 4.6, "range": 20.0, "damage": 21, "projectile_count": 4, "spread": 0.30, "anticipation": 0.62, "active": 0.14, "recovery": 0.38, "sfx": "projectile", "color": Color(0.62, 0.72, 1.0), "element": "shock"},
+			{"id": "crescent_sweep", "kind": "sword", "cooldown": 4.2, "range": 6.6, "damage": 29, "radius": 4.0, "anticipation": 0.70, "active": 0.20, "recovery": 0.42, "sfx": "sword", "color": Color(1.0, 0.80, 0.46), "min_form": 1},
+			{"id": "orbit_barrage", "kind": "projectile", "cooldown": 9.0, "range": 22.0, "damage": 19, "projectile_count": 6, "spread": 0.60, "anticipation": 0.95, "active": 0.18, "recovery": 0.52, "sfx": "cast", "color": Color(0.44, 0.66, 1.0), "element": "shock", "min_form": 2},
+		],
+		"diamond_reward": 8,
+		"rewards": {"xp": 420, "loot": {"moonmoss": 5, "crystal_fragment": 3}, "first_kill_materials": {"crystal_fragment": 3, "iron_shard": 4}},
+	},
 }
 
 static func canonical_id_for(boss_id: String) -> String:
