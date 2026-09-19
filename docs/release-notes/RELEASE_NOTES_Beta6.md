@@ -4,19 +4,21 @@
 **Package:** `com.devhuang1.embervale` · **App label:** Embervale Mobile
 **versionCode:** `6` · **versionName:** `Beta 6`
 
-**Artifact:** `exports/beta6/Embervale-Beta6-arm64-v8a.apk` (188.9 MB / 198,050,785 bytes)
+**Artifact:** `exports/beta6/Embervale-Beta6-arm64-v8a.apk` (188.9 MB / 198,047,636 bytes)
 **Checksums:** `exports/beta6/SHA256SUMS.txt`
-(SHA-256: `70f395e91b321e522152628d2e4846f8e81663ac098dc318f39c171f77126529`)
+(SHA-256: `82322a8d5985ab7cfa0c84afdadff7f687ce0af13e12cb4bbab52a5807c56fb7`)
 
 > Signed with Godot's bundled development certificate — the **same certificate as
 > Beta 1–5**, so this installs straight over any earlier beta and keeps existing
 > saves. Fine for sideloaded testing/distribution via GitHub Releases; **not** for
 > Play Store submission.
 >
-> **This build carries a RevenueCat Test Store public key** (packed as
-> `res://store_defaults.tres`), so in-app pack purchases are **simulated** — for
-> demo and QA only. Run `tools/write_store_defaults.gd -- --clear` before a public
-> release build; no secret (`sk_...`) is present in the APK.
+> **This artifact carries no store configuration and no provider key** — the
+> public build has no `store_defaults.tres`, so the shop shows no in-app buy row.
+> The keyed Test Store build stays local (`Embervale-Beta6-device-teststore-arm64-v8a.apk`,
+> not distributed): write the key with `tools/write_store_defaults.gd` and export
+> for device QA, then `--clear` again before any public export. No secret
+> (`sk_...`) is ever present in any APK.
 
 ## What changed since Beta 5
 
@@ -30,10 +32,10 @@
   instead of granting twice. Packs are repeatable — two purchases, two grants.
 - The browser **BUY ONLINE** row now appears only when a hosted funnel is
   configured, so an SDK-only build never shows a button that can only fail.
-- Shipped store values now travel as a **resource** (`store_defaults.tres`,
-  gitignored): a plain config file is not packed into an APK, so the earlier
-  mechanism silently shipped nothing at all. `tools/write_store_defaults.gd`
-  writes it from environment variables and `--clear` removes it.
+- Shipped store values travel as a **resource** (`store_defaults.tres`,
+  gitignored) because a plain config file is not packed into an APK. The public
+  artifact is exported with no store resource at all; `tools/write_store_defaults.gd`
+  writes (or `-- --clear` removes) the file for a local device build.
 - Works with a RevenueCat **Test Store** key (simulated purchases, no Play
   account) or a Google Play key; real Play products still need the Play Console.
 
