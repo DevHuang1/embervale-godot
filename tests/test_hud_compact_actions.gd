@@ -70,5 +70,8 @@ func _run() -> void:
 		quit(1)
 		return
 	scene.queue_free()
+	# Process the free before quitting so the scene is torn down while the
+	# tree is still alive.
+	await process_frame
 	print("HUD COMPACT ACTION TESTS PASSED")
 	quit()

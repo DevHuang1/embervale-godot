@@ -46,6 +46,7 @@ func _ready() -> void:
 	_build_frame_rate_row()
 	_add_settings_section("Controls", UiKit.COPPER)
 	_build_camera_row()
+	_build_look_sensitivity_row()
 	_build_motion_row()
 	_build_mobile_controls_row()
 	_build_key_bindings_section()
@@ -187,7 +188,7 @@ func _build_camera_row() -> void:
 	option.name = "CameraViewOption"
 	option.add_item("Third Person")
 	option.add_item("First Person")
-	option.tooltip_text = "Tap to move; joystick to steer. Mobile: swipe horizontally on the right side to orbit and pinch to zoom. Desktop: right/middle-drag or horizontal-wheel to orbit."
+	option.tooltip_text = "Tap to move; joystick to steer. Mobile: drag anywhere on the right side of the screen to turn the camera and pinch to zoom. Desktop: left/right-drag or horizontal wheel to turn the camera, wheel to zoom."
 	var config := ConfigFile.new()
 	config.load(AudioManager.SETTINGS_PATH)
 	var current := str(config.get_value("gameplay", "camera_view", "third_person"))
@@ -214,6 +215,51 @@ func _move_hint_below(row: Control) -> void:
 	if hint == null or row == null or hint.get_parent() != row.get_parent():
 		return
 	hint.get_parent().move_child(hint, row.get_index() + 1)
+
+## One slider scales every camera look gesture: third-person drag orbit and
+## first-person free-look. The rig owns the multiplier and persists it with the
+## other camera preferences; the slider only reports the player's choice.
+func _build_look_sensitivity_row() -> void:
+	var vbox: VBoxContainer = rows_box
+	var row := HBoxContainer.new()
+	row.name = "CameraSensitivityRow"
+	var label := Label.new()
+	label.text = "Camera Sensitivity"
+	label.tooltip_text = "How far a drag turns the camera, in third person and first person. Persists across realms and restarts."
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	row.add_child(label)
+	var slider := HSlider.new()
+	slider.name = "CameraSensitivitySlider"
+	slider.custom_minimum_size = Vector2(150, 32)
+	slider.min_value = CameraRig.MIN_LOOK_SENSITIVITY
+	slider.max_value = CameraRig.MAX_LOOK_SENSITIVITY
+	slider.step = 0.1
+	slider.value = _current_look_sensitivity()
+	slider.value_changed.connect(func(value: float) -> void: _apply_look_sensitivity(value))
+	row.add_child(slider)
+	vbox.add_child(row)
+	_move_hint_below(row)
+
+func _current_look_sensitivity() -> float:
+	var camera_rig := get_tree().root.find_child("CameraRig", true, false)
+	if camera_rig != null and camera_rig.has_method("get_look_sensitivity"):
+		return clampf(float(camera_rig.call("get_look_sensitivity")),
+			CameraRig.MIN_LOOK_SENSITIVITY, CameraRig.MAX_LOOK_SENSITIVITY)
+	var config := ConfigFile.new()
+	config.load(AudioManager.SETTINGS_PATH)
+	return clampf(float(config.get_value("gameplay", "camera_sensitivity", 1.0)),
+		CameraRig.MIN_LOOK_SENSITIVITY, CameraRig.MAX_LOOK_SENSITIVITY)
+
+func _apply_look_sensitivity(value: float) -> void:
+	var camera_rig := get_tree().root.find_child("CameraRig", true, false)
+	if camera_rig != null and camera_rig.has_method("set_look_sensitivity"):
+		camera_rig.call("set_look_sensitivity", value)
+		return
+	var settings := ConfigFile.new()
+	settings.load(AudioManager.SETTINGS_PATH)
+	settings.set_value("gameplay", "camera_sensitivity", value)
+	settings.save(AudioManager.SETTINGS_PATH)
 
 ## Adaptive-quality picker: Low / Auto / High, persisted by QualityScaler.
 func _build_quality_row() -> void:

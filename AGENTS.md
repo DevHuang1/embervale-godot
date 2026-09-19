@@ -1,6 +1,6 @@
-/# Embervale Agent Brief
+# Embervale Agent Brief
 
-This is a Godot 4 stylized dark-fantasy action RPG with Android as the primary
+This is a Godot 4.7 stylized dark-fantasy action RPG with Android as the primary
 performance target. When asked to improve the project, work from the highest
 priority unchecked task below that fits the user's request. Finish and verify a
 coherent slice before opening another large refactor.
@@ -20,7 +20,9 @@ coherent slice before opening another large refactor.
 - Give every recurring effect, light, projectile, body, tween, and notification
   a lifetime plus a hard cap, cleanup path, or pool.
 - Never claim visual acceptance from the dummy renderer or device performance
-  without a real renderer/device measurement.
+  without a real renderer/device measurement. Capture harnesses:
+  `tools/capture_realms.gd`, `tools/capture_ui_portrait.gd`,
+  `tools/capture_weapon_props.gd`.
 - Pin `gradle_build/min_sdk="24"` in the Android export preset before any Gradle
   build. The preset is gitignored, and Godot 4.7's Gradle-build default is 29,
   which yields an APK that Android 9 (API 28) and older refuse to install with a
@@ -29,20 +31,46 @@ coherent slice before opening another large refactor.
 - Do not copy protected art, UI, maps, names, lore, or exact designs from other
   RPGs. Use successful games only as quality references.
 
+## Current goal
+
+Updated via `/goal`. The current pursuit goal for this session.
+
 ## Current baseline — build on it, do not redo it
 
 - Seven seamless stylized-PBR surface families exist under
   `assets/textures/stylized/`, with deterministic normal/roughness generation.
-- **Goal**: The current pursuit goal for this session. Updated via `/goal` command.
-EOF
 - Five realm terrain profiles bind stylized maps and have distinct palettes.
 - Terrain detail is tiered: Low off, Medium single offset, High short POM march.
+- Terrain carves coherent world-scale material regions (sand/dirt/grass) plus a
+  beach band wherever the river or a pond meets land; both terrain shaders bind
+  the same contract, and the river test twin lives in
+  `scripts/world/world_waterways.gd` (`_bind_shoreline` in
+  `scripts/systems/terrain_relief.gd`; asserted by
+  `tests/test_terrain_relief_layers.gd` and `tests/test_realm_visuals.gd`).
 - `QualityScaler` owns VFX density, pool/trail caps, transient lights,
   distortion, fog, and material detail.
 - `CombatFx` retains existing `spawn_*` interfaces, deterministic sprite FX,
   capped cleanup, and a protected non-blooming enemy-telegraph layer.
-- Realm/material, VFX-budget, combat-feedback, ecosystem, quality, and UI smoke
-  validations exist. Extend these rather than creating parallel harnesses.
+- Realm/material, VFX-budget, combat-feedback, ecosystem, quality, UI smoke,
+  forge/blueprint, weapon-scale, portrait-fit, and save-migration validations
+  exist. Extend these rather than creating parallel harnesses.
+- The camera weapon-scan flow is gone. Forging is blueprint-driven
+  (`scripts/systems/forge_catalog.gd` + `GameState.forge_blueprint`), the lens
+  economy keeps its legacy save field names, and the analyze beat replaces
+  capture. Contract and implementation record:
+  `docs/SCAN_TO_FORGE_MIGRATION.md`.
+- Weapons render through `WeaponVisualRegistry` (CC0 models normalized by
+  measured size; forged `relic_<base>` kits resolve to their base kit). The
+  hero's hand mounts and the satchel preview share that registry — do not give
+  either its own table.
+- Body armor defaults to the procedural builders, but
+  `ArmorVisualRegistry` supports `kind: "model"` records that mount a rigid
+  CC0 prop on a skeleton bone with measured normalization. License evidence
+  for every shipped character/armor model lives in `assets/models/LICENSES.md`;
+  review seat/scale with `tools/capture_armor_prop.gd`.
+- `tests/route_end_to_end_validation.gd` is the integration gate for the full
+  route (crashes, soft locks, duplicate rewards, stale references, save/reload).
+  It passes 71/0; keep it green.
 
 ## Active project backlog
 
@@ -82,8 +110,11 @@ EOF
       remove meaningless micro-stat complexity and avoid currency bloat.
 - [ ] Complete the item loop: acquire → understand → compare → equip/use/craft/
       salvage → visibly feel stronger.
-- [ ] Make crafting transactional, prevent double activation, explain missing
+- [x] Make crafting transactional, prevent double activation, explain missing
       requirements, and test exact resource deduction/reward behavior.
+      (Done for the forge blueprint path: `GameState.forge_blueprint` validates,
+      deducts exactly once, and reports missing materials;
+      `tests/test_forge_blueprint.gd` covers it.)
 - [ ] Make quests save-safe and reward exactly once across death, reload, and
       realm travel.
 
@@ -138,6 +169,11 @@ Choose commands proportional to the change, then run the affected suites:
 
 ```sh
 godot --headless --path . --editor --quit
+godot --headless --path . --script tests/route_end_to_end_validation.gd
+godot --headless --path . --script tests/test_forge_blueprint.gd
+godot --headless --path . --script tests/test_weapon_model_scale.gd
+godot --headless --path . --script tests/test_ui_portrait_fit.gd
+godot --headless --path . --script tests/test_quest_objective_seeding.gd
 godot --headless --path . --script tests/test_material_bindings.gd
 godot --headless --path . --script tests/test_quality_scaler.gd
 godot --headless --path . --script tests/test_realm_visuals.gd

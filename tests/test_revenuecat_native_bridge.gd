@@ -492,6 +492,22 @@ func _test_build_defaults_feed_the_store() -> void:
 
 	# A hostile or malformed shipped resource fails closed instead of configuring.
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(device))
+	# A real shipped resource carries the key SEALED; the store must resolve it
+	# exactly like a plaintext one, and an unrecoverable blob must not configure.
+	var sealed_build := StoreDefaults.new()
+	sealed_build.funnel_url = "https://signup.cat/link_ship"
+	sealed_build.native_api_key_sealed = SECURITY.seal(PUBLIC_KEY)
+	ResourceSaver.save(sealed_build, defaults)
+	store.load_config()
+	_check(store.authority_name() == "native",
+		"a sealed shipped key must configure the native authority")
+	var broken_build := StoreDefaults.new()
+	broken_build.native_api_key_sealed = "rcseal1:" + "AAAA"
+	ResourceSaver.save(broken_build, defaults)
+	store.load_config()
+	_check(store.authority_name() == "none",
+		"an unrecoverable sealed key must fail closed like a malformed one")
+
 	var hostile := StoreDefaults.new()
 	hostile.funnel_url = "https://evil.example.com/checkout"
 	hostile.native_api_key = "sk_" + "A1b2C3d4E5f6G7h8"

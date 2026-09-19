@@ -62,61 +62,6 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 14
 
-[node name="CameraView" type="PanelContainer" parent="Root/VBox" unique_id=1908425348]
-custom_minimum_size = Vector2(0, 170)
-layout_mode = 2
-
-[node name="CameraFeed" type="TextureRect" parent="Root/VBox/CameraView" unique_id=1704068605]
-layout_mode = 2
-mouse_filter = 2
-expand_mode = 1
-stretch_mode = 6
-
-[node name="CameraStatus" type="Label" parent="Root/VBox/CameraView" unique_id=2044104766]
-layout_mode = 2
-theme_override_font_sizes/font_size = 18
-text = "CAMERA PREVIEW · OFFLINE FALLBACK AVAILABLE"
-horizontal_alignment = 1
-vertical_alignment = 2
-
-[node name="Pipeline" type="PanelContainer" parent="Root/VBox" unique_id=997263700]
-layout_mode = 2
-
-[node name="PipelineVBox" type="VBoxContainer" parent="Root/VBox/Pipeline" unique_id=7280098]
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="PipelineTitle" type="Label" parent="Root/VBox/Pipeline/PipelineVBox" unique_id=1472720611]
-layout_mode = 2
-theme_type_variation = &"Eyebrow"
-text = "FORGING PIPELINE"
-
-[node name="PrivacyNotice" type="Label" parent="Root/VBox/Pipeline/PipelineVBox" unique_id=967905242]
-layout_mode = 2
-theme_type_variation = &"Caption"
-text = "PRIVACY · Camera frames are processed locally and are not uploaded. The game result is generated from the detected class, not a stored photo."
-autowrap_mode = 2
-
-[node name="Step1" type="Label" parent="Root/VBox/Pipeline/PipelineVBox" unique_id=1512944426]
-layout_mode = 2
-theme_type_variation = &"Caption"
-text = "1 — process the camera frame locally"
-
-[node name="Step2" type="Label" parent="Root/VBox/Pipeline/PipelineVBox" unique_id=1874184203]
-layout_mode = 2
-theme_type_variation = &"Caption"
-text = "2 — bind its class to a weapon form"
-
-[node name="Step3" type="Label" parent="Root/VBox/Pipeline/PipelineVBox" unique_id=1069730958]
-layout_mode = 2
-theme_type_variation = &"Caption"
-text = "3 — roll rarity from the photo itself"
-
-[node name="Step4" type="Label" parent="Root/VBox/Pipeline/PipelineVBox" unique_id=260674225]
-layout_mode = 2
-theme_type_variation = &"Caption"
-text = "4 — reveal your forged gear"
-
 [node name="Result" type="PanelContainer" parent="Root/VBox" unique_id=1820734057]
 visible = false
 layout_mode = 2
@@ -142,7 +87,7 @@ text = "+"
 layout_mode = 2
 theme_type_variation = &"Title"
 theme_override_font_sizes/font_size = 30
-text = "MUG MACE"
+text = "CINDER MAUL"
 
 [node name="WeaponStats" type="Label" parent="Root/VBox/Result/ResultVBox" unique_id=715894179]
 layout_mode = 2
@@ -235,14 +180,8 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 22
 text = "EQUIP"
 
-[node name="ScanButton" type="Button" parent="Root/VBox" unique_id=1942341772]
-custom_minimum_size = Vector2(0, 80)
-layout_mode = 2
-theme_override_font_sizes/font_size = 24
-text = "BEGIN DIVINATION"
-
 [node name="ScanCount" type="Label" parent="Root/VBox" unique_id=994631318]
 layout_mode = 2
 theme_type_variation = &"Caption"
-text = "SCANS AVAILABLE: 5"
+text = "LENS CHARGES: 5"
 horizontal_alignment = 1

@@ -1,6 +1,7 @@
 # Scan → Forge Migration Plan
 
-Status: proposed, not started. Decisions below were confirmed 2026-09-19.
+Status: implemented 2026-09-19 (S1–S5 complete; S6 verification below).
+Decisions were confirmed 2026-09-19.
 
 ## Decision summary
 
@@ -177,6 +178,12 @@ top rarities stay boss-gated. Exact bills are a Slice 1 balance pass.
 - Kept: `scans_remaining`, `scan_fragments`, `boss_first_kills`,
   `boss_customs`, `forged_weapons` (relic ids unchanged).
 - Added: `analyzed_families`, defaulting to `{}` on old saves.
+- Display names are migrated on load and on add: old saves that still carry the
+  camera-era names for a canonical weapon id (MUG MACE → CINDER MAUL, POCKET
+  BLADE → SHARD DAGGER, SNIP TWINS → TWIN FANGS, SODA CANNON → FEN SCEPTER,
+  SLAB HAMMER → ASHFALL MAUL) are rewritten. Player-named relics (`relic_*`
+  ids) and crafted names are never touched. Covered by
+  `tests/test_legacy_weapon_names.gd`.
 - Never serialized: camera frames, relic mesh/texture.
 - Extend `content_schema.gd` with `migrate_analysis_state` and cover it in
   `tests/test_content_schema_scans.gd`.
@@ -230,13 +237,108 @@ godot --headless --path . --editor --quit
 | S5 | Retire `ScanManager` camera paths, `relic_forge.gd`, IAP product + audit + store check | no dead camera/mesh code; monetization audit green |
 | S6 | Full suite + editor import + route smoke | all tests below green; P0 route delivers first forge inside 15 minutes |
 
+## Implementation record
+
+Delivered:
+
+- `scripts/systems/forge_catalog.gd` (new): five blueprints (base ids unchanged),
+  family unlock rules, deterministic tier bills, trophy labels.
+- `GameState`: `analyzed_families` (saved, migrated with
+  `ContentSchema.migrate_analysis_state`), `register_analysis`,
+  `is_blueprint_unlocked`, `unlocked_blueprint_ids`, `blueprint_progress`,
+  transactional `forge_blueprint` (exact deduction, cloud intent, craft
+  objective + onboarding hook).
+- `ForgeMenu`: blueprint list with lock progress, tier picker with live material
+  bills, naming + stat preview, FORGE wired to `forge_blueprint`. The retired
+  `CameraView`, `Pipeline`, and `ScanButton` nodes and their camera/photo copy
+  were removed from `forge_menu.tscn`; the same cleanup removed the altar's
+  retired buttons and scan copy. The scripts keep a no-op cleanup fallback for
+  older scene variants.
+- `BossAltar`: trophy palette picker (starter palettes plus first-kill trophies
+  in `Bestiary.BOSS_DEFS.matriarch.trophies`), skill/SFX choice, one lens charge
+  on lock-in, same payload shape.
+- `HUD`: analyze flow records blueprint progress, pulses the existing reveal
+  shader, and shows newly unlocked blueprint names.
+- Retired: camera capture paths and fake detection, `relic_forge.gd`, the
+  `scan_pack_5` product and its shop/audit branches, and (final pass) the whole
+  dormant relic-visual channel: `ScanManager.relic_forged`/`last_relic`,
+  `Hero.current_relic`/`_on_relic_forged`/`_build_relic_hand_visual`, the
+  world-manager trophy spawn plus its `_process` spin, and
+  `RelicData.mesh`/`mesh_scene`/`texture`. `relic_pedestal` stays as the
+  practice-altar anchor. Forged `relic_<base>` kits are now given a hand
+  visual by `WeaponVisualRegistry.resolve_id`, which maps them to their base
+  kit's model; the same pass routes every other registry-mapped weapon id
+  (realm and boss rewards) through the in-hand mount instead of falling
+  through the id match with no prop. Covered by
+  `tests/test_weapon_mount.gd` (relic kit + `thornbite_cleaver`) and the
+  relic-id assertions in `tests/test_weapon_model_scale.gd`; real Metal
+  captures of two forged kits in hand via `tools/capture_weapon_props.gd`.
+- First-15-minutes integration: the onboarding route now teaches `analyze`
+  (lens → blueprints) before `craft`, the craft hint points at the forge, the
+  HUD reports blueprint progress on every analysis
+  (`GameState.analysis_progress_note`), and `tests/test_forge_early_route.gd`
+  proves the T0 bill is one-pass reachable in Whispergrove and that two
+  Whispergrove analyses unlock and forge the first weapon.
+
+Deviations from the original plan:
+
+- Starter trophies were added so the first Matriarch fight is customizable;
+  first-kill trophies remain the progression reward.
+- The hero's held props are CC0 models from `WeaponVisualRegistry`, not the
+  camera-era procedural sculpts (those are now unreachable fallbacks). Two
+  mappings were corrected for the new names — Cinder Maul uses the small hammer,
+  Ashfall Maul the double hammer, Fen Scepter a polearm — the satchel preview
+  now reads the same registry instead of its own drifting table (which also
+  pointed at a missing `Staff.fbx`), and both hand and preview normalize each
+  model by measured size (`WeaponVisualRegistry.normalized_scale`). The old
+  hardcoded 0.012 quaternius constant had shrunk every mapped FBX to about
+  5 cm in hand and hid it entirely in the preview. Verified with real Metal
+  captures via `tools/capture_weapon_props.gd` and locked by
+  `tests/test_weapon_model_scale.gd` (all 22 mapped models normalize to their
+  authored length).
+- `ScanManager.relic_forged`/`last_relic` stay as dormant API because `hero.gd`
+  and `world_manager.gd` still subscribe; they simply never fire now.
+- `tests/test_forge_camera_surface.gd` became
+  `tests/test_forge_blueprint_surface.gd`; `tests/test_scan_pack_product.gd`
+  became `tests/test_monetization_catalog.gd`.
+
+Pre-existing issue found during verification (not caused by this change):
+`scripts/systems/save_service.gd:25` uses a `PackedByteArray(...)` constructor
+in a `const`, which some headless runner modes reject with
+"isn't a constant expression". Normal game runs are unaffected; the file is
+uncommitted work in progress.
+
+Pre-existing failure found during verification (now fixed):
+`tests/route_end_to_end_validation.gd` failed its indoor camera-pitch assertion
+(70 passes / 1 failure) at committed HEAD `e13aa9c` and in the working tree.
+Root cause was a test race, not a camera defect: entering a structure plays a
+short camera focus moment that deliberately owns the framing, and the assertion
+sampled `target_angle_v` while that cinematic was still live (or had just been
+re-triggered a few frames later). Instrumented capture showed the rig reports
+`_indoor = true` and clamps the pitch to -0.26 rad within a frame of the
+cinematic ending. The test now cancels any live focus moment and waits (bounded)
+for the steady indoor state before asserting, so it still fails if the clamp or
+the indoor detection regresses. Route suite is 71 passes / 0 failures on three
+consecutive runs.
+
+Portrait pass (real Metal renderer, 1080x1920, `tools/capture_ui_portrait.gd`):
+
+- First captures showed both menus overflowing horizontally: the forge tier row
+  and the altar trophy row forced a minimum width wider than the frame, and the
+  one-line stat string repeated the overflow, clipping every child.
+- Fixed: tier and trophy rows are 3-column `GridContainer`s, the forge stat line
+  is split (short headline + wrapped skill detail), the weapon icon mounts in
+  the glyph slot instead of appending below the actions.
+- Re-captured clean; `tests/test_ui_portrait_fit.gd` now fails if either menu's
+  combined minimum width exceeds the portrait frame.
+
 ## Risks and open questions
 
 - Display re-theme names in the table above need sign-off.
 - Family→blueprint mapping and tier costs need a first balance pass; top tier
   must stay reachable with free-earned materials.
-- Back-socket relic mesh and relic trophy pedestal become dead paths — decide
-  remove vs keep dormant in S5.
+- Back-socket relic mesh and relic trophy pedestal dead paths: removed in the
+  final cleanup pass; the pedestal itself stays as a landmark/anchor.
 - Whether analysis should keep costing a charge (recommended yes, keeps the
   economy untouched) — revisit if blueprint progress feels slow in onboarding.
 - Android camera permission entries in the export preset become unused once the

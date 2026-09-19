@@ -58,6 +58,9 @@ func _run() -> void:
 	## 3b. Streamed flavor props (ruins, ponds) conform to the relief surface.
 	failures += await _check_flavor_conformity("whispergrove")
 
+	## 3c. Rivers, bridges, vines and multi-type trees exist and hold clear.
+	failures += await _check_river_and_undergrowth("bramblewood")
+
 	## 4. Other inherited realm scenes use the same procedural owner.
 	for realm in ["mistfen", "heartwood"]:
 		failures += await _check_active_realm(realm)
@@ -95,16 +98,20 @@ func _snapshot(realm: String) -> Dictionary:
 		var trees := 0
 		var rocks := 0
 		var bushes := 0
+		var vines := 0
 		for child in chunk_node.get_children():
-			if child.name == "GrassCarpet":
+			var batch_name := str(child.name)
+			if batch_name == "GrassCarpet":
 				grass = (child as MultiMeshInstance3D).multimesh.instance_count
-			elif child.name == "StreamTrees":
-				trees = (child as MultiMeshInstance3D).multimesh.instance_count
-			elif child.name == "StreamRocks":
+			elif batch_name.begins_with("StreamTrees"):
+				trees += (child as MultiMeshInstance3D).multimesh.instance_count
+			elif batch_name == "StreamRocks":
 				rocks = (child as MultiMeshInstance3D).multimesh.instance_count
-			elif child.name == "StreamBushes":
-				bushes = (child as MultiMeshInstance3D).multimesh.instance_count
-		counts[str(chunk_node.name)] = [grass, trees, rocks, bushes]
+			elif batch_name.begins_with("StreamBushes"):
+				bushes += (child as MultiMeshInstance3D).multimesh.instance_count
+			elif batch_name == "StreamVines":
+				vines = (child as MultiMeshInstance3D).multimesh.instance_count
+		counts[str(chunk_node.name)] = [grass, trees, rocks, bushes, vines]
 	snapshot["content"] = counts
 	scene.queue_free()
 	await process_frame
@@ -137,6 +144,8 @@ func _check_caps(realm: String) -> int:
 			continue
 		chunk_total += 1
 		var grass_count := 0
+		var tree_count := 0
+		var bush_count := 0
 		for child in chunk_node.get_children():
 			if child.name == "GrassCarpet":
 				grass_count = (child as MultiMeshInstance3D).multimesh.instance_count
@@ -155,24 +164,16 @@ func _check_caps(realm: String) -> int:
 							f += 1
 							print("FAIL: %s streamed grass inside boss arena" % realm)
 							break
-			elif child.name == "StreamTrees":
-				var trees := (child as MultiMeshInstance3D).multimesh.instance_count
-				if trees < 7 or trees > 11:
-					f += 1
-					print("FAIL: %s chunk %s tree count out of band (%d)" \
-						% [realm, chunk_node.name, trees])
+			elif str(child.name).begins_with("StreamTrees"):
+				tree_count += (child as MultiMeshInstance3D).multimesh.instance_count
 			elif child.name == "StreamRocks":
 				var rocks := (child as MultiMeshInstance3D).multimesh.instance_count
 				if rocks < 8 or rocks > 16:
 					f += 1
 					print("FAIL: %s chunk %s rock count out of band (%d)" \
 						% [realm, chunk_node.name, rocks])
-			elif child.name == "StreamBushes":
-				var bushes := (child as MultiMeshInstance3D).multimesh.instance_count
-				if bushes < 5 or bushes > 11:
-					f += 1
-					print("FAIL: %s chunk %s bush count out of band (%d)" \
-						% [realm, chunk_node.name, bushes])
+			elif str(child.name).begins_with("StreamBushes"):
+				bush_count += (child as MultiMeshInstance3D).multimesh.instance_count
 			elif child.name == "StreamTerrainMesh":
 				var arrays := (child as MeshInstance3D).mesh.surface_get_arrays(0)
 				var vertices := arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array
@@ -180,6 +181,14 @@ func _check_caps(realm: String) -> int:
 					f += 1
 					print("FAIL: %s tile exceeds compatibility vertex limit (%d)" \
 						% [realm, vertices.size()])
+		if tree_count < 7 or tree_count > 11:
+			f += 1
+			print("FAIL: %s chunk %s tree count out of band (%d)" \
+				% [realm, chunk_node.name, tree_count])
+		if bush_count < 5 or bush_count > 11:
+			f += 1
+			print("FAIL: %s chunk %s bush count out of band (%d)" \
+				% [realm, chunk_node.name, bush_count])
 	if chunk_total < 9:
 		f += 1
 		print("FAIL: %s streamer built too few chunks (%d)" % [realm, chunk_total])
@@ -366,6 +375,89 @@ func _check_prop_conforms(prop: MeshInstance3D, min_world: Vector3,
 			% [prop.name, prop.position.y, expected])
 		return 1
 	return 0
+
+## River presentation, bridge collision, riverbank clearance and undergrowth
+## variety (multi-type trees and vines) in the streamed ring.
+func _check_river_and_undergrowth(realm: String) -> int:
+	var f := 0
+	var scene := await _boot_grove(realm)
+	var streamer := scene.find_child("WorldStreamer", true, false)
+	if streamer == null or not streamer.call("is_active"):
+		f += 1
+		print("FAIL: river check needs an active streamer")
+		scene.queue_free()
+		await process_frame
+		return f
+	var spec := WorldWaterways.river_for(realm)
+	var water := streamer.find_child("RiverWater", true, false) as MeshInstance3D
+	if water == null or water.mesh == null or water.mesh.get_surface_count() == 0:
+		f += 1
+		print("FAIL: %s streamed river has no water ribbon" % realm)
+	else:
+		var vertices := water.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] \
+			as PackedVector3Array
+		if vertices.size() < 200:
+			f += 1
+			print("FAIL: %s river ribbon is too short (%d verts)" \
+				% [realm, vertices.size()])
+		var half := WorldWaterways.water_half_width(spec)
+		for vertex in vertices:
+			if WorldWaterways.lateral_distance(spec, Vector2(vertex.x, vertex.z)) > half + 0.1:
+				f += 1
+				print("FAIL: %s river ribbon leaves its channel" % realm)
+				break
+	var bridge := streamer.find_child("RiverBridge", true, false) as StaticBody3D
+	if bridge == null:
+		f += 1
+		print("FAIL: %s river has no bridge" % realm)
+	else:
+		var shapes := bridge.find_children("*", "CollisionShape3D", true, false)
+		if shapes.size() < 3 or float(bridge.get_meta("bridge_span", 0.0)) < 8.0:
+			f += 1
+			print("FAIL: %s bridge has no walkable deck collision" % realm)
+	var stones := streamer.find_child("RiverStones", true, false) as MultiMeshInstance3D
+	if stones == null or stones.multimesh == null or stones.multimesh.instance_count == 0:
+		f += 1
+		print("FAIL: %s riverbanks have no stone dressing" % realm)
+
+	var tree_families := {}
+	var vine_total := 0
+	var reach := WorldWaterways.carve_reach(spec)
+	for chunk_node in streamer.get_children():
+		if not str(chunk_node.name).begins_with("StreamChunk_"):
+			continue
+		for child in chunk_node.get_children():
+			var batch := child as MultiMeshInstance3D
+			if batch == null or batch.multimesh == null:
+				continue
+			var batch_name := str(batch.name)
+			if batch_name.begins_with("StreamVines"):
+				vine_total += batch.multimesh.instance_count
+				continue
+			if batch_name.begins_with("StreamTrees") or batch_name.begins_with("StreamBushes") \
+					or batch_name == "StreamRocks":
+				if batch.multimesh.instance_count > 0:
+					tree_families[batch_name] = true
+				for i in batch.multimesh.instance_count:
+					var origin := batch.multimesh.get_instance_transform(i).origin
+					var world_xz := Vector2(batch.global_position.x + origin.x,
+						batch.global_position.z + origin.z)
+					if WorldWaterways.lateral_distance(spec, world_xz) < reach:
+						f += 1
+						print("FAIL: %s %s rooted inside the river channel" \
+							% [realm, batch_name])
+						break
+	if tree_families.size() < 3:
+		f += 1
+		print("FAIL: %s streamed world has fewer than three prop families" % realm)
+	if vine_total == 0:
+		f += 1
+		print("FAIL: %s streamed trees carry no vines" % realm)
+	scene.queue_free()
+	await process_frame
+	if f == 0:
+		print("PASS: river, bridge, vines and multi-type trees hold")
+	return f
 
 func _check_active_realm(realm: String) -> int:
 	var f := 0

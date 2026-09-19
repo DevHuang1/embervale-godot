@@ -34,6 +34,16 @@ var _drag_samples: Dictionary = {}  # index -> {speed: float, dir: Vector2}
 var _drag_start_positions: Dictionary = {}  # pointer id -> screen position
 var _joystick_pointer_ids: Dictionary = {}
 var _first_person_look_pointer: int = -1
+## Look-zone presses are held until release: if the gesture becomes a camera
+## drag it must not also order the hero to walk, and a clean tap still moves.
+var _deferred_world_taps: Dictionary = {}  # pointer id -> press position
+var _camera_gesture_pointers: Dictionary = {}  # pointer ids owned by the camera
+var _camera_zone_pointers: Dictionary = {}  # pointer ids that began in the look zone
+var _mouse_tap_pending: bool = false
+var _mouse_press_position: Vector2 = Vector2.ZERO
+## Fallback tap travel when no CameraRig is registered. The rig owns the
+## authoritative threshold through camera_drag_threshold().
+const CAMERA_TAP_SLOP := 6.0
 const SETTINGS_PATH := "user://settings.cfg"
 const DEFAULT_KEY_BINDINGS: Dictionary = {
 	"scan": KEY_F, "skill_0": KEY_Q, "skill_1": KEY_E, "skill_2": KEY_R,
@@ -65,6 +75,10 @@ func _recover_input_state() -> void:
 	clear_joystick_pointers()
 	_drag_start_positions.clear()
 	_first_person_look_pointer = -1
+	_cancel_deferred_taps()
+	_camera_gesture_pointers.clear()
+	_camera_zone_pointers.clear()
+	_mouse_tap_pending = false
 	world_gesture_active = false
 	for keycode in MOVEMENT_KEYCODES:
 		if Input.is_key_pressed(keycode):
@@ -192,6 +206,10 @@ func _notification(what: int) -> void:
 		clear_joystick_pointers()
 		_drag_start_positions.clear()
 		_first_person_look_pointer = -1
+		_cancel_deferred_taps()
+		_camera_gesture_pointers.clear()
+		_camera_zone_pointers.clear()
+		_mouse_tap_pending = false
 		world_gesture_active = false
 
 func _handle_key(event: InputEventKey) -> void:
@@ -243,24 +261,68 @@ func _handle_touch(event: InputEventScreenTouch) -> void:
 			return
 		_drag_start_positions[event.index] = event.position
 		_drag_samples[event.index] = {"speed": 0.0, "dir": Vector2.ZERO, "time": Time.get_ticks_msec() / 1000.0}
-		if now - last_tap_time < tap_threshold:
-			interact_pressed.emit()
-			last_tap_time = 0.0
-		elif active_camera:
-			last_tap_time = now
-			emit_world_tap(event.position, active_camera)
-		else:
-			last_tap_time = now
+		if _drag_start_positions.size() >= 2:
+			# Two fingers are a camera orbit/pinch gesture: neither pointer is
+			# a world tap, and any pending look-zone tap is cancelled.
+			for index in _drag_start_positions:
+				_camera_gesture_pointers[index] = true
+			_cancel_deferred_taps()
+			return
+		if _is_camera_touch_zone(event.position):
+			# Decided on release: a drag turns the camera, a clean tap moves.
+			_camera_zone_pointers[event.index] = true
+			_deferred_world_taps[event.index] = event.position
+			return
+		_emit_touch_tap(now, event.position)
 	else:
+		var start_position: Vector2 = _drag_start_positions.get(event.index, Vector2.INF)
 		_drag_start_positions.erase(event.index)
 		if first_person_active:
 			end_first_person_look(event.index)
 			return
-		if not world_gesture_active and _drag_samples.has(event.index):
+		if not world_gesture_active and not _camera_zone_pointers.has(event.index) \
+				and _drag_samples.has(event.index):
 			var sample: Dictionary = _drag_samples[event.index]
 			if sample.speed > flick_threshold:
 				dodge_pressed.emit(sample.dir)
 		_drag_samples.erase(event.index)
+		var deferred: Vector2 = _deferred_world_taps.get(event.index, Vector2.INF)
+		var claimed := _camera_gesture_pointers.has(event.index)
+		_deferred_world_taps.erase(event.index)
+		_camera_gesture_pointers.erase(event.index)
+		_camera_zone_pointers.erase(event.index)
+		if deferred != Vector2.INF and start_position != Vector2.INF and not claimed \
+				and event.position.distance_to(start_position) <= _camera_tap_slop():
+			_emit_touch_tap(now, start_position)
+
+## Shared tap decision: a second tap inside the window is the interact gesture,
+## otherwise the tap commands a move. Look-zone taps reach this on release so a
+## camera drag can drop them before they ever move the hero.
+func _emit_touch_tap(now: float, position: Vector2) -> void:
+	if now - last_tap_time < tap_threshold:
+		interact_pressed.emit()
+		last_tap_time = 0.0
+	elif active_camera:
+		last_tap_time = now
+		emit_world_tap(position, active_camera)
+	else:
+		last_tap_time = now
+
+func _cancel_deferred_taps() -> void:
+	_deferred_world_taps.clear()
+
+func _is_camera_touch_zone(position: Vector2) -> bool:
+	if active_camera_controller == null or not is_instance_valid(active_camera_controller):
+		return false
+	if not active_camera_controller.has_method("is_camera_touch_zone"):
+		return false
+	return bool(active_camera_controller.call("is_camera_touch_zone", position))
+
+func _camera_tap_slop() -> float:
+	if active_camera_controller != null and is_instance_valid(active_camera_controller) \
+			and active_camera_controller.has_method("camera_drag_threshold"):
+		return float(active_camera_controller.call("camera_drag_threshold"))
+	return CAMERA_TAP_SLOP
 
 func _handle_joypad_button(event: InputEventJoypadButton) -> void:
 	if not event.pressed:
@@ -301,6 +363,11 @@ func _handle_drag(event: InputEventScreenDrag) -> void:
 		# keep the hero sliding while the player pans the view.
 		move_input.emit(Vector2.ZERO)
 		return
+	if _camera_zone_pointers.has(event.index):
+		# A press in the look zone is either a camera drag or a tap. Until it
+		# passes the camera deadzone it must not steer the hero.
+		move_input.emit(Vector2.ZERO)
+		return
 	if relative.length() > touch_deadzone:
 		move_input.emit(relative.normalized())
 		_track_drag_sample(event, relative)
@@ -315,8 +382,12 @@ func _camera_consumes_world_drag(event: InputEventScreenDrag) -> bool:
 	var start_position := event.position
 	if _drag_start_positions.has(event.index):
 		start_position = _drag_start_positions[event.index]
-	return bool(active_camera_controller.call("consume_world_drag", start_position,
-		event.relative))
+	var consumed := bool(active_camera_controller.call("consume_world_drag",
+		start_position, event.relative, event.index, event.position))
+	if consumed:
+		_camera_gesture_pointers[event.index] = true
+		_deferred_world_taps.erase(event.index)
+	return consumed
 
 func _track_drag_sample(event: InputEventScreenDrag, relative: Vector2) -> void:
 	if relative.length() <= touch_deadzone:
@@ -336,16 +407,24 @@ func _handle_mouse(event: InputEventMouseButton) -> void:
 		match event.button_index:
 			MOUSE_BUTTON_LEFT:
 				# Desktop "attack" lives on the Attack button only; an
-				# empty-world click is a movement tap (mirrors mobile).
-				if active_camera:
-					emit_world_tap(event.position, active_camera)
+				# empty-world click is a movement tap (mirrors mobile). The
+				# tap waits for release so a left-drag can turn the camera.
+				_mouse_tap_pending = true
+				_mouse_press_position = event.position
 			MOUSE_BUTTON_RIGHT: interact_pressed.emit()
 	else:
 		match event.button_index:
+			MOUSE_BUTTON_LEFT:
+				if _mouse_tap_pending and active_camera \
+						and event.position.distance_to(_mouse_press_position) <= _camera_tap_slop():
+					emit_world_tap(_mouse_press_position, active_camera)
+				_mouse_tap_pending = false
 			MOUSE_BUTTON_RIGHT: interact_released.emit()
 
 func _handle_mouse_motion(event: InputEventMouseMotion) -> void:
-	pass
+	if _mouse_tap_pending \
+			and event.position.distance_to(_mouse_press_position) > _camera_tap_slop():
+		_mouse_tap_pending = false
 
 func set_active_camera(camera: Camera3D, controller: Node = null) -> void:
 	active_camera = camera

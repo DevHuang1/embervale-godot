@@ -4,6 +4,8 @@ class_name HUD
 const BOSS_REWARD_CHOICE_PANEL := preload("res://scripts/ui/boss_reward_choice_panel.gd")
 const REWARD_REVEAL_PANEL := preload("res://scripts/ui/reward_reveal_panel.gd")
 const REWARD_REVEAL_MODEL := preload("res://scripts/systems/reward_reveal_model.gd")
+const DISCOVERY_CARD := preload("res://scripts/ui/discovery_card.gd")
+const DISCOVERY_DIRECTOR := preload("res://scripts/systems/discovery_director.gd")
 
 ## === HUD — Full Embervale Combat + Quest Interface ===
 
@@ -66,6 +68,13 @@ const MAX_REWARD_POPUPS := 4
 var _reward_popup_queue: Array[Dictionary] = []
 var _reward_popup_active := false
 var _reward_popup_serial := 0
+## First-encounter introductions. The director owns the trigger; the HUD owns
+## presentation and queues at most three so a crowded camp cannot flood it.
+const MAX_DISCOVERY_CARDS := 3
+var _discovery_director: Node = null
+var _discovery_queue: Array[Dictionary] = []
+var _discovery_active := false
+var _discovery_serial := 0
 @onready var skill_buttons : Array = []
 @onready var skill_glyph_labels : Array = []
 @onready var skill_cd_labels : Array = []
@@ -187,6 +196,110 @@ func _ready() -> void:
 	if boss_health_bar: boss_health_bar.visible = false
 	if loot_toast: loot_toast.visible = false
 	_apply_touch_target_scale()
+	_setup_discovery()
+
+## First meetings are watched by a small director that shares the HUD's world,
+## so every realm gets intros without each scene wiring its own trigger.
+func _setup_discovery() -> void:
+	if _discovery_director != null and is_instance_valid(_discovery_director):
+		return
+	var world := get_parent() as Node3D
+	if world == null:
+		return
+	_discovery_director = DISCOVERY_DIRECTOR.new()
+	_discovery_director.name = "DiscoveryDirector"
+	add_child(_discovery_director)
+	_discovery_director.call("setup", world)
+	_discovery_director.connect("record_discovered", _on_record_discovered)
+
+func _on_record_discovered(record: Dictionary) -> void:
+	var active_count: int = 1 if _discovery_active else 0
+	if _discovery_queue.size() + active_count >= MAX_DISCOVERY_CARDS:
+		return
+	_discovery_queue.append(record.duplicate())
+	_show_next_discovery()
+
+func _show_next_discovery() -> void:
+	if _discovery_active or _discovery_queue.is_empty():
+		return
+	var record: Dictionary = _discovery_queue.pop_front()
+	_discovery_active = true
+	_discovery_serial += 1
+	var wrapper := Control.new()
+	wrapper.name = "DiscoveryCardSlot_%d" % _discovery_serial
+	wrapper.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrapper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var card: DiscoveryCard = DISCOVERY_CARD.new()
+	card.name = "DiscoveryCard"
+	var card_width := _discovery_card_width()
+	card.custom_minimum_size = Vector2(card_width, 0.0)
+	# Right side, below the combat card and the loot/level toasts. The
+	# introduction must never cover the fight it is describing, and the top
+	# centre already belongs to the enemy plate.
+	card.anchor_left = 1.0
+	card.anchor_right = 1.0
+	card.offset_left = -card_width - FRAME_MARGIN
+	card.offset_right = -FRAME_MARGIN
+	card.offset_top = 430.0
+	wrapper.add_child(card)
+	(_root_control() as Control).add_child(wrapper)
+	card.dismissed.connect(func() -> void:
+		if is_instance_valid(wrapper):
+			wrapper.queue_free()
+		_discovery_active = false
+		call_deferred("_show_next_discovery"))
+	card.open_for(record)
+	_play_discovery_focus(record)
+
+func _discovery_card_width() -> float:
+	var viewport_width := get_viewport().get_visible_rect().size.x
+	return clampf(viewport_width - 2.0 * FRAME_MARGIN, 280.0, 520.0)
+
+func _root_control() -> Node:
+	return get_node_or_null("Root")
+
+## Places get the small camera beat (a calm moment worth framing); creatures
+## never take the camera, because the meeting is usually the start of a fight.
+func _play_discovery_focus(record: Dictionary) -> void:
+	if str(record.get("type", "")) != "structure":
+		return
+	if not _discovery_motion_allows_focus():
+		return
+	# A sweep while a fight is live would take the camera exactly when the
+	# player needs it; the card still introduces the place.
+	if game_state != null and int(game_state.combat_state) == GameState.CombatState.COMBAT:
+		return
+	var focus := record.get("node") as Node3D
+	if focus == null or not is_instance_valid(focus):
+		return
+	var scene := get_tree().current_scene
+	if scene == null:
+		return
+	var camera_rig := scene.get_node_or_null("CameraRig")
+	var hero := scene.get_node_or_null("Hero") as Node3D
+	if camera_rig == null or not camera_rig.has_method("play_focus_moment"):
+		return
+	var focus_offset := Vector3(0.0, 1.4, 0.0)
+	var anchor := focus.global_position + focus_offset + Vector3(0.0, 1.0, 5.0)
+	if hero != null and is_instance_valid(hero):
+		var toward_hero := hero.global_position - focus.global_position
+		toward_hero.y = 0.0
+		if toward_hero.length() > 0.5:
+			anchor = focus.global_position + focus_offset \
+				+ toward_hero.normalized() * 5.0 + Vector3(0.0, 1.0, 0.0)
+	camera_rig.call("play_focus_moment", focus, anchor, focus_offset, 1.6)
+
+## Reduced-motion and off keep the information and drop the camera move.
+func _discovery_motion_allows_focus() -> bool:
+	var scene := get_tree().current_scene
+	if scene == null:
+		return true
+	var camera_rig := scene.get_node_or_null("CameraRig")
+	if camera_rig == null:
+		return true
+	var feedback := str(camera_rig.get("feedback_mode"))
+	return feedback != "off" and feedback != "reduced"
+
 
 func _connect_dungeon_completion() -> void:
 	var expansion := get_tree().root.find_child("RealmExpansion", true, false)
@@ -326,7 +439,10 @@ func _connect_signals() -> void:
 		rm.boss_reward_choice_available.connect(_on_boss_reward_choice_available)
 	if settings_button: settings_button.pressed.connect(_on_settings_pressed)
 	if satchel_button: satchel_button.pressed.connect(_on_satchel_pressed)
-	if scan_button: scan_button.pressed.connect(_on_scan_pressed)
+	if scan_button:
+		scan_button.pressed.connect(_on_scan_pressed)
+		scan_button.text = "FORGE"
+		scan_button.tooltip_text = "Open the forge: blueprints, tiers, and reforging"
 	if shop_button: shop_button.pressed.connect(_on_shop_pressed)
 	if stats_button: stats_button.pressed.connect(_on_stats_pressed)
 	if enemy_scan_button: enemy_scan_button.pressed.connect(_on_enemy_scan_pressed)
@@ -1122,6 +1238,8 @@ func _on_enemy_scan_pressed() -> void:
 	var unlocked: Array = []
 	if game_state.has_method("register_analysis"):
 		unlocked = game_state.register_analysis(str(report.get("kind", "")))
+	if game_state.has_method("check_onboarding_trigger"):
+		game_state.check_onboarding_trigger("analyze")
 	var scan_manager := get_node_or_null("/root/ScanManager")
 	if scan_manager != null and scan_manager.has_method("pulse_reveal"):
 		scan_manager.call("pulse_reveal")
@@ -1132,6 +1250,10 @@ func _on_enemy_scan_pressed() -> void:
 			var def: Dictionary = game_state.WEAPON_DEFS.get(str(blueprint_id), {})
 			names.append(str(def.get("name", blueprint_id)))
 		unlock_line = "\nBLUEPRINT UNLOCKED · %s" % ", ".join(names)
+	elif game_state.has_method("analysis_progress_note"):
+		var note := str(game_state.analysis_progress_note(str(report.get("kind", ""))))
+		if not note.is_empty():
+			unlock_line = "\n%s" % note
 	if combat_status:
 		combat_status.text = "HP %d · ATK %d · SPD %.1f\nPHYS RES %d%% · MAGIC RES %d%%\n%s\n%s%s" % [
 			int(report.hp), int(report.attack), float(report.speed),

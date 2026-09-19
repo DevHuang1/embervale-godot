@@ -175,6 +175,82 @@ static func is_safe_header_value(value: String) -> bool:
 			return false
 	return true
 
+## === Build-key sealing (obfuscation, never secrecy) ===
+## The SDK key is a public value that must ship inside the client, so the client
+## must be able to recover it. Sealing therefore only stops a literal
+## copy-paste extraction out of the APK — the passphrase below is compiled into
+## the same build and is public by construction. Anything stronger would need a
+## server, which the SDK-only path deliberately does not have.
+const SEAL_MARKER := "rcseal1:"
+const SEAL_PASSPHRASE := "embervale-beta-store-seal-v1"
+const SEAL_SALT_BYTES := 16
+const SEAL_IV_BYTES := 16
+const AES_BLOCK_BYTES := 16
+
+static func is_sealed(value: String) -> bool:
+	return value.strip_edges().begins_with(SEAL_MARKER)
+
+## AES-256-CBC with a random salt and IV per call, PKCS#7 padded, base64 inside
+## a versioned marker so a future scheme can be told apart from this one.
+static func seal(plaintext: String, passphrase: String = SEAL_PASSPHRASE) -> String:
+	var value := plaintext.strip_edges()
+	if value.is_empty():
+		return ""
+	var crypto := Crypto.new()
+	var salt := crypto.generate_random_bytes(SEAL_SALT_BYTES)
+	var iv := crypto.generate_random_bytes(SEAL_IV_BYTES)
+	var padded := value.to_utf8_buffer()
+	var pad := AES_BLOCK_BYTES - (padded.size() % AES_BLOCK_BYTES)
+	for i in pad:
+		padded.append(pad)
+	var aes := AESContext.new()
+	if aes.start(AESContext.MODE_CBC_ENCRYPT, _seal_key(salt, passphrase), iv) != OK:
+		return ""
+	var body := aes.update(padded)
+	aes.finish()
+	if body.is_empty():
+		return ""
+	return SEAL_MARKER + Marshalls.raw_to_base64(salt + iv + body)
+
+## Returns "" when the value is not a well-formed sealed blob, cannot be
+## decrypted with this passphrase, or does not come out as a header-safe ASCII
+## string — the caller then fails closed exactly like a malformed plain key.
+static func unseal(sealed_value: String,
+		passphrase: String = SEAL_PASSPHRASE) -> String:
+	var trimmed := sealed_value.strip_edges()
+	if not trimmed.begins_with(SEAL_MARKER):
+		return ""
+	var packed := Marshalls.base64_to_raw(trimmed.substr(SEAL_MARKER.length()))
+	if packed.size() <= SEAL_SALT_BYTES + SEAL_IV_BYTES:
+		return ""
+	if (packed.size() - SEAL_SALT_BYTES - SEAL_IV_BYTES) % AES_BLOCK_BYTES != 0:
+		return ""
+	var salt := packed.slice(0, SEAL_SALT_BYTES)
+	var iv := packed.slice(SEAL_SALT_BYTES, SEAL_SALT_BYTES + SEAL_IV_BYTES)
+	var body := packed.slice(SEAL_SALT_BYTES + SEAL_IV_BYTES)
+	var aes := AESContext.new()
+	if aes.start(AESContext.MODE_CBC_DECRYPT, _seal_key(salt, passphrase), iv) != OK:
+		return ""
+	var padded := aes.update(body)
+	aes.finish()
+	if padded.size() < AES_BLOCK_BYTES or padded.size() % AES_BLOCK_BYTES != 0:
+		return ""
+	var padding := int(padded[padded.size() - 1])
+	if padding < 1 or padding > AES_BLOCK_BYTES or padding > padded.size():
+		return ""
+	var text := padded.slice(0, padded.size() - padding).get_string_from_utf8()
+	return text if is_safe_header_value(text) else ""
+
+## SHA-256(salt || passphrase) keeps a fixed 32-byte key out of the blob, so the
+## same key value never seals to the same bytes twice.
+static func _seal_key(salt: PackedByteArray,
+		passphrase: String) -> PackedByteArray:
+	var context := HashingContext.new()
+	context.start(HashingContext.HASH_SHA256)
+	context.update(salt)
+	context.update(passphrase.to_utf8_buffer())
+	return context.finish()
+
 ## Diagnostics-only rendering. Reveals the scheme marker and the last four
 ## characters, never enough to reconstruct the credential.
 static func redact(value: String) -> String:

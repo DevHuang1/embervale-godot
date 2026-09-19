@@ -112,9 +112,11 @@ func _build_trophy_row() -> void:
 	UiKit.style_label(tag, &"Eyebrow", 20)
 	box.add_child(tag)
 
-	var row := HBoxContainer.new()
+	var row := GridContainer.new()
 	row.name = "TrophyRow"
-	row.add_theme_constant_override("separation", 8)
+	row.columns = 3
+	row.add_theme_constant_override("h_separation", 8)
+	row.add_theme_constant_override("v_separation", 8)
 	box.add_child(row)
 
 	var first_unlocked: Dictionary = {}

@@ -17,6 +17,7 @@ extends SceneTree
 const CLIENT := preload("res://scripts/systems/revenuecat_api_client.gd")
 const CATALOG := preload("res://scripts/systems/web_store_catalog.gd")
 const SECURITY := preload("res://scripts/systems/store_security.gd")
+const SAVE_SERVICE := preload("res://scripts/systems/save_service.gd")
 
 const SAVE_PATH := "user://embervale_save.cfg"
 
@@ -193,10 +194,13 @@ func _fetch_active(project_id: String, customer_id: String, secret: String) -> A
 	return active
 
 ## Reads the gameplay save read-only, so the check never mutates progress.
+## Goes through SaveService so the encrypted container and a legacy plaintext
+## save are both handled by the same reader the game uses.
 func _claimed_record_ids() -> PackedStringArray:
 	var ids := PackedStringArray()
-	var cfg := ConfigFile.new()
-	if cfg.load(SAVE_PATH) != OK:
+	var loaded := SAVE_SERVICE.new().load_config(SAVE_PATH)
+	var cfg := loaded.get("config") as ConfigFile
+	if cfg == null:
 		return ids
 	var ledger: Variant = cfg.get_value("progress", "purchase_ledger", [])
 	if not ledger is Array:

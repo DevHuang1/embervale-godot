@@ -1123,15 +1123,10 @@ func _on_arena_boss_died(_boss_id: String) -> void:
 	_biome_boss = null
 	game_state.quest_progress.emit("The biome exhales. The ruin will stir again if you seek a rematch.")
 
-## === Frame: relic spin + proximity triggers ===
-## NOTE: does not chain to WorldManager._process — the base version calls
-## set_process(false) whenever no relic trophy exists, which would kill
-## gate/arena polling.
+## === Frame: expansion build + proximity triggers ===
 func _process(delta: float) -> void:
 	if _bramblewood_expedition == null and _expansion_accessible():
 		_build_bramblewood_expansion()
-	if _relic_trophy != null and is_instance_valid(_relic_trophy):
-		_relic_trophy.rotate_y(delta * 0.7)
 	# Throttled clean-up pass so packs left behind on the route are pruned
 	# between respawn ticks, keeping the nearby cap honest while travelling.
 	_despawn_sweep_in -= delta

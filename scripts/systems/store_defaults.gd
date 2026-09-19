@@ -16,6 +16,10 @@ class_name StoreDefaults
 ## refused by the same validation the rest of the store uses.
 
 @export var native_api_key := ""
+## The shipped form of the key: sealed by `tools/write_store_defaults.gd` so a
+## literal copy-paste of the resource does not yield a usable key. Sealing is
+## obfuscation (the passphrase ships in the same client), not confidentiality.
+@export var native_api_key_sealed := ""
 @export var project_id := ""
 @export var funnel_url := ""
 @export var backend_url := ""
@@ -26,3 +30,15 @@ static func load_shipped() -> StoreDefaults:
 	if not ResourceLoader.exists(RESOURCE_PATH):
 		return null
 	return ResourceLoader.load(RESOURCE_PATH) as StoreDefaults
+
+## The key the store should use: a plaintext value is honored (local/dev
+## resources and test fixtures), otherwise the sealed field is unsealed. An
+## unrecoverable value resolves to "" so the store fails closed.
+func resolved_native_api_key() -> String:
+	var plain := native_api_key.strip_edges()
+	if not plain.is_empty():
+		return plain
+	return StoreSecurity.unseal(native_api_key_sealed)
+
+func has_native_key() -> bool:
+	return not resolved_native_api_key().is_empty()

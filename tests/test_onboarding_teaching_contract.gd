@@ -18,4 +18,4 @@ func _init() -> void:
 		print("ALL ONBOARDING TEACHING CONTRACT TESTS PASSED")
 	else:
 		push_error("%d onboarding teaching contract failures" % failures)
-	quit(1)
+	quit(1 if failures > 0 else 0)

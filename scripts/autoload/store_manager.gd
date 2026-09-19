@@ -262,7 +262,15 @@ func _apply_shipped_defaults(path: String) -> void:
 	_apply_project(defaults.project_id)
 	_apply_funnel(defaults.funnel_url)
 	_apply_backend(defaults.backend_url)
-	_apply_native_key(defaults.native_api_key)
+	# A sealed field that cannot be recovered is corrupt or hostile, not absent:
+	# clear the key instead of leaving an earlier source's value in place.
+	if defaults.native_api_key.strip_edges().is_empty() \
+			and not defaults.native_api_key_sealed.strip_edges().is_empty() \
+			and defaults.resolved_native_api_key().is_empty():
+		_native_api_key = ""
+		push_warning("StoreManager: ignored a shipped key that could not be unsealed.")
+	else:
+		_apply_native_key(defaults.resolved_native_api_key())
 
 func _apply_project(project_id: String) -> void:
 	var project := project_id.strip_edges()

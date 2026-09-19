@@ -156,7 +156,7 @@ value = 0.8
 [node name="HintLabel" type="Label" parent="Root/Panel/Margin/VBox/Scroll/Rows"]
 layout_mode = 2
 theme_type_variation = &"Caption"
-text = "Camera: choose first/third person above. Press V on desktop; right/middle-drag or horizontal-wheel to orbit. On mobile, swipe horizontally on the right side or pinch to orbit and zoom."
+text = "Camera: choose first/third person above. Press V on desktop; drag with either mouse button or use the horizontal wheel to turn the camera. On mobile, drag anywhere on the right side of the screen to turn the camera and pinch to zoom."
 horizontal_alignment = 1
 autowrap_mode = 2
 

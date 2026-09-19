@@ -13,6 +13,7 @@ class_name GroveDressing
 @export var grove_cluster_count: int = 26
 @export var rock_count: int = 320
 @export var bush_count: int = 240
+@export var vine_count: int = 140
 @export var pebble_count: int = 1100
 @export var tuft_count: int = 36000
 @export_range(0.5, 2.5, 0.1) var ecosystem_density: float = 1.6
@@ -26,6 +27,7 @@ class_name GroveDressing
 var rng := RandomNumberGenerator.new()
 
 const FOG_BANK_SCENE := preload("res://scenes/world/fog_bank.tscn")
+const WATERWAYS := preload("res://scripts/world/world_waterways.gd")
 const AUTHORED_RUIN_PROPS := {
 	"whispergrove": "res://assets/models/kenney_nature/Models/tree_detailed.fbx",
 	"bramblewood": "res://assets/models/kenney_graveyard/Models/altar-stone.fbx",
@@ -93,6 +95,7 @@ func _ready() -> void:
 	_build_grove_clusters()
 	_build_rocks()
 	_build_bushes()
+	_build_vines()
 	_build_pale_path()
 	_build_tufts()
 	_build_pebbles()
@@ -338,14 +341,18 @@ func _build_gathering_nodes() -> void:
 	if realm_id == "whispergrove":
 		realm_id = "bramblewood"
 	var profiles := {
-		"bramblewood": ["moss_fiber", "bramble_wood", "iron_shard", "beast_hide"],
-		"mistfen": ["fen_reed", "spore_dust", "moss_fiber", "fen_reed"],
-		"heartwood": ["emberstone", "monster_core", "iron_shard", "emberstone"],
-		"moonfen": ["moonmoss", "crystal_fragment", "fen_reed", "moonmoss"],
+		"bramblewood": ["moss_fiber", "bramble_wood", "iron_shard", "beast_hide",
+			"river_clay", "wild_berry"],
+		"mistfen": ["fen_reed", "spore_dust", "moss_fiber", "mire_blossom",
+			"crystal_fragment", "moss_fiber"],
+		"heartwood": ["emberstone", "monster_core", "iron_shard", "cinder_bark",
+			"beast_hide", "emberstone"],
+		"moonfen": ["moonmoss", "crystal_fragment", "fen_reed", "star_shell",
+			"spore_dust", "moonmoss"],
 	}
 	var materials: Array = profiles.get(realm_id, profiles["bramblewood"])
 	var anchors: Array[Vector2] = _prop_anchors()
-	for i in mini(4, anchors.size()):
+	for i in mini(materials.size(), anchors.size()):
 		var base := anchors[i]
 		var angle := float(i) * 1.91 + 0.4
 		var point := base + Vector2(cos(angle), sin(angle)) * 2.8
@@ -360,6 +367,8 @@ func _build_gathering_nodes() -> void:
 				"bramble_wood": 3,
 				"iron_shard": 4,
 				"beast_hide": 2,
+				"river_clay": 2,
+				"wild_berry": 3,
 			}
 			minimum_yield = int(route_yields.get(str(materials[i]), 1))
 			maximum_yield = minimum_yield
@@ -367,6 +376,30 @@ func _build_gathering_nodes() -> void:
 			1.15, 180.0, realm_id)
 		node.position = Vector3(point.x, _ground_height(point.x, point.y), point.y)
 		add_child(node)
+	if realm_id == "bramblewood":
+		_build_river_bank_nodes()
+
+## Clay and berries grow where the water is: two stops flank the authored
+## crossing so the river pays out materials instead of being scenery only.
+func _build_river_bank_nodes() -> void:
+	var spec := WATERWAYS.river_for("bramblewood")
+	if spec.is_empty():
+		return
+	var bank_offset := WATERWAYS.water_half_width(spec) + 3.2
+	var crossings := WATERWAYS.bridge_crossings("bramblewood")
+	for i in crossings.size():
+		for side: float in [-1.0, 1.0]:
+			var point := Vector2(crossings[i].x + side * bank_offset, crossings[i].y + 3.4)
+			var node := GatheringNode.new()
+			node.name = "Gather_river_clay_bank_%d_%s" % [i, "l" if side < 0.0 else "r"]
+			node.configure("river_clay", 2, 3, 1.15, 180.0, "bramblewood")
+			node.position = Vector3(point.x, _ground_height(point.x, point.y), point.y)
+			add_child(node)
+			var berries := GatheringNode.new()
+			berries.name = "Gather_wild_berry_bank_%d_%s" % [i, "l" if side < 0.0 else "r"]
+			berries.configure("wild_berry", 2, 4, 1.15, 180.0, "bramblewood")
+			berries.position = Vector3(point.x, _ground_height(point.x, point.y + 1.6), point.y + 1.6)
+			add_child(berries)
 
 func _mat(color: Color, emission: Color = Color.BLACK, energy: float = 0.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -587,6 +620,137 @@ func _build_grove_clusters() -> void:
 	_batch(meshes["visual"], bark, trunks, true, 310.0)
 	_batch(canopy, canopy_mat, canopies, true, 310.0)
 	_add_prop_collision(meshes["collider"], trunks, "GroveTrees")
+	## Static realms get the same multi-family read as the streamed grove: a
+	## share of the interior trunks becomes a taller pale aspen or a short
+	## dark conifer instead of another copy of the border oak.
+	_build_tree_variants(trunks)
+
+func _build_tree_variants(trunks: Array[Transform3D]) -> void:
+	if trunks.is_empty():
+		return
+	var aspen_bark := _shader_mat("res://assets/shaders/bark.gdshader", {
+		"bark_color": tree_trunk_color.lightened(0.34),
+	})
+	var aspen_canopy := _shader_mat("res://assets/shaders/canopy.gdshader", {
+		"canopy_color": tree_canopy_color.lightened(0.16),
+		"highlight_color": tree_canopy_color.lightened(0.6),
+	})
+	var pine_bark := _shader_mat("res://assets/shaders/bark.gdshader", {
+		"bark_color": tree_trunk_color.darkened(0.25),
+	})
+	var pine_canopy := _shader_mat("res://assets/shaders/canopy.gdshader", {
+		"canopy_color": tree_canopy_color.darkened(0.22),
+		"highlight_color": tree_canopy_color.lightened(0.25),
+	})
+	var aspen_trunks: Array[Transform3D] = []
+	var aspen_crowns: Array[Transform3D] = []
+	var pine_trunks: Array[Transform3D] = []
+	var pine_crowns: Array[Transform3D] = []
+	for trunk in trunks:
+		var roll := rng.randf()
+		if roll >= 0.44:
+			continue
+		var s := rng.randf_range(0.85, 1.15)
+		var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s, s))
+		if roll < 0.24:
+			aspen_trunks.append(Transform3D(basis, trunk.origin))
+			aspen_crowns.append(Transform3D(basis.scaled(Vector3(1.1, 1.0, 1.1)),
+				trunk.origin + Vector3(0.0, 3.7 * s, 0.0)))
+		else:
+			pine_trunks.append(Transform3D(basis, trunk.origin))
+			pine_crowns.append(Transform3D(basis, trunk.origin + Vector3(0.0, 2.2 * s, 0.0)))
+	var aspen_trunk_mesh := CylinderMesh.new()
+	aspen_trunk_mesh.top_radius = 0.09
+	aspen_trunk_mesh.bottom_radius = 0.2
+	aspen_trunk_mesh.height = 4.0
+	aspen_trunk_mesh.radial_segments = 6
+	var aspen_crown_mesh := SphereMesh.new()
+	aspen_crown_mesh.radius = 1.05
+	aspen_crown_mesh.height = 1.7
+	aspen_crown_mesh.radial_segments = 8
+	aspen_crown_mesh.rings = 4
+	var pine_trunk_mesh := CylinderMesh.new()
+	pine_trunk_mesh.top_radius = 0.1
+	pine_trunk_mesh.bottom_radius = 0.24
+	pine_trunk_mesh.height = 2.4
+	pine_trunk_mesh.radial_segments = 6
+	var pine_crown_mesh := CylinderMesh.new()
+	pine_crown_mesh.top_radius = 0.04
+	pine_crown_mesh.bottom_radius = 1.2
+	pine_crown_mesh.height = 2.4
+	pine_crown_mesh.radial_segments = 7
+	_batch(aspen_trunk_mesh, aspen_bark, aspen_trunks, true, 310.0, "VariantAspenTrunks")
+	_batch(aspen_crown_mesh, aspen_canopy, aspen_crowns, true, 310.0, "VariantAspenCrowns")
+	_batch(pine_trunk_mesh, pine_bark, pine_trunks, true, 310.0, "VariantPineTrunks")
+	_batch(pine_crown_mesh, pine_canopy, pine_crowns, true, 310.0, "VariantPineCrowns")
+
+## Hanging vine strands on border trunks and interior groves: the static
+## realms' answer to the streamed grove's understory.
+func _build_vines() -> void:
+	var mesh := _make_vine_mesh()
+	var stem_mat := _mat(tuft_color.darkened(0.05))
+	var leaf_mat := _mat(tuft_color.lightened(0.18))
+	mesh.surface_set_material(0, stem_mat)
+	mesh.surface_set_material(1, leaf_mat)
+	var transforms: Array[Transform3D] = []
+	for i in vine_count:
+		var ang := rng.randf() * TAU
+		var r := rng.randf_range(tree_ring_min + 4.0, tree_ring_max - 4.0)
+		var pos := Vector3(cos(ang) * r, 0.0, sin(ang) * r)
+		var s := rng.randf_range(0.8, 1.3)
+		var basis := Basis.from_euler(Vector3(0.0, rng.randf() * TAU,
+			rng.randf_range(-0.06, 0.06))).scaled(Vector3.ONE * s)
+		transforms.append(Transform3D(basis, Vector3(pos.x,
+			_ground_height(pos.x, pos.z) + rng.randf_range(1.5, 2.2), pos.z)))
+	_batch(mesh, null, transforms, false, 310.0, "Vines")
+
+## Tapered, curved strand with leaf clusters — same silhouette as the
+## streamed grove vines so the understory reads identically in every realm.
+func _make_vine_mesh() -> ArrayMesh:
+	var strand := SurfaceTool.new()
+	strand.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var segments := 6
+	var length := 2.2
+	var ring_sides := 4
+	var previous_ring: Array[Vector3] = []
+	for i in segments + 1:
+		var t := float(i) / float(segments)
+		var center := Vector3(sin(t * 2.4) * 0.16 * t, -length * t,
+			cos(t * 1.9) * 0.10 * t)
+		var radius := lerpf(0.055, 0.018, t)
+		var ring: Array[Vector3] = []
+		for s in ring_sides:
+			var angle := TAU * float(s) / float(ring_sides) + t * 0.6
+			ring.append(center + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius))
+		if not previous_ring.is_empty():
+			for s in ring_sides:
+				var next := (s + 1) % ring_sides
+				strand.add_vertex(previous_ring[s])
+				strand.add_vertex(ring[s])
+				strand.add_vertex(ring[next])
+				strand.add_vertex(previous_ring[s])
+				strand.add_vertex(ring[next])
+				strand.add_vertex(previous_ring[next])
+		previous_ring = ring
+	strand.generate_normals()
+	var mesh := ArrayMesh.new()
+	strand.commit(mesh)
+	var leaves := SurfaceTool.new()
+	leaves.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in 3:
+		var t := 0.35 + 0.22 * float(i)
+		var center := Vector3(sin(t * 2.4) * 0.16 * t, -length * t,
+			cos(t * 1.9) * 0.10 * t)
+		var leaf := SphereMesh.new()
+		leaf.radius = 0.17
+		leaf.height = 0.13
+		leaf.radial_segments = 5
+		leaf.rings = 3
+		leaves.append_from(leaf, 0, Transform3D(
+			Basis(Vector3.UP, float(i) * 1.7).scaled(Vector3(1.0, 0.6, 1.0)), center))
+	leaves.generate_normals()
+	leaves.commit(mesh)
+	return mesh
 
 func _build_rocks() -> void:
 	var rock := SphereMesh.new()
@@ -1073,7 +1237,7 @@ func _build_thorn_arches() -> void:
 		var gy := _ground_height(s.x, s.y)
 		var facing := rng.randf_range(-0.18, 0.18)
 		var gate_basis := Basis(Vector3.UP, facing)
-		for side in [-1.0, 1.0]:
+		for side: float in [-1.0, 1.0]:
 			var local := Vector3(side * 1.15, 1.38, 0.0)
 			var post_basis := gate_basis * Basis.from_euler(Vector3(0, 0, -side * 0.09))
 			posts.append(Transform3D(post_basis, Vector3(s.x, gy, s.y) + gate_basis * local))

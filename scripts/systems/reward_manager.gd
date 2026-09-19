@@ -306,7 +306,7 @@ func grant_drops(drops: Array, metadata: Dictionary = {}) -> Dictionary:
 					_add_loot_context(summary, dtype, did)
 
 			"relic":
-				pass  # Handled by ScanManager; relics need forge flow
+				pass  # Relics are minted by the forge flow, never as loot drops
 
 	# Save after all drops applied
 	if _gs.has_method("save_game"):

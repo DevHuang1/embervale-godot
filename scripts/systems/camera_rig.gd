@@ -15,6 +15,11 @@ const VIEW_TOP_DOWN := "top_down"
 const HITSTOP_LEASE := "camera_hitstop"
 const KILLCAM_LEASE := "camera_killcam"
 
+## Look sensitivity multiplier range exposed by the settings slider. 1.0 keeps
+## the authored drag feel; the multiplier scales every camera look gesture.
+const MIN_LOOK_SENSITIVITY := 0.5
+const MAX_LOOK_SENSITIVITY := 2.0
+
 @export var distance: float = 17.5
 @export var min_distance: float = 11.0
 @export var max_distance: float = 28.0
@@ -90,6 +95,12 @@ var cam_attributes: CameraAttributesPractical = null
 var camera_base_position: Vector3 = Vector3.ZERO
 var view_mode: String = VIEW_THIRD_PERSON
 var settings_path: String = AudioManager.SETTINGS_PATH
+## One persisted multiplier scales third-person orbit and first-person
+## free-look. The authored exports stay the 1.0 baseline and are never
+## compounded: set_look_sensitivity() always rebuilds them from the base.
+var look_sensitivity: float = 1.0
+var _base_rotate_sensitivity: float = 0.005
+var _base_first_person_sensitivity: float = 0.004
 
 # Mode switching state: lerps between top-down and 3rd-person
 var _target_distance: float = 17.5
@@ -134,6 +145,11 @@ func _ready() -> void:
 	view_mode = _load_view_mode()
 	feedback_mode = _load_feedback_mode()
 	set_view_mode(view_mode, true, false)
+	# Capture the authored look rates before the persisted multiplier lands so
+	# repeated changes rebuild from the baseline instead of compounding.
+	_base_rotate_sensitivity = rotate_sensitivity
+	_base_first_person_sensitivity = first_person_look_sensitivity
+	set_look_sensitivity(_load_look_sensitivity(), false)
 	
 	# Snap to default framing on first frame
 	rotation.y = target_angle_h
@@ -444,6 +460,9 @@ func set_view_mode(new_mode: String, instant: bool = false,
 	view_mode = new_mode
 	_touch_pos.clear()
 	_touch_prev.clear()
+	_look_pointers.clear()
+	_mouse_drag_candidate = false
+	_drag_rotate = false
 	InputManager.world_gesture_active = false
 	third_person = view_mode == VIEW_THIRD_PERSON
 	_apply_view_targets(view_mode)
@@ -519,17 +538,51 @@ func _save_view_mode() -> void:
 	config.set_value("gameplay", "camera_view", view_mode)
 	config.save(settings_path)
 
+## Persisted look sensitivity for every drag gesture. Kept beside the view mode
+## so one ConfigFile owns all camera preferences; the settings slider calls
+## this and a fresh scene re-applies it in _ready().
+func set_look_sensitivity(multiplier: float, persist: bool = true) -> void:
+	look_sensitivity = clampf(multiplier, MIN_LOOK_SENSITIVITY, MAX_LOOK_SENSITIVITY)
+	rotate_sensitivity = _base_rotate_sensitivity * look_sensitivity
+	set_first_person_look_sensitivity(_base_first_person_sensitivity * look_sensitivity)
+	if persist:
+		_save_look_sensitivity()
+
+func get_look_sensitivity() -> float:
+	return look_sensitivity
+
+func _load_look_sensitivity() -> float:
+	var config := ConfigFile.new()
+	if config.load(settings_path) != OK:
+		return 1.0
+	var stored := float(config.get_value("gameplay", "camera_sensitivity", 1.0))
+	return clampf(stored, MIN_LOOK_SENSITIVITY, MAX_LOOK_SENSITIVITY)
+
+func _save_look_sensitivity() -> void:
+	var config := ConfigFile.new()
+	config.load(settings_path)
+	config.set_value("gameplay", "camera_sensitivity", look_sensitivity)
+	config.save(settings_path)
+
 # === Input: drag rotate, pinch zoom, wheel zoom ===
 @export var rotate_sensitivity: float = 0.005
 @export var pinch_zoom_scale: float = 0.035
 @export var wheel_zoom_step: float = 2.0
 @export var wheel_rotate_step: float = 0.22
-## The right side of the playfield is reserved for camera orbit on mobile.
+## The right side of the playfield is reserved for camera look on mobile.
 ## The left side remains tap-to-move/joystick territory.
 @export_range(0.0, 1.0, 0.01) var camera_drag_start_ratio: float = 0.35
-@export var camera_drag_direction_bias: float = 1.15
+## A press inside the look zone becomes a camera drag only after this much
+## travel, so a clean tap still reads as world movement instead of a tiny orbit.
+@export var camera_drag_deadzone: float = 6.0
 
 var _drag_rotate: bool = false
+var _mouse_drag_candidate: bool = false
+var _mouse_press_position: Vector2 = Vector2.ZERO
+## Pointers latched as camera look for the rest of their gesture. Once a
+## right-side drag has started it must keep turning the view even when the
+## finger later moves vertically or reverses, instead of flipping to steering.
+var _look_pointers: Dictionary = {}
 var _touch_pos := {}
 var _touch_prev := {}
 
@@ -544,6 +597,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		_apply_orbit_delta(event.relative)
 		if view_mode == VIEW_FIRST_PERSON:
 			_target_angle_v = target_angle_v
+	elif event is InputEventMouseMotion and _mouse_drag_candidate \
+			and view_mode != VIEW_FIRST_PERSON:
+		# Desktop left-button drag: the gesture becomes camera look only after
+		# the pointer has travelled, so a plain click stays a world tap.
+		if event.position.distance_to(_mouse_press_position) >= camera_drag_deadzone:
+			_drag_rotate = true
+			_apply_orbit_delta(event.relative)
 	elif event is InputEventMouseMotion and not _drag_rotate and view_mode == VIEW_FIRST_PERSON:
 		# Desktop free-look: moving the mouse turns the first-person view.
 		_apply_first_person_look(event.relative)
@@ -554,9 +614,22 @@ func _unhandled_input(event: InputEvent) -> void:
 		_handle_screen_drag(event)
 
 func _handle_mouse_button(event: InputEventMouseButton) -> void:
+	# A player who reaches for the camera during an intro or focus beat gets
+	# control back at once; a cinematic must never leave the view deaf.
+	if event.pressed and _cinematic:
+		cancel_cinematic()
 	match event.button_index:
+		MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				_mouse_drag_candidate = true
+				_mouse_press_position = event.position
+			else:
+				_mouse_drag_candidate = false
+				_drag_rotate = false
 		MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE:
 			_drag_rotate = event.pressed
+			if event.pressed:
+				_mouse_drag_candidate = false
 		MOUSE_BUTTON_WHEEL_UP:
 			if event.pressed:
 				set_distance(distance - wheel_zoom_step)
@@ -570,24 +643,47 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			if event.pressed:
 				_apply_orbit_delta(Vector2(wheel_rotate_step, 0.0))
 
-## InputManager calls this before its normal tap-to-move drag path. This keeps
-## the established left-side movement controls intact while making the
-## camera-side horizontal swipe an unambiguous orbit gesture.
-func wants_world_drag(start_position: Vector2, relative: Vector2) -> bool:
-	if _cinematic or view_mode == VIEW_FIRST_PERSON or _touch_pos.size() >= 2:
-		return false
-	if relative.length_squared() < 16.0:
-		return false
-	if absf(relative.x) <= absf(relative.y) * camera_drag_direction_bias:
+## The camera look zone: presses that begin here may become camera drags.
+## InputManager holds their world tap until release so a drag never orders the
+## hero to walk; the travel threshold and latch live in consume_world_drag().
+func is_camera_touch_zone(screen_position: Vector2) -> bool:
+	if _cinematic or view_mode == VIEW_FIRST_PERSON:
 		return false
 	var viewport_width := get_viewport().get_visible_rect().size.x
 	if viewport_width <= 0.0:
 		return false
-	return start_position.x >= viewport_width * camera_drag_start_ratio
+	return screen_position.x >= viewport_width * camera_drag_start_ratio
 
-func consume_world_drag(start_position: Vector2, relative: Vector2) -> bool:
-	if not wants_world_drag(start_position, relative):
+## Travel a gesture needs before it is claimed as a camera drag. InputManager
+## reuses this so tap-vs-drag is decided by exactly one threshold.
+func camera_drag_threshold() -> float:
+	return camera_drag_deadzone
+
+## InputManager calls this before its normal tap-to-move drag path. A press
+## that starts on the camera side and travels past the deadzone latches that
+## pointer to the camera, so one finger turns the view left/right and up/down
+## for the whole gesture. The left side remains player steering.
+func wants_world_drag(start_position: Vector2, relative: Vector2,
+		pointer_id: int = -1) -> bool:
+	if _cinematic or view_mode == VIEW_FIRST_PERSON or _touch_pos.size() >= 2:
 		return false
+	if pointer_id >= 0 and _look_pointers.has(pointer_id):
+		return true
+	if relative.length_squared() < camera_drag_deadzone * camera_drag_deadzone:
+		return false
+	return is_camera_touch_zone(start_position)
+
+func consume_world_drag(start_position: Vector2, relative: Vector2,
+		pointer_id: int = -1, current_position: Vector2 = Vector2.INF) -> bool:
+	# Cumulative travel decides the initial claim; per-event deltas are used
+	# once latched so a slow drag still starts the gesture.
+	var claim_relative := relative
+	if current_position != Vector2.INF:
+		claim_relative = Vector2(start_position.distance_to(current_position), 0.0)
+	if not wants_world_drag(start_position, claim_relative, pointer_id):
+		return false
+	if pointer_id >= 0:
+		_look_pointers[pointer_id] = true
 	_apply_orbit_delta(relative)
 	return true
 
@@ -596,11 +692,18 @@ func _handle_screen_touch(event: InputEventScreenTouch) -> void:
 			and InputManager.is_joystick_pointer_owned(event.index):
 		return
 	if event.pressed:
+		# Same contract as desktop: touching to look during an intro or focus
+		# beat restores player camera control immediately.
+		if _cinematic:
+			cancel_cinematic()
+		# A recycled pointer id must never inherit the previous latch.
+		_look_pointers.erase(event.index)
 		if view_mode == VIEW_FIRST_PERSON and _touch_pos.is_empty():
 			InputManager.begin_first_person_look(event.index)
 		_touch_pos[event.index] = event.position
 		_touch_prev[event.index] = event.position
 	else:
+		_look_pointers.erase(event.index)
 		if view_mode == VIEW_FIRST_PERSON:
 			InputManager.end_first_person_look(event.index)
 		_touch_pos.erase(event.index)

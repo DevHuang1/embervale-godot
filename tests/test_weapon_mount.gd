@@ -57,6 +57,26 @@ func _run() -> void:
 	else:
 		print("OK: arcane_staff model mounted")
 
+	# --- Forged relic kit wears its base kit's model in hand ---
+	var relic_def: Dictionary = RelicData.build_weapon_def(
+		gs.WEAPON_DEFS["mug_mace"], 3, "Probe Relic", ["Rite A", "Rite B", "Rite C"])
+	gs.add_weapon(relic_def, true)
+	await _frames(3)
+	if hand_r.get_node_or_null("WeaponModel") == null:
+		failures += 1
+		print("FAIL: forged relic kit mounted no model under HandSocketR")
+	else:
+		print("OK: relic kit model mounted")
+
+	# --- Realm reward weapons previously fell through the match ---
+	gs.add_weapon(gs.WEAPON_DEFS["thornbite_cleaver"], true)
+	await _frames(3)
+	if hand_r.get_node_or_null("WeaponModel") == null:
+		failures += 1
+		print("FAIL: thornbite_cleaver mounted no model under HandSocketR")
+	else:
+		print("OK: thornbite_cleaver model mounted")
+
 	# --- Slash animation SFX layers without errors for every stage ---
 	for stage in [0, 1, 2]:
 		audio.play_swing_stage(stage)

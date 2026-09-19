@@ -51,21 +51,59 @@ func _build_visual() -> void:
 	_visual = Node3D.new()
 	_visual.name = "Visual"
 	add_child(_visual)
+	var style := _material_style()
+	var color: Color = style.get("color", _realm_color())
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = _realm_color()
+	mat.albedo_color = color
 	mat.emission_enabled = true
-	mat.emission = _realm_color().lightened(0.2)
+	mat.emission = color.lightened(0.2)
 	mat.emission_energy_multiplier = 0.6
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = 0.18
-	mesh.bottom_radius = 0.22
-	mesh.height = 0.35
-	mesh.radial_segments = 8
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
-	mi.material_override = mat
-	mi.position.y = 0.17
-	_visual.add_child(mi)
+	match str(style.get("shape", "stalk")):
+		"mound":
+			var mound := CylinderMesh.new()
+			mound.top_radius = 0.42
+			mound.bottom_radius = 0.5
+			mound.height = 0.22
+			mound.radial_segments = 8
+			_add_visual_mesh(mound, mat, Vector3(0.0, 0.11, 0.0))
+		"cluster":
+			for i in 3:
+				var berry := SphereMesh.new()
+				berry.radius = 0.14
+				berry.height = 0.2
+				berry.radial_segments = 6
+				berry.rings = 4
+				_add_visual_mesh(berry, mat, Vector3(
+					cos(float(i) * 2.1) * 0.16, 0.3, sin(float(i) * 2.1) * 0.16))
+		"bloom":
+			var bloom := SphereMesh.new()
+			bloom.radius = 0.22
+			bloom.height = 0.32
+			bloom.radial_segments = 8
+			bloom.rings = 5
+			_add_visual_mesh(bloom, mat, Vector3(0.0, 0.3, 0.0))
+		"log":
+			var log_mesh := CylinderMesh.new()
+			log_mesh.top_radius = 0.12
+			log_mesh.bottom_radius = 0.15
+			log_mesh.height = 0.72
+			log_mesh.radial_segments = 7
+			_add_visual_mesh(log_mesh, mat, Vector3(0.0, 0.15, 0.0),
+				Vector3(0.0, 0.0, PI * 0.5))
+		"shell":
+			var shell := CylinderMesh.new()
+			shell.top_radius = 0.26
+			shell.bottom_radius = 0.32
+			shell.height = 0.1
+			shell.radial_segments = 8
+			_add_visual_mesh(shell, mat, Vector3(0.0, 0.06, 0.0))
+		_:
+			var stalk := CylinderMesh.new()
+			stalk.top_radius = 0.18
+			stalk.bottom_radius = 0.22
+			stalk.height = 0.35
+			stalk.radial_segments = 8
+			_add_visual_mesh(stalk, mat, Vector3(0.0, 0.17, 0.0))
 	_progress_ring = MeshInstance3D.new()
 	_progress_ring.name = "ProgressRing"
 	var ring_mat := StandardMaterial3D.new()
@@ -78,6 +116,27 @@ func _build_visual() -> void:
 	_progress_ring.material_override = ring_mat
 	_progress_ring.visible = false
 	_visual.add_child(_progress_ring)
+
+func _add_visual_mesh(mesh: Mesh, material: Material, offset: Vector3,
+		rotation: Vector3 = Vector3.ZERO) -> void:
+	var instance := MeshInstance3D.new()
+	instance.mesh = mesh
+	instance.material_override = material
+	instance.position = offset
+	instance.rotation = rotation
+	_visual.add_child(instance)
+
+## Distinct silhouettes per raw material so a gather stop reads as its
+## substance (clay mound, berry cluster, bloom, bark log, shell) instead of
+## one generic stalk everywhere.
+func _material_style() -> Dictionary:
+	match material_id:
+		"river_clay": return {"shape": "mound", "color": Color(0.58, 0.40, 0.31)}
+		"wild_berry": return {"shape": "cluster", "color": Color(0.66, 0.18, 0.22)}
+		"mire_blossom": return {"shape": "bloom", "color": Color(0.62, 0.80, 0.88)}
+		"cinder_bark": return {"shape": "log", "color": Color(0.48, 0.22, 0.10)}
+		"star_shell": return {"shape": "shell", "color": Color(0.58, 0.64, 0.90)}
+	return {}
 
 func _build_prompt() -> void:
 	_prompt_label = Label3D.new()

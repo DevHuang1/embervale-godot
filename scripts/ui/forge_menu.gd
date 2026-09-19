@@ -75,6 +75,7 @@ func _ready() -> void:
 	$Root.add_theme_stylebox_override("panel", UiKit.glass_stylebox())
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	UiKit.apply_parchment(result_panel, UiKit.RADIUS_BUTTON)
+	weapon_stats.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	UiKit.style_primary_button(equip_button)
 	UiKit.style_button(close_button, UiKit.SAGE)
 	_strip_retired_nodes()
@@ -151,6 +152,7 @@ func _build_blueprint_list() -> void:
 		button.name = "%sBlueprint" % blueprint_id
 		button.custom_minimum_size = Vector2(0, 64)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.add_theme_font_size_override("font_size", 18)
 		button.pressed.connect(_select_blueprint.bind(blueprint_id))
 		_blueprint_list_box.add_child(button)
@@ -199,9 +201,11 @@ func _build_tier_row() -> void:
 	UiKit.style_label(title, &"Eyebrow", 18)
 	box.add_child(title)
 
-	var row := HBoxContainer.new()
+	var row := GridContainer.new()
 	row.name = "TierButtons"
-	row.add_theme_constant_override("separation", 6)
+	row.columns = 3
+	row.add_theme_constant_override("h_separation", 6)
+	row.add_theme_constant_override("v_separation", 6)
 	box.add_child(row)
 	for index in FORGE_CATALOG.tier_count():
 		var button := Button.new()
@@ -280,7 +284,9 @@ func _paint_weapon_icon(weapon_id: String) -> void:
 		icon_view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		icon_view.custom_minimum_size = Vector2(72, 72)
 		weapon_glyph.visible = false
-		weapon_glyph.get_parent().add_child(icon_view)
+		var parent := weapon_glyph.get_parent()
+		parent.add_child(icon_view)
+		parent.move_child(icon_view, weapon_glyph.get_index())
 	else:
 		weapon_glyph.visible = true
 	UiKit.style_label(weapon_glyph, &"Title", 56)
@@ -339,7 +345,9 @@ func _refresh_preview() -> void:
 	var def := RelicData.build_weapon_def(base, pending_tier, item_name_edit.text,
 		_skill_name_inputs())
 	weapon_name.text = def.name
-	var parts := ["ATK %d · %s style" % [def.atk, str(def.style).to_upper()]]
+	weapon_stats.text = "ATK %d · %s style · %s" % [def.atk, str(def.style).to_upper(),
+		str(def.element).to_upper()]
+	var parts: Array[String] = []
 	for i in def.skills.size():
 		var sk: Dictionary = def.skills[i]
 		var cd_text := "%ds" % int(sk.cooldown)
@@ -349,7 +357,7 @@ func _refresh_preview() -> void:
 			parts.append("%s (ULT) · %.2f× blast · %s CD" % [sk.name, sk.dmg_mult, cd_text])
 		else:
 			parts.append("%s · %.2f× hit · %s CD" % [sk.name, sk.dmg_mult, cd_text])
-	weapon_stats.text = " · ".join(parts)
+	kit_preview.text = "%s\nEvery number is fixed by the forge — the names are yours alone." % " · ".join(parts)
 
 	rarity_label.text = "RARITY: %s" % str(FORGE_CATALOG.tier_name(pending_tier)).to_upper()
 	rarity_label.add_theme_color_override("font_color",
@@ -369,7 +377,6 @@ func _refresh_preview() -> void:
 		"" if affordable else " · MISSING MATERIALS"]
 	_cost_label.add_theme_color_override("font_color",
 		UiKit.CREAM if affordable else UiKit.BLOOD)
-	kit_preview.text = "The forge fixes every number — names are yours alone."
 	_refresh_tier_buttons()
 	equip_button.disabled = not affordable
 

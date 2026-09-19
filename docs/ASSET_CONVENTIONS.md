@@ -37,3 +37,20 @@ data or save files.
   overwrite gameplay sockets.
 - `ContentRegistry.resolve_asset_path()` is the replacement boundary. Fallback
   paths remain valid until a replacement is available.
+
+## Body armor models
+
+- Body armor defaults to the procedural builders in `hero.gd`. An imported
+  armor asset is wired by adding an `ArmorVisualRegistry` record with
+  `kind: "model"`; the hero then mounts that rigid prop on a skeleton bone.
+- Model records carry `path`, `bone` (default `Torso`), `offset`,
+  `rotation_degrees`, and `length`. Nothing is skinned: the piece is authored
+  around its own pivot and seated by the record's transform.
+- Size is measured from the model's own bounds and normalized to `length`
+  metres, so replacement assets never need hand-tuned scale constants.
+- License evidence is mandatory before a record ships; add it to
+  `assets/models/LICENSES.md` with source, pack page, and license, and add the
+  matching entry to `AssetIntakeCatalog`.
+- Review seat and scale with
+  `godot --path . --script tools/capture_armor_prop.gd --rendering-driver metal`
+  before wiring the record; `tests/test_armor_visuals.gd` guards the contract.

@@ -27,6 +27,9 @@ var _lock_was := false
 var _manual_values := false
 var _manual_hp := 0
 var _manual_max_hp := 1
+## Optional owner-driven range gate. Bosses retire their plate when the player
+## leaves the encounter; ordinary enemies keep the default always-on plate.
+var _range_visible := true
 
 func _ready() -> void:
 	_source = get_parent()
@@ -44,6 +47,14 @@ func _process(_delta: float) -> void:
 		queue_free()
 		return
 	_refresh(false)
+
+## Encounter-scoped plates (bosses) can gate visibility on the player's
+## distance without touching the ordinary enemy behaviour.
+func set_range_visible(visible_in_range: bool) -> void:
+	if _range_visible == visible_in_range:
+		return
+	_range_visible = visible_in_range
+	_refresh(true)
 
 func _build_bar() -> void:
 	var plate := Node3D.new()
@@ -221,7 +232,7 @@ func _refresh(force: bool) -> void:
 		if has_poise:
 			var poise_ratio := clampf(float(_source.call("get_poise_ratio")), 0.0, 1.0)
 			_poise_fill.scale = Vector3(maxf(poise_ratio, 0.001), 1.0, 1.0)
-	visible = not defeated
+	visible = not defeated and _range_visible
 	var is_locked := false
 	if show_name_when_targeted:
 		# A detached bar (enemy freed mid-frame) is outside the active scene

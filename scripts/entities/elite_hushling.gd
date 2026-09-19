@@ -11,6 +11,10 @@ var _chain_triggered := false
 var _elite_core: MeshInstance3D = null
 var _elite_core_material: StandardMaterial3D = null
 
+## Elites share the hushling rig but are their own first-encounter codex entry.
+func discovery_kind() -> String:
+    return "elite_hushling"
+
 func _ready() -> void:
     max_hp = 72
     base_atk = 7

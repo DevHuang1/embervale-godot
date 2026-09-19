@@ -1,5 +1,7 @@
 extends SceneTree
 
+var _failures := 0
+
 func _init() -> void:
 	var source := FileAccess.get_file_as_string("res://scripts/systems/terrain_relief.gd")
 	var shader := FileAccess.get_file_as_string("res://assets/shaders/terrain_ground_layers.gdshader")
@@ -20,10 +22,41 @@ func _init() -> void:
 		_assert_true(shader.contains("%s_tex" % layer), "%s texture layer exists" % layer)
 	_assert_true(shader.contains("moss_strength"), "moss layer exists")
 	_assert_true(shader.contains("moisture_strength"), "wetness control exists")
-	print("ALL TERRAIN RELIEF/LAYER TESTS PASSED")
-	quit()
+
+	# --- Material zones + shoreline beaches (Minecraft-style regions) ---
+	var desktop_shader := FileAccess.get_file_as_string(
+		"res://assets/shaders/terrain_ground.gdshader")
+	var mobile_shader := FileAccess.get_file_as_string(
+		"res://assets/shaders/terrain_ground_mobile.gdshader")
+	for terrain_shader in [desktop_shader, mobile_shader]:
+		_assert_true(terrain_shader.contains("region_scale"),
+			"terrain shader carves coherent material regions")
+		_assert_true(terrain_shader.contains("sand_color"),
+			"terrain shader tints sand from the realm palette")
+		_assert_true(terrain_shader.contains("shoreline_sand("),
+			"terrain shader owns the waterline beach band")
+		_assert_true(terrain_shader.contains("river_center_x("),
+			"terrain shader mirrors the river centerline")
+		_assert_true(terrain_shader.contains("river_half_width")
+			and terrain_shader.contains("river_beach"),
+			"river beach width is a tunable uniform")
+		_assert_true(terrain_shader.contains("pond_a")
+			and terrain_shader.contains("pond_b") and terrain_shader.contains("pond_c"),
+			"three pond beach slots are declared")
+	_assert_true(not desktop_shader.contains("vec4 texture_lift"),
+		"per-channel texture lift cannot hue-shift sand again")
+	_assert_true(source.contains("func _bind_shoreline"),
+		"terrain relief binds the shoreline contract")
+	_assert_true(source.contains("POND_SHADER_SLOTS"), "pond shader slots are centralized")
+	_assert_true(source.contains("WATERWAYS.water_half_width(_river)"),
+		"river beach starts at the real water-plane edge")
+	if _failures == 0:
+		print("ALL TERRAIN RELIEF/LAYER TESTS PASSED")
+	else:
+		print("%d FAILURES" % _failures)
+	quit(1 if _failures > 0 else 0)
 
 func _assert_true(condition: bool, label: String) -> void:
 	if not condition:
+		_failures += 1
 		push_error("FAIL: %s" % label)
-		quit(1)

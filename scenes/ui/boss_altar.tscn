@@ -27,7 +27,7 @@ horizontal_alignment = 1
 [node name="ScanLine" type="Label" parent="Root/VBox"]
 layout_mode = 2
 theme_type_variation = &"Subtitle"
-text = "You hold 5 scans."
+text = "The lens holds 5 charges."
 horizontal_alignment = 1
 
 [node name="LockedBlurb" type="Label" parent="Root/VBox"]
@@ -41,11 +41,6 @@ horizontal_alignment = 1
 layout_mode = 2
 alignment = 1
 theme_override_constants/separation = 16
-
-[node name="ScanButton" type="Button" parent="Root/VBox/ActionRow"]
-custom_minimum_size = Vector2(250, 58)
-layout_mode = 2
-text = "SCAN AN OBJECT"
 
 [node name="DefaultButton" type="Button" parent="Root/VBox/ActionRow"]
 custom_minimum_size = Vector2(250, 58)
@@ -73,7 +68,7 @@ theme_override_constants/separation = 10
 [node name="PaletteTag" type="Label" parent="Root/VBox/CustomBox"]
 layout_mode = 2
 theme_type_variation = &"Eyebrow"
-text = "EXTRACTED PALETTE"
+text = "TROPHY PALETTE"
 
 [node name="PaletteRow" type="HBoxContainer" parent="Root/VBox/CustomBox"]
 layout_mode = 2
@@ -113,11 +108,5 @@ theme_override_constants/separation = 16
 [node name="LockButton" type="Button" parent="Root/VBox/CustomBox/LockRow"]
 custom_minimum_size = Vector2(280, 58)
 layout_mode = 2
-text = "LOCK IN (USES 1 SCAN)"
+text = "LOCK IN · 1 LENS CHARGE"
 disabled = true
-
-[node name="RescanButton" type="Button" parent="Root/VBox/CustomBox/LockRow"]
-visible = false
-custom_minimum_size = Vector2(170, 58)
-layout_mode = 2
-text = "RESCAN"

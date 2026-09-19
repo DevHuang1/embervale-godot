@@ -47,6 +47,12 @@ const WORLD_SEED := 2026082357
 const CARPET_SPACING := 1.08
 const CHUNKS_PER_FRAME := 2
 const PREFETCH_CHUNKS := 1
+## Share of broadleaf streamed trees that carry a hanging vine.
+const TREE_VINE_CHANCE := 0.38
+## River presentation: sample spacing along the centerline and a hard cap on
+## the bank-stone batch so a full-extent river stays one cheap MultiMesh.
+const RIVER_SAMPLE_STEP := 5.0
+const RIVER_STONE_MAX := 620
 ## World-edge grass: a sparse blade layer past the tier's far ring so the
 ## whole TerrainRelief extent (half-width 300 m) reads as covered ground.
 const FRINGE_SPACING := 9.0
@@ -70,6 +76,7 @@ const ROCK_SHADER := preload("res://assets/shaders/rock.gdshader")
 const BARK_SHADER := preload("res://assets/shaders/bark.gdshader")
 const AMBIENT_FOLIAGE_SCRIPT := preload("res://scripts/systems/ambient_foliage_patch.gd")
 const AMBIENT_LIFE_SCRIPT := preload("res://scripts/systems/ambient_life_field.gd")
+const WATERWAYS := preload("res://scripts/world/world_waterways.gd")
 
 var _active := false
 var _realm_id := "bramblewood"
@@ -96,13 +103,29 @@ var _grass_material: ShaderMaterial
 var _tree_mesh: ArrayMesh
 var _tree_trunk_material: ShaderMaterial
 var _tree_canopy_material: Material
+## Secondary tree families scatter alongside the oak so the treeline reads as
+## a forest with more than one silhouette. Meshes carry their trunk/canopy
+## surfaces; `_batch_mm` passes no material override so those surfaces win.
+var _tree_aspen_mesh: ArrayMesh
+var _tree_pine_mesh: ArrayMesh
+var _tree_aspen_bark: ShaderMaterial
+var _tree_pine_bark: ShaderMaterial
+var _canopy_aspen_material: StandardMaterial3D
+var _canopy_pine_material: StandardMaterial3D
+var _vine_mesh: ArrayMesh
+var _vine_stem_material: StandardMaterial3D
+var _vine_leaf_material: StandardMaterial3D
 var _rock_mesh: SphereMesh
 var _rock_material: ShaderMaterial
 var _bush_mesh: SphereMesh
 var _bush_material: Material
+var _bush_berry_material: StandardMaterial3D
 var _deadwood_mesh: CylinderMesh
 var _deadwood_material: ShaderMaterial
 var _stone_material: ShaderMaterial
+## River channel this realm carves and presents; empty when the realm has no
+## waterway (all current realms own one).
+var _river_spec: Dictionary = {}
 ## Sand / clay / dirt patch surfaces shared across every streamed chunk so
 ## ground texture variety reaches the whole world (origin patches previously
 ## faded at ~64 m and left the far terrain a single grass wash).
@@ -424,6 +447,7 @@ func _setup() -> void:
 		# repeating hitch on mobile.
 		_chunks_per_frame = 1
 	_realm_id = _visual_realm_id()
+	_river_spec = WATERWAYS.river_for(_realm_id)
 	var world := get_parent() as Node3D
 	_hero = world.get_node_or_null("Hero")
 	_apply_quality_startup()
@@ -432,6 +456,7 @@ func _setup() -> void:
 	_build_clearances()
 	_relocate_walls(world)
 	_build_ambient_life()
+	_build_river()
 	if _hero != null and _hero.has_signal("position_changed"):
 		if _hero.is_connected("position_changed", _on_hero_moved):
 			_hero.disconnect("position_changed", _on_hero_moved)
@@ -646,12 +671,24 @@ func _build_clearances() -> void:
 		_clearances.append({"pos": Vector2(pocket3.x, pocket3.z), "radius": 4.2})
 	for pond_value in WorldGroundComposition.pond_centers(_realm_id):
 		_clearances.append({"pos": pond_value as Vector2, "radius": 4.8})
+	for crossing in WATERWAYS.bridge_crossings(_realm_id):
+		_clearances.append({"pos": crossing, "radius": 10.5})
 
 func _clearance_blocks(point: Vector2) -> bool:
+	if _river_blocks(point):
+		return true
 	for entry in _clearances:
 		if point.distance_to(entry["pos"] as Vector2) < float(entry["radius"]):
 			return true
 	return false
+
+## Hard river edge used by prop scatter: nothing may root inside the carved
+## channel or the water strip.
+func _river_blocks(point: Vector2) -> bool:
+	if _river_spec.is_empty():
+		return false
+	return WATERWAYS.lateral_distance(_river_spec, point) \
+		< WATERWAYS.carve_reach(_river_spec) + 0.4
 
 ## Returns a soft clearance factor: 1.0 is a hard gameplay clearing, while
 ## values between 0 and 1 shorten/sparsify grass without leaving empty holes.
@@ -661,6 +698,11 @@ func _clearance_strength(point: Vector2) -> float:
 		var radius := float(entry["radius"])
 		var distance := point.distance_to(entry["pos"] as Vector2)
 		strongest = maxf(strongest, 1.0 - smoothstep(radius, radius + 2.4, distance))
+	if not _river_spec.is_empty():
+		var reach := WATERWAYS.carve_reach(_river_spec)
+		var river_distance := WATERWAYS.lateral_distance(_river_spec, point)
+		strongest = maxf(strongest, 1.0 - smoothstep(reach + 0.4, reach + 1.6,
+			river_distance))
 	return strongest
 
 func _rocks_clearance(point: Vector2) -> bool:
@@ -765,6 +807,17 @@ func _build_shared_resources() -> void:
 	canopy_surface.commit(_tree_mesh)
 	_tree_mesh.surface_set_material(1, _tree_canopy_material)
 
+	_build_variant_tree_resources(pal)
+
+	_vine_stem_material = StandardMaterial3D.new()
+	_vine_stem_material.albedo_color = (pal["canopy"] as Color).darkened(0.08)
+	_vine_stem_material.roughness = 0.92
+	_vine_leaf_material = StandardMaterial3D.new()
+	_vine_leaf_material.albedo_color = (pal["canopy"] as Color).lightened(0.10)
+	_vine_leaf_material.roughness = 0.94
+	_vine_leaf_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_vine_mesh = _make_vine_mesh()
+
 	_rock_mesh = SphereMesh.new()
 	_rock_mesh.radius = 1.0
 	_rock_mesh.height = 1.0
@@ -789,6 +842,14 @@ func _build_shared_resources() -> void:
 	_bush_material.albedo_color = (pal["canopy"] as Color).darkened(0.18)
 	_bush_material.roughness = 1.0
 	_bush_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_bush_berry_material = StandardMaterial3D.new()
+	_bush_berry_material.albedo_color = (pal["canopy"] as Color).lerp(
+		Color(0.42, 0.14, 0.20), 0.42)
+	_bush_berry_material.emission_enabled = true
+	_bush_berry_material.emission = Color(0.42, 0.10, 0.16)
+	_bush_berry_material.emission_energy_multiplier = 0.35
+	_bush_berry_material.roughness = 0.95
+	_bush_berry_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 	_deadwood_mesh = CylinderMesh.new()
 	_deadwood_mesh.top_radius = 0.11
@@ -814,6 +875,155 @@ func _build_shared_resources() -> void:
 			load("res://assets/textures/stylized/%s" % pair[1]))
 
 	_build_patch_shared_resources()
+
+## Secondary tree families. Aspen is a taller pale-trunked tree with a narrow
+## high crown; pine is a short dark conifer. Both are base-anchored and share
+## the oak's two-surface contract, so `_batch_mm` instances them without a
+## material override.
+func _build_variant_tree_resources(pal: Dictionary) -> void:
+	_tree_aspen_bark = _bark_material(Color(0.48, 0.44, 0.36))
+	_tree_pine_bark = _bark_material(Color(0.085, 0.065, 0.055))
+	_canopy_aspen_material = StandardMaterial3D.new()
+	_canopy_aspen_material.albedo_color = (pal["canopy"] as Color).lightened(0.14)
+	_canopy_aspen_material.roughness = 0.9
+	_canopy_aspen_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_canopy_pine_material = StandardMaterial3D.new()
+	_canopy_pine_material.albedo_color = (pal["canopy"] as Color).darkened(0.20).lerp(
+		Color(0.05, 0.12, 0.10), 0.5)
+	_canopy_pine_material.roughness = 0.95
+	_canopy_pine_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_tree_aspen_mesh = _make_variant_tree_mesh(
+		{"trunk_height": 4.3, "top": 0.09, "bottom": 0.22, "limbs": 3,
+		"limb_attach": 2.5, "limb_tilt": 44.0, "canopy_radius": 1.02,
+		"canopy_height": 1.8, "canopy_y": 3.95, "segments": 8},
+		_tree_aspen_bark, _canopy_aspen_material)
+	_tree_pine_mesh = _make_variant_tree_mesh(
+		{"trunk_height": 2.7, "top": 0.11, "bottom": 0.26, "limbs": 0,
+		"limb_attach": 0.0, "limb_tilt": 0.0, "canopy_radius": 1.18,
+		"canopy_height": 2.3, "canopy_y": 2.9, "segments": 7, "conifer": true},
+		_tree_pine_bark, _canopy_pine_material)
+
+func _bark_material(color: Color) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = BARK_SHADER
+	material.set_shader_parameter("bark_color", color)
+	for pair in [["bark_albedo_tex", "bark/albedo.png"],
+			["bark_normal_tex", "bark/normal.png"],
+			["bark_rough_tex", "bark/roughness.png"]]:
+		material.set_shader_parameter(pair[0],
+			load("res://assets/textures/stylized/%s" % pair[1]))
+	return material
+
+func _make_variant_tree_mesh(spec: Dictionary, bark: Material, canopy: Material) -> ArrayMesh:
+	var trunk_height := float(spec.get("trunk_height", 3.4))
+	var trunk := CylinderMesh.new()
+	trunk.top_radius = float(spec.get("top", 0.14))
+	trunk.bottom_radius = float(spec.get("bottom", 0.3))
+	trunk.height = trunk_height
+	trunk.radial_segments = 7
+	trunk.rings = 1
+	var mesh := ArrayMesh.new()
+	var trunk_surface := SurfaceTool.new()
+	trunk_surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	trunk_surface.append_from(trunk, 0,
+		Transform3D(Basis(), Vector3(0, trunk_height * 0.5, 0)))
+	var limb_count := int(spec.get("limbs", 0))
+	if limb_count > 0:
+		var limb := CylinderMesh.new()
+		limb.top_radius = 0.03
+		limb.bottom_radius = 0.09
+		limb.height = 1.35
+		limb.radial_segments = 5
+		limb.rings = 1
+		for i in limb_count:
+			var azimuth := TAU * float(i) / float(limb_count) + 0.35 * float(i % 2)
+			var tilt := deg_to_rad(float(spec.get("limb_tilt", 50.0)) \
+				+ 6.0 * float(i % 2))
+			var limb_basis := Basis(Vector3.UP, azimuth) * Basis(Vector3.RIGHT, tilt)
+			var attach := Vector3(0.0, float(spec.get("limb_attach", 1.9)) \
+				+ 0.34 * float(i), 0.0)
+			trunk_surface.append_from(limb, 0, Transform3D(limb_basis,
+				attach + limb_basis * Vector3(0, limb.height * 0.5, 0)))
+	trunk_surface.commit(mesh)
+	mesh.surface_set_material(0, bark)
+	var canopy_surface := SurfaceTool.new()
+	canopy_surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var canopy_y := float(spec.get("canopy_y", 3.0))
+	var canopy_height := float(spec.get("canopy_height", 2.0))
+	var canopy_radius := float(spec.get("canopy_radius", 1.2))
+	var segments := maxi(int(spec.get("segments", 8)), 6)
+	if bool(spec.get("conifer", false)):
+		for tier in 2:
+			var cone := CylinderMesh.new()
+			cone.top_radius = 0.03
+			cone.bottom_radius = canopy_radius * (1.0 - 0.3 * float(tier))
+			cone.height = canopy_height * (1.0 - 0.2 * float(tier))
+			cone.radial_segments = segments
+			cone.rings = 1
+			canopy_surface.append_from(cone, 0, Transform3D(Basis(),
+				Vector3(0.0, canopy_y + float(tier) * canopy_height * 0.55, 0.0)))
+	else:
+		var crown := SphereMesh.new()
+		crown.radius = canopy_radius
+		crown.height = canopy_height
+		crown.radial_segments = segments
+		crown.rings = 5
+		crown.is_hemisphere = true
+		canopy_surface.append_from(crown, 0,
+			Transform3D(Basis(), Vector3(0, canopy_y, 0)))
+	canopy_surface.commit(mesh)
+	mesh.surface_set_material(1, canopy)
+	return mesh
+
+## Hanging vine strand: a tapered tube that curves, plus three leaf clusters.
+## Built once per realm and instanced at tree trunks and ruin walls.
+func _make_vine_mesh() -> ArrayMesh:
+	var strand := SurfaceTool.new()
+	strand.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var segments := 6
+	var length := 2.2
+	var ring_sides := 4
+	var previous_ring: Array[Vector3] = []
+	for i in segments + 1:
+		var t := float(i) / float(segments)
+		var center := Vector3(sin(t * 2.4) * 0.16 * t, -length * t,
+			cos(t * 1.9) * 0.10 * t)
+		var radius := lerpf(0.055, 0.018, t)
+		var ring: Array[Vector3] = []
+		for s in ring_sides:
+			var angle := TAU * float(s) / float(ring_sides) + t * 0.6
+			ring.append(center + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius))
+		if not previous_ring.is_empty():
+			for s in ring_sides:
+				var next := (s + 1) % ring_sides
+				strand.add_vertex(previous_ring[s])
+				strand.add_vertex(ring[s])
+				strand.add_vertex(ring[next])
+				strand.add_vertex(previous_ring[s])
+				strand.add_vertex(ring[next])
+				strand.add_vertex(previous_ring[next])
+		previous_ring = ring
+	strand.generate_normals()
+	var mesh := ArrayMesh.new()
+	strand.commit(mesh)
+	mesh.surface_set_material(0, _vine_stem_material)
+	var leaves := SurfaceTool.new()
+	leaves.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in 3:
+		var t := 0.35 + 0.22 * float(i)
+		var center := Vector3(sin(t * 2.4) * 0.16 * t, -length * t,
+			cos(t * 1.9) * 0.10 * t)
+		var leaf := SphereMesh.new()
+		leaf.radius = 0.17
+		leaf.height = 0.13
+		leaf.radial_segments = 5
+		leaf.rings = 3
+		leaves.append_from(leaf, 0, Transform3D(
+			Basis(Vector3.UP, float(i) * 1.7).scaled(Vector3(1.0, 0.6, 1.0)), center))
+	leaves.generate_normals()
+	leaves.commit(mesh)
+	mesh.surface_set_material(1, _vine_leaf_material)
+	return mesh
 
 ## Sand/clay/dirt patch surfaces follow WorldGroundComposition's material rule
 ## (stylized PBR albedo/normal/roughness + realm tint) so the streamed world
@@ -1178,12 +1388,17 @@ func stall_context_report() -> Dictionary:
 
 func _batch_mm(chunk: Node3D, name: String, mesh: Mesh, material: Material,
 		transforms: Array[Transform3D], cast_shadows: bool) -> void:
+	_batch_mm_extent(chunk, name, mesh, material, transforms, cast_shadows,
+		AABB(Vector3(-4, -2, -4), Vector3(68, 14, 68)))
+
+func _batch_mm_extent(parent: Node3D, name: String, mesh: Mesh, material: Material,
+		transforms: Array[Transform3D], cast_shadows: bool, local_aabb: AABB) -> void:
 	if transforms.is_empty():
 		return
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = mesh
-	mm.custom_aabb = AABB(Vector3(-4, -2, -4), Vector3(68, 14, 68))
+	mm.custom_aabb = local_aabb
 	mm.instance_count = transforms.size()
 	for i in transforms.size():
 		mm.set_instance_transform(i, transforms[i])
@@ -1195,7 +1410,7 @@ func _batch_mm(chunk: Node3D, name: String, mesh: Mesh, material: Material,
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	else:
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	chunk.add_child(mmi)
+	parent.add_child(mmi)
 
 ## Scatter authoritative counts while honouring gameplay clearances. The target
 ## band is the authored chunk density; skipping a cleared candidate without a
@@ -1227,7 +1442,45 @@ func _build_trees(chunk: Node3D, min_world: Vector3, rng: RandomNumberGenerator)
 			var basis := Basis.from_euler(Vector3(0.0, rng.randf() * TAU, 0.0)).scaled(
 				Vector3(s, rng.randf_range(0.85, 1.15), s))
 			return Transform3D(basis, Vector3(local.x, _surface_height(world), local.y)))
-	_batch_mm(chunk, "StreamTrees", _tree_mesh, null, transforms, true)
+	# The band stays 7-11 trees per chunk; the split only changes which
+	# silhouettes make it up so the forest never reads as one clone.
+	var oaks: Array[Transform3D] = []
+	var aspens: Array[Transform3D] = []
+	var pines: Array[Transform3D] = []
+	for transform in transforms:
+		var roll := rng.randf()
+		if roll < 0.32:
+			aspens.append(_rescale_tree(transform, rng.randf_range(0.85, 1.08)))
+		elif roll < 0.56:
+			pines.append(_rescale_tree(transform, rng.randf_range(0.82, 1.06)))
+		else:
+			oaks.append(transform)
+	_batch_mm(chunk, "StreamTrees", _tree_mesh, null, oaks, true)
+	_batch_mm(chunk, "StreamTreesAspen", _tree_aspen_mesh, null, aspens, true)
+	_batch_mm(chunk, "StreamTreesPine", _tree_pine_mesh, null, pines, true)
+	_build_tree_vines(chunk, oaks, aspens, rng)
+
+func _rescale_tree(transform: Transform3D, scale: float) -> Transform3D:
+	return Transform3D(transform.basis.scaled(Vector3.ONE * scale), transform.origin)
+
+## Vines climb a share of the broadleaf trees. They hang from the trunk
+## canopy line, so they read as understory growth rather than floating props.
+func _build_tree_vines(chunk: Node3D, oaks: Array[Transform3D],
+		aspens: Array[Transform3D], rng: RandomNumberGenerator) -> void:
+	var vines: Array[Transform3D] = []
+	for group in [oaks, aspens]:
+		for tree in group:
+			if rng.randf() > TREE_VINE_CHANCE:
+				continue
+			var yaw := rng.randf() * TAU
+			var offset := Vector3(cos(yaw), 0.0, sin(yaw)) * 0.24
+			var scale := rng.randf_range(0.8, 1.25)
+			var basis := Basis.from_euler(
+				Vector3(0.0, yaw, rng.randf_range(-0.05, 0.05))).scaled(
+					Vector3.ONE * scale)
+			vines.append(Transform3D(basis,
+				tree.origin + offset + Vector3(0.0, rng.randf_range(1.5, 2.1), 0.0)))
+	_batch_mm(chunk, "StreamVines", _vine_mesh, null, vines, false)
 
 func _build_rocks_and_bushes(chunk: Node3D, min_world: Vector3,
 		rng: RandomNumberGenerator) -> void:
@@ -1248,7 +1501,15 @@ func _build_rocks_and_bushes(chunk: Node3D, min_world: Vector3,
 			var basis := Basis.from_euler(Vector3(0.0, rng.randf() * TAU, 0.0)).scaled(
 				Vector3(s, rng.randf_range(0.7, 1.3), s))
 			return Transform3D(basis, Vector3(local.x, _surface_height(world) + 0.02, local.y)))
-	_batch_mm(chunk, "StreamBushes", _bush_mesh, _bush_material, bush_transforms, true)
+	var leafy: Array[Transform3D] = []
+	var berry: Array[Transform3D] = []
+	for transform in bush_transforms:
+		if rng.randf() < 0.38:
+			berry.append(transform)
+		else:
+			leafy.append(transform)
+	_batch_mm(chunk, "StreamBushes", _bush_mesh, _bush_material, leafy, true)
+	_batch_mm(chunk, "StreamBushesBerry", _bush_mesh, _bush_berry_material, berry, true)
 
 func _build_deadwood(chunk: Node3D, min_world: Vector3,
 		rng: RandomNumberGenerator) -> void:
@@ -1301,6 +1562,17 @@ func _build_ruins(chunk: Node3D, min_world: Vector3, rng: RandomNumberGenerator)
 			rng.randf_range(-1.6, 1.6) * (wall_count - i))
 		wall.rotation.y = rng.randf() * TAU
 		group.add_child(wall)
+		if rng.randf() < 0.72:
+			var vine := MeshInstance3D.new()
+			vine.name = "RuinVine"
+			vine.mesh = _vine_mesh
+			var wall_yaw := wall.rotation.y
+			var spans := rng.randf_range(-box.size.x * 0.34, box.size.x * 0.34)
+			vine.position = wall.position + Basis(Vector3.UP, wall_yaw) \
+				* Vector3(spans, h * 0.5 + 0.04, 0.32)
+			vine.rotation.y = wall_yaw
+			vine.scale = Vector3.ONE * rng.randf_range(0.45, 0.72)
+			group.add_child(vine)
 	# Ruins sit directly on the streamed terrain.  A flat BoxMesh floor makes
 	# an isolated square patch at chunk distance and exposes the terrain tile
 	# boundary to the camera.
@@ -1385,6 +1657,190 @@ func _build_pond(chunk: Node3D, min_world: Vector3, rng: RandomNumberGenerator) 
 			_surface_height(stone_world) + 0.10 * stone_scale, stone_pos.y)
 		stone.scale = Vector3.ONE * stone_scale
 		group.add_child(stone)
+
+## ---- River: carved channel, water ribbon, bank stones and bridges ----
+func _build_river() -> void:
+	if _river_spec.is_empty():
+		return
+	var river := Node3D.new()
+	river.name = "WorldRiver"
+	add_child(river)
+	_build_river_ribbon(river)
+	_build_river_stones(river)
+	_build_river_bridges(river)
+
+## One world-extent ribbon following the meander. Sampling the shared
+## `center_x(z)` keeps the water continuous across streamed chunk borders.
+func _build_river_ribbon(parent: Node3D) -> void:
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var half := WATERWAYS.water_half_width(_river_spec)
+	var offset := WATERWAYS.water_offset(_river_spec)
+	var z := WATERWAYS.RIVER_MIN_Z
+	var previous := _river_edges(z, half, offset)
+	while z + RIVER_SAMPLE_STEP <= WATERWAYS.RIVER_MAX_Z:
+		z += RIVER_SAMPLE_STEP
+		var current := _river_edges(z, half, offset)
+		surface.add_vertex(previous[0])
+		surface.add_vertex(current[0])
+		surface.add_vertex(current[1])
+		surface.add_vertex(previous[0])
+		surface.add_vertex(current[1])
+		surface.add_vertex(previous[1])
+		previous = current
+	surface.generate_normals()
+	var instance := MeshInstance3D.new()
+	instance.name = "RiverWater"
+	instance.mesh = surface.commit()
+	instance.material_override = _river_water_material()
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	instance.visibility_range_end = _effective_world_radius() + 60.0
+	instance.visibility_range_end_margin = 20.0
+	parent.add_child(instance)
+
+## Left/right water-edge points at a centerline sample. The offsets are
+## lateral (matching the lateral carve band) so the sheet always fits inside
+## its own channel even through a steep meander, and both edges are clamped
+## just below the lower bank so a cross-slope cannot push water onto dry land.
+func _river_edges(z: float, half: float, offset: float) -> Array[Vector3]:
+	var cx := WATERWAYS.center_x(_river_spec, z)
+	var water_y := _surface_height(Vector2(cx, z)) + offset
+	var left := Vector3(cx - half, 0.0, z)
+	var right := Vector3(cx + half, 0.0, z)
+	water_y = minf(water_y, minf(_surface_height(Vector2(left.x, left.z)),
+		_surface_height(Vector2(right.x, right.z))) + 0.02)
+	left.y = water_y
+	right.y = water_y
+	return [left, right]
+
+func _river_water_material() -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	var tint := WATERWAYS.water_tint(_realm_id)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.albedo_color = tint
+	material.metallic = 0.18
+	material.roughness = 0.14
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	if _realm_id == "moonfen" or _realm_id == "mistfen":
+		material.emission_enabled = true
+		material.emission = tint.lightened(0.30)
+		material.emission_energy_multiplier = 0.16
+	return material
+
+## Riverbank stones: one capped MultiMesh across the whole waterway so the
+## banks read as worked ground instead of a bare shader seam.
+func _build_river_stones(parent: Node3D) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = WORLD_SEED ^ hash(_realm_id + ":river_stones")
+	var half := WATERWAYS.water_half_width(_river_spec)
+	var transforms: Array[Transform3D] = []
+	var z := WATERWAYS.RIVER_MIN_Z * 0.55
+	while z <= WATERWAYS.RIVER_MAX_Z * 0.55 and transforms.size() < RIVER_STONE_MAX:
+		z += rng.randf_range(5.0, 9.0)
+		for side: float in [-1.0, 1.0]:
+			if rng.randf() > 0.62:
+				continue
+			var cx := WATERWAYS.center_x(_river_spec, z)
+			var x := cx + side * (half + rng.randf_range(0.2, 2.6))
+			var scale := rng.randf_range(0.35, 1.05)
+			var basis := Basis.from_euler(Vector3(rng.randf_range(-0.25, 0.25),
+				rng.randf() * TAU, rng.randf_range(-0.25, 0.25))).scaled(
+					Vector3(scale, scale * rng.randf_range(0.45, 0.8), scale))
+			transforms.append(Transform3D(basis,
+				Vector3(x, _surface_height(Vector2(x, z)) + 0.06 * scale, z)))
+	var span := float(_river_spec.get("meander", 0.0)) * 1.45 + half + 8.0
+	var base_x := float(_river_spec.get("base_x", 0.0))
+	var extent := AABB(
+		Vector3(base_x - span, -10.0, WATERWAYS.RIVER_MIN_Z - 16.0),
+		Vector3(span * 2.0, 28.0,
+			WATERWAYS.RIVER_MAX_Z - WATERWAYS.RIVER_MIN_Z + 32.0))
+	_batch_mm_extent(parent, "RiverStones", _rock_mesh, _rock_material, transforms,
+		true, extent)
+
+func _build_river_bridges(parent: Node3D) -> void:
+	var labels := WATERWAYS.bridge_labels(_realm_id)
+	var crossings := WATERWAYS.bridge_crossings(_realm_id)
+	for i in crossings.size():
+		_build_bridge(parent, crossings[i],
+			labels[i] if i < labels.size() else "CROSSING")
+
+## A sloped plank deck keyed to the bank heights at both ends, with rails and
+## posts. The deck top meets the ground at both ends (+5 cm) so the player
+## walks on without a step, and one collision body mirrors the visual exactly.
+func _build_bridge(parent: Node3D, center: Vector2, label: String) -> void:
+	var half := float(_river_spec.get("width", 5.0)) * 0.5 \
+		+ float(_river_spec.get("bank", 3.0))
+	var reach := half + 2.4
+	var x0 := center.x - reach
+	var x1 := center.x + reach
+	var y0 := _surface_height(Vector2(x0, center.y))
+	var y1 := _surface_height(Vector2(x1, center.y))
+	var length := x1 - x0
+	var theta := atan2(y1 - y0, length)
+	var basis := Basis(Vector3(0, 0, 1), theta)
+	var thickness := 0.22
+	var mid := Vector3((x0 + x1) * 0.5,
+		(y0 + y1) * 0.5 + 0.05 - thickness * 0.5 * cos(theta), center.y)
+	var body := StaticBody3D.new()
+	body.name = "RiverBridge"
+	body.collision_layer = 32
+	body.collision_mask = 0
+	body.set_meta("bridge_label", label)
+	parent.add_child(body)
+	var deck := MeshInstance3D.new()
+	deck.name = "BridgeDeck"
+	var deck_mesh := BoxMesh.new()
+	deck_mesh.size = Vector3(length, thickness, 3.0)
+	deck.mesh = deck_mesh
+	deck.material_override = _deadwood_material
+	deck.transform = Transform3D(basis, mid)
+	body.add_child(deck)
+	var deck_shape := CollisionShape3D.new()
+	var deck_box := BoxShape3D.new()
+	deck_box.size = deck_mesh.size
+	deck_shape.shape = deck_box
+	deck_shape.transform = deck.transform
+	body.add_child(deck_shape)
+	for side: float in [-1.0, 1.0]:
+		var rail := MeshInstance3D.new()
+		rail.name = "BridgeRail"
+		var rail_mesh := BoxMesh.new()
+		rail_mesh.size = Vector3(length, 0.1, 0.1)
+		rail.mesh = rail_mesh
+		rail.material_override = _deadwood_material
+		rail.transform = Transform3D(basis, mid + basis * Vector3(0.0,
+			thickness * 0.5 + 0.62, side * 1.36))
+		body.add_child(rail)
+		var rail_shape := CollisionShape3D.new()
+		var rail_box := BoxShape3D.new()
+		rail_box.size = rail_mesh.size
+		rail_shape.shape = rail_box
+		rail_shape.transform = rail.transform
+		body.add_child(rail_shape)
+	for x_side: float in [-1.0, 1.0]:
+		for z_side: float in [-1.0, 1.0]:
+			var local := Vector3(x_side * (length * 0.5 - 0.9),
+				-thickness * 0.5, z_side * 1.25)
+			var post_top := mid + basis * local
+			var ground := _surface_height(Vector2(post_top.x, post_top.z))
+			var post_height := maxf(post_top.y - ground + 0.3, 0.4)
+			var post := MeshInstance3D.new()
+			post.name = "BridgePost"
+			var post_mesh := CylinderMesh.new()
+			post_mesh.top_radius = 0.09
+			post_mesh.bottom_radius = 0.12
+			post_mesh.height = post_height
+			post_mesh.radial_segments = 6
+			post.mesh = post_mesh
+			post.material_override = _stone_material
+			post.position = Vector3(post_top.x, ground + post_height * 0.5, post_top.z)
+			body.add_child(post)
+	body.set_meta("bridge_span", length)
+	body.set_meta("bridge_water_line", _river_waterline_y(center.x, center.y))
+
+func _river_waterline_y(x: float, z: float) -> float:
+	return _surface_height(Vector2(WATERWAYS.center_x(_river_spec, z), z)) \
+		+ WATERWAYS.water_offset(_river_spec)
 
 ## ---- Public contract for tests ----
 func is_active() -> bool:

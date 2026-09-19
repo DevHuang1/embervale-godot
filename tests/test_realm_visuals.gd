@@ -127,6 +127,43 @@ func _run() -> void:
 				print("FAIL: %s sampler %s not bound to stylized master (%s)"
 					% [realm, sampler, t.resource_path])
 
+		# Material zones + waterline beaches: the runtime material must bind the
+		# river twin and one pond slot per authored basin, or the ground reads
+		# as a flat grass wash (the regression this contract guards).
+		if int(float(terrain.get_shader_parameter("river_enabled"))) != 1:
+			failures += 1
+			print("FAIL: %s terrain has no river shoreline binding" % realm)
+		else:
+			var river_spec := WorldWaterways.river_for(realm)
+			if not is_equal_approx(float(terrain.get_shader_parameter("river_wavelen")),
+					maxf(float(river_spec.get("wavelen", 120.0)), 1.0)):
+				failures += 1
+				print("FAIL: %s river wavelength does not match WorldWaterways" % realm)
+			if not is_equal_approx(float(terrain.get_shader_parameter("river_half_width")),
+					WorldWaterways.water_half_width(river_spec)):
+				failures += 1
+				print("FAIL: %s river beach does not start at the water plane edge" % realm)
+		var pond_specs := WorldGroundComposition.pond_specs(realm)
+		for pond_index in 3:
+			var slot_name: String = ["pond_a", "pond_b", "pond_c"][pond_index]
+			var slot_value := terrain.get_shader_parameter(slot_name) as Vector4
+			if slot_value == null:
+				failures += 1
+				print("FAIL: %s missing %s shoreline binding" % [realm, slot_name])
+				continue
+			if pond_index >= pond_specs.size():
+				if not is_zero_approx(slot_value.w):
+					failures += 1
+					print("FAIL: %s %s should be disabled" % [realm, slot_name])
+				continue
+			var pond: Dictionary = pond_specs[pond_index]
+			var pond_center: Vector2 = pond.get("center", Vector2.ZERO)
+			if slot_value.w < 0.5 or not is_equal_approx(slot_value.x, pond_center.x) \
+					or not is_equal_approx(slot_value.y, pond_center.y) \
+					or not is_equal_approx(slot_value.z, float(pond.get("radius", 3.0))):
+				failures += 1
+				print("FAIL: %s %s does not match its authored pond" % [realm, slot_name])
+
 		# Mobile/compatibility renderers must receive one index-safe continuous
 		# surface; exceeding 65,535 vertices produced rectangular ground strips.
 		for terrain_node in scene.find_children("TerrainMesh", "MeshInstance3D", true, false):
@@ -153,6 +190,21 @@ func _run() -> void:
 				if not gathering.is_in_group("interactable"):
 					failures += 1
 					print("FAIL: %s gathering node is not interactable" % realm)
+
+		# Every realm owns a carved river with a bridge and bank dressing, and
+		# gather stops beyond the original four material types.
+		if scene.find_child("RiverWater", true, false) == null \
+				or scene.find_child("RiverBridge", true, false) == null \
+				or scene.find_child("RiverStones", true, false) == null:
+			failures += 1
+			print("FAIL: %s river, bridge or bank dressing missing" % realm)
+		var distinct_materials := {}
+		for gathering in gathering_nodes:
+			distinct_materials[str((gathering as GatheringNode).material_id)] = true
+		if distinct_materials.size() < 5:
+			failures += 1
+			print("FAIL: %s exposes fewer than five material types (%d)" \
+				% [realm, distinct_materials.size()])
 
 		# Continuous grass contract: one dense MultiMesh carpet covers the playable
 		# route even on the boot-time Low tier. Paths and boss arenas stay clear.

@@ -52,7 +52,6 @@ var _practice_altar: Node3D = null
 var _post_boss_root: Node3D = null
 var _camp_shortcut_marker: Label3D = null
 
-var _relic_trophy: Node3D = null
 var _realm_expansion: RealmExpansion = null
 var _castle_landmark: CastleLandmark = null
 var _realm_audio_beds: RealmAudioBeds = null
@@ -108,11 +107,6 @@ func _ready() -> void:
 	game_state.stage_changed.connect(_on_stage_changed)
 	game_state.defeated.connect(_on_player_defeated)
 	game_state.victory.connect(_on_player_victory)
-	
-	# Photo-forged relics get a rotating trophy by the quest board.
-	ScanManager.relic_forged.connect(_spawn_relic_trophy)
-	if ScanManager.last_relic != null:
-		_spawn_relic_trophy(ScanManager.last_relic)
 	_refresh_camp_shortcut_marker()
 	refresh_route_markers()
 
@@ -468,42 +462,6 @@ func _clear_pack() -> void:
 			e.queue_free()
 	_pack.clear()
 
-# === Relic trophy: the captured object, spinning above its pedestal ===
-func _spawn_relic_trophy(relic) -> void:
-	if relic_pedestal == null or relic == null or relic.mesh == null:
-		return
-	if _relic_trophy != null and is_instance_valid(_relic_trophy):
-		_relic_trophy.queue_free()
-	_relic_trophy = Node3D.new()
-	var mi := MeshInstance3D.new()
-	mi.mesh = relic.mesh
-	_relic_trophy.add_child(mi)
-	# Elemental relics tint their pedestal light and shed matching motes
-	var element := str(relic.get("element") if relic is Dictionary \
-		else relic.element)
-	var glow_color: Color = ImpactDirector.ELEMENT_COLORS.get(element,
-		Color(1.0, 0.72, 0.29))
-	var glow := OmniLight3D.new()
-	glow.light_color = glow_color
-	glow.light_energy = 0.9
-	glow.omni_range = 3.5
-	glow.omni_attenuation = 1.6
-	_relic_trophy.add_child(glow)
-	add_child(_relic_trophy)
-	_relic_trophy.global_position = relic_pedestal.global_position + Vector3(0, 1.15, 0)
-	if element != "":
-		CombatFx.spawn_motes(self,
-			relic_pedestal.global_position + Vector3(0, 1.2, 0),
-			Color(glow_color.r, glow_color.g, glow_color.b, 0.7),
-			12, 0.5, 1.2, 1.4)
-	set_process(true)
-
-func _process(delta: float) -> void:
-	if _relic_trophy != null and is_instance_valid(_relic_trophy):
-		_relic_trophy.rotate_y(delta * 0.7)
-	else:
-		set_process(false)
-
 # === Particle sprite fix: square quads get a runtime radial-gradient glow ===
 func _soften_particle_sprites() -> void:
 	for node_path in ["Fireflies", "MistParticles"]:
@@ -687,9 +645,6 @@ func _disconnect_persistent_signals() -> void:
 			if game_state.has_signal(signal_name) \
 					and game_state.is_connected(signal_name, callable):
 				game_state.disconnect(signal_name, callable)
-	if ScanManager != null and is_instance_valid(ScanManager) \
-			and ScanManager.relic_forged.is_connected(_spawn_relic_trophy):
-		ScanManager.relic_forged.disconnect(_spawn_relic_trophy)
 
 ## === Boss gate: "Shape Your Foe" before the Matriarch wakes ===
 ## Players with scans may spend one to personalize her; everyone else —

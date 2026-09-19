@@ -31,6 +31,23 @@ func _run() -> void:
 		await create_timer(0.9).timeout
 		if bool(camera.get("_cinematic")):
 			_fail("Focus moment did not auto-release after its bounded duration")
+		# A look press during a focus beat hands control back immediately: an
+		# intro camera must never stay deaf to the player who grabs the view.
+		camera.play_focus_moment(focus, Vector3(0.0, 4.0, 6.0), Vector3.UP, 2.0)
+		var look_touch := InputEventScreenTouch.new()
+		look_touch.index = 5
+		look_touch.position = Vector2(900.0, 900.0)
+		look_touch.pressed = true
+		root.push_input(look_touch)
+		await process_frame
+		if bool(camera.get("_cinematic")):
+			_fail("Player look press did not release the focus moment")
+		var look_release := InputEventScreenTouch.new()
+		look_release.index = 5
+		look_release.position = Vector2(900.0, 900.0)
+		look_release.pressed = false
+		root.push_input(look_release)
+		await process_frame
 		focus.queue_free()
 	grove.queue_free()
 	await process_frame

@@ -62,6 +62,31 @@ uniform float tex_gain : hint_range(0.5, 2.5) = 1.0;
 uniform float tex_saturation : hint_range(0.0, 1.5) = 1.0;
 // Sandy dry patches on flat open ground
 uniform float sand_amount : hint_range(0.0, 1.0) = 0.34;
+uniform vec3 sand_color : source_color = vec3(0.70, 0.58, 0.36);
+
+// --- Surface regions (Minecraft-style material zones) ---
+// Low-frequency fields carve whole sand / dirt areas with feathered borders
+// so the ground reads as distinct terrain types instead of one grass wash.
+uniform float region_scale : hint_range(0.001, 0.05) = 0.0075;
+uniform float region_edge : hint_range(0.02, 0.4) = 0.13;
+
+// --- Shoreline beaches (river + pond waterlines) ---
+// Twins of WorldWaterways' centerline so the sand band hugs the carved
+// channel. Bound per realm by TerrainRelief; disabled by default.
+uniform float river_enabled = 0.0;
+uniform float river_base_x = 0.0;
+uniform float river_meander = 0.0;
+uniform float river_wavelen = 120.0;
+uniform float river_phase = 0.0;
+uniform float river_detail = 0.25;
+// Water-plane half width bound from WorldWaterways; sand is complete across
+// the water and fades to grass over `river_beach` metres beyond it.
+uniform float river_half_width = 6.6;
+uniform float river_beach : hint_range(0.0, 12.0) = 2.6;
+// xy = pond center, z = basin radius, w = enabled
+uniform vec4 pond_a = vec4(0.0, 0.0, 0.0, 0.0);
+uniform vec4 pond_b = vec4(0.0, 0.0, 0.0, 0.0);
+uniform vec4 pond_c = vec4(0.0, 0.0, 0.0, 0.0);
 
 // --- Height-weighted blending (UE landscape heightlerp feel) ---
 uniform float height_contrast : hint_range(0.0, 6.0) = 2.4;
@@ -285,6 +310,39 @@ float surf_height(vec2 p) {
 	return h;
 }
 
+// Pond beach ring: 1 inside the basin, fading across the bank into grass.
+float pond_beach(vec4 pond, vec2 wp) {
+	if (pond.w < 0.5) {
+		return 0.0;
+	}
+	float d = length(wp - pond.xy) / max(pond.z, 0.001);
+	return 1.0 - smoothstep(0.82, 1.5, d);
+}
+
+// River centerline twin of WorldWaterways.center_x, so the beach band hugs
+// the exact carved channel without an extra sampler or vertex attribute.
+float river_center_x(float z) {
+	float wavelen = max(river_wavelen, 1.0);
+	float primary = sin(z / wavelen * TAU + river_phase);
+	float secondary = sin(z / (wavelen * 0.37) * TAU + river_phase * 1.7);
+	return river_base_x + river_meander * primary
+		+ river_meander * river_detail * secondary;
+}
+
+// Complete sand at every waterline, fading up the bank toward grass.
+float shoreline_sand(vec2 wp) {
+	float beach = 0.0;
+	if (river_enabled > 0.5) {
+		float d = abs(wp.x - river_center_x(wp.y));
+		beach = 1.0 - smoothstep(river_half_width + 0.2,
+			river_half_width + river_beach, d);
+	}
+	beach = max(beach, pond_beach(pond_a, wp));
+	beach = max(beach, pond_beach(pond_b, wp));
+	beach = max(beach, pond_beach(pond_c, wp));
+	return beach;
+}
+
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
@@ -308,10 +366,26 @@ void fragment() {
 		fbm(wp * patch_scale * 0.22 + macro * 2.0));
 	float dryness = fbm(wp * patch_scale * 0.13 + vec2(51.2, 17.4));
 	float flatness = smoothstep(0.28, 0.05, slope);
+	// --- Surface regions (Minecraft-style material zones) ---
+	// Low-frequency fields carve whole sand / dirt areas with feathered
+	// borders, so the ground reads as distinct terrain types instead of a
+	// uniform grass wash speckled with sub-metre noise.
+	float edge = max(region_edge, 0.02);
+	float sand_field = fbm(wp * region_scale + vec2(11.3, 37.9));
+	float dirt_field = fbm(wp * region_scale * 0.83 + vec2(83.1, 19.7));
+	float sand_cut = 0.70 - sand_amount * 0.55;
+	float dirt_cut = 0.78 - dirt_amount * 0.42;
+	float sand_region = smoothstep(sand_cut, sand_cut + edge, sand_field);
+	float dirt_region = smoothstep(dirt_cut, dirt_cut + edge, dirt_field);
+	// Shoreline beach: complete sand at the river and pond waterlines.
+	float beach = shoreline_sand(wp);
 	// Make secondary surfaces readable at gameplay distance. The old narrow
 	// threshold produced tiny sand islands that disappeared under lighting.
-	float sand_mask = sand_amount * flatness * 1.65
-		* smoothstep(0.28, 0.58, dryness) * (1.0 - patches * 0.72);
+	// Region cores own the zone; the fine patch noise only adds edge breakup.
+	float sand_patch = sand_amount * flatness * 1.65
+		* smoothstep(0.28, 0.58, dryness) * (1.0 - dirt_region * 0.72) * 0.45;
+	float sand_mask = clamp(max(max(sand_region, sand_patch), beach), 0.0, 1.0);
+	float dirt_mask = clamp(max(dirt_region, patches * 0.22), 0.0, 1.0);
 	float rock_mask = smoothstep(slope_start - 0.07, slope_end + 0.05, slope);
 	float crest = smoothstep(1.4, 2.6, world_pos.y);
 	float wr = max(rock_mask, crest * (1.0 - patches));
@@ -321,9 +395,9 @@ void fragment() {
 	// --- Base weights -> height-modulated weights (UE heightlerp) ---
 	// Partition the base layers before height blending. Keeping grass fixed at
 	// 1.0 made every other surface a weak tint laid over a nearly solid field.
-	float wg = max(0.035, (1.0 - patches) * (1.0 - sand_mask) * (1.0 - wr));
-	float wd = patches * (1.0 - wr) * 1.75;
-	float ws = sand_mask * (1.0 - wr) * 1.15;
+	float wg = max(0.02, (1.0 - dirt_mask) * (1.0 - sand_mask) * (1.0 - wr));
+	float wd = dirt_mask * (1.0 - sand_mask * 0.85) * (1.0 - wr) * 1.75;
+	float ws = sand_mask * (1.0 - wr) * 1.6;
 	float wrr = wr * 1.45;
 	vec2 uvg = layer_uv(uv, 0);
 	vec2 uvd = layer_uv(uv, 1);
@@ -402,17 +476,18 @@ void fragment() {
 	float authored_mix = clamp(tex_blend, 0.0, 1.0);
 	vec3 col = wg * mix(grass_tint, gc, authored_mix);
 	col += wd * mix(dirt_tint_of(wp), dc, authored_mix);
-	col = mix(col, grade_texture(mudc) * dirt_color * 2.0, clamp(patches * 0.42, 0.0, 0.48));
-	col += ws * mix(mix(grass_dry, vec3(0.62, 0.55, 0.40), 0.45),
-		sc, authored_mix);
-	col += wrr * mix(stone_color, rc, authored_mix);
+	// Mud accent rides inside the dirt zone instead of speckling the whole map.
+	col = mix(col, grade_texture(mudc) * dirt_color * 2.0,
+		clamp(patches * dirt_mask * 0.30, 0.0, 0.42));
+	col += ws * mix(sand_color, sc, authored_mix);
+	col += wrr * mix(mix(stone_color, crest_color, crest), rc, authored_mix);
 
 	// Pebble speckle
 	vec2 cell = floor(wp * tile_scale * 14.0);
 	vec2 fcell = fract(wp * tile_scale * 14.0) - 0.5;
 	float pebble = step(0.94, hash21(cell)) * (1.0 - smoothstep(0.16, 0.46, length(fcell)));
 	col = mix(col, stone_color * 1.22,
-		pebble * speckle_strength * 0.8 * (1.0 - wr));
+		pebble * speckle_strength * 0.8 * (1.0 - wr) * (1.0 - sand_mask * 0.6));
 
 	// Macro colour variation (v4): sweep tint across biome-scale regions
 	float macro_var = fbm(wp * macro_variation_scale + vec2(17.3, 41.9));
@@ -426,13 +501,14 @@ void fragment() {
 	vec3 vein_tint = mix(grass_tint * 0.88, dirt_color * 1.06,
 		clamp(patches + sand_mask * 0.35, 0.0, 1.0));
 	col = mix(col, col * 0.78 + vein_tint * 0.22,
-		soil_vein * macro_breakup_strength * (1.0 - wr) * 0.36);
+		soil_vein * macro_breakup_strength * (1.0 - wr) * 0.36
+			* (1.0 - sand_mask * 0.85));
 	// Exposed earth islands provide a readable large-scale material change;
 	// their feathered noise edge avoids painted circles or hard tile borders.
 	float earth_field = fbm(wp * 0.052 + vec2(26.4, 83.1));
 	earth_field = earth_field * 0.68 + vein_b * 0.32;
 	float exposed_earth = smoothstep(0.54, 0.69, earth_field)
-		* dirt_amount * flatness * (1.0 - wr);
+		* dirt_amount * flatness * (1.0 - wr) * (1.0 - sand_mask * 0.9);
 	vec3 earth_col = mix(dirt_tint_of(wp), dc, authored_mix);
 	col = mix(col, earth_col, exposed_earth * 0.72);
 
@@ -441,13 +517,15 @@ void fragment() {
 	float moisture_mask = smoothstep(0.34, 0.70, moisture_field);
 	vec3 tint_mix = mix(vec3(1.0), realm_tint, realm_tint_strength);
 	col *= tint_mix;
-	// A restrained local-contrast lift keeps grass, soil, and sand grain
-	// readable under fog/ambient lighting without changing their base hue.
-	vec3 texture_lift = mix(vec3(1.0), smoothstep(vec3(0.16), vec3(0.86),
-		col) * 1.12, clamp(tex_blend, 0.0, 1.0));
-	col *= texture_lift;
+	// A luminance-only contrast lift keeps grass, soil, and sand grain readable
+	// under fog/ambient without shifting hue. The former per-channel curve
+	// crushed dark grass to black and turned sand orange/red.
+	float col_lum = lum(col);
+	float contrast_lift = mix(0.88, 1.18, smoothstep(0.10, 0.72, col_lum));
+	col *= mix(1.0, contrast_lift, clamp(tex_blend, 0.0, 1.0));
 	float moss_mask = moss_strength * mix(0.48, 1.0, moisture_strength)
-		* moisture_mask * (1.0 - wr) * flatness;
+		* moisture_mask * (1.0 - wr) * flatness
+		* (1.0 - sand_mask) * (1.0 - dirt_mask * 0.35);
 	// Preserve some grass texture inside the moss rather than replacing it with
 	// a flat green swatch; this gives moss visible organic breakup on mobile.
 	vec3 moss_surface = mix(moss_color, grade_texture(mc) * moss_color * 1.65, 0.58)

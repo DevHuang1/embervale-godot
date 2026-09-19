@@ -34,6 +34,11 @@ const MATERIAL_DEFS := {
 	"spore_dust": { "name": "Spore Dust", "realm": "mistfen", "rarity": 0 },
 	"crystal_fragment": { "name": "Crystal Fragment", "realm": "moonfen", "rarity": 2 },
 	"monster_core": { "name": "Monster Core", "realm": "heartwood", "rarity": 2 },
+	"river_clay": { "name": "River Clay", "realm": "bramblewood", "rarity": 0 },
+	"wild_berry": { "name": "Wild Berry", "realm": "bramblewood", "rarity": 0 },
+	"mire_blossom": { "name": "Mire Blossom", "realm": "mistfen", "rarity": 0 },
+	"cinder_bark": { "name": "Cinder Bark", "realm": "heartwood", "rarity": 1 },
+	"star_shell": { "name": "Star Shell", "realm": "moonfen", "rarity": 1 },
 	"camp_ember": { "name": "Camp Ember", "realm": "camp", "rarity": 2 },
 }
 
@@ -82,6 +87,11 @@ func _make_consumable(item_id: String) -> Dictionary:
 var raw_materials: Dictionary = {}
 var gathered_nodes: Dictionary = {}
 var discovered_landmarks: Dictionary = {}
+## First-encounter codex records already introduced this save (`mob:<kind>` /
+## `structure:<instance>`). Additive: legacy saves start empty and the cap
+## bounds save size from a runaway trigger.
+const DISCOVERY_RECORD_CAP := 256
+var discovered_records: Dictionary = {}
 ## Per-realm explored mini-map cells for the discovery layer. Additive: legacy
 ## saves start with an empty map, malformed payloads are dropped, and the cap
 ## bounds both the save size and the minimap's lookup cost. Cells are 12 m
@@ -777,6 +787,7 @@ func reset() -> void:
 	raw_materials = {}
 	gathered_nodes = {}
 	discovered_landmarks = {}
+	discovered_records = {}
 	explored_cells = {}
 	world_activity_state = _empty_world_activity_state()
 	quest_objectives = []
@@ -826,6 +837,10 @@ func reset() -> void:
 	var sm := get_node_or_null("/root/StoryManager")
 	if sm != null and sm.has_method("reset_payload"):
 		sm.reset_payload()
+
+	# A fresh route shows its chapter goals from the first frame; the seeded
+	# entries are cheap to rebuild and never persist during a reset.
+	_seed_stage_objectives(current_stage)
 	
 	hp_changed.emit(0, hp)
 	xp_changed.emit(xp, level)
@@ -1011,19 +1026,21 @@ func get_quest_copy(stage: QuestStage) -> Dictionary:
 	if stage == QuestStage.COMPLETE: return {"chapter": "IV. A Path Relit", "title": "The Grove Remembers", "instruction": "The old road will hold its warmth until the next traveler comes through.", "why": "Prepare a stronger build for future realms.", "risk": "Future expeditions add elemental pressure.", "reward": "Moonfen access and long-term mastery.", "next_action": "Open the expedition journal."}
 	return {"chapter": "", "title": "", "instruction": ""}
 
-func _seed_stage_objectives(stage: QuestStage) -> void:
+## Idempotent: existing ids keep their progress, so this can run on every
+## fresh reset and on load to heal saves written before chapter seeding.
+func _seed_stage_objectives(stage: QuestStage, persist: bool = false) -> void:
 	match stage:
 		QuestStage.SEEK_SPRITE:
-			add_objective("chapter1_hushling", "Defeat the Hushling", "kill", 1)
-			add_objective("chapter1_gather", "Gather Bramblewood", "gather", 2)
+			add_objective("chapter1_hushling", "Defeat the Hushling", "kill", 1, persist)
+			add_objective("chapter1_gather", "Gather Bramblewood", "gather", 2, persist)
 		QuestStage.CLAIM_SHARD:
-			add_objective("chapter2_gather", "Gather an Ember Shard", "gather", 1)
-			add_objective("chapter2_craft", "Craft your first upgrade", "craft", 1)
+			add_objective("chapter2_gather", "Gather an Ember Shard", "gather", 1, persist)
+			add_objective("chapter2_craft", "Craft your first upgrade", "craft", 1, persist)
 		QuestStage.LIGHT_BEACON:
-			add_objective("chapter3_beacon", "Light the old beacon", "reach", 1)
-			add_objective("chapter3_elite", "Defeat the expedition elite", "kill", 1)
+			add_objective("chapter3_beacon", "Light the old beacon", "reach", 1, persist)
+			add_objective("chapter3_elite", "Defeat the expedition elite", "kill", 1, persist)
 		QuestStage.COMPLETE:
-			add_objective("chapter4_expedition", "Prepare for the next expedition", "upgrade", 1)
+			add_objective("chapter4_expedition", "Prepare for the next expedition", "upgrade", 1, persist)
 
 # === Quest Objectives ===
 var quest_objectives: Array[Dictionary] = []
@@ -1031,7 +1048,8 @@ var pinned_objective_id: String = ""
 var completed_quizzes: Dictionary = {}
 const OBJECTIVE_TYPES := ["kill", "gather", "reach", "craft", "equip", "upgrade", "open_chest"]
 
-func add_objective(id: String, description: String, type: String = "kill", target_qty: int = 1) -> void:
+func add_objective(id: String, description: String, type: String = "kill",
+		target_qty: int = 1, persist: bool = true) -> void:
 	if id.is_empty() or type not in OBJECTIVE_TYPES:
 		return
 	for obj in quest_objectives:
@@ -1042,7 +1060,8 @@ func add_objective(id: String, description: String, type: String = "kill", targe
 		"target_qty": target_qty, "current_qty": 0, "completed": false
 	})
 	inventory_changed.emit()
-	save_game()
+	if persist:
+		save_game()
 
 func update_objective(type: String, item_id: String = "", qty: int = 1,
 		persist: bool = true) -> void:
@@ -1190,10 +1209,11 @@ var onboarding_step: int = 0
 const ONBOARDING_STEPS := [
 	{"id": "move", "hint": "Follow the pale path through the welcome arch", "trigger": "movement", "signal": "landmark", "blocking": false},
 	{"id": "attack", "hint": "The Hushling stirs. Tap it or press Attack to mark and strike", "trigger": "combat", "signal": "enemy_reveal", "blocking": false},
+	{"id": "analyze", "hint": "Analyze the marked foe with the lens — insight unlocks forge blueprints", "trigger": "analyze", "signal": "lens_reveal", "blocking": false},
 	{"id": "dodge", "hint": "Read the red telegraph, then use Dodge as it closes", "trigger": "dodge", "signal": "telegraph", "blocking": false},
 	{"id": "pickup", "hint": "Claim the warm reward left by the defeated foe", "trigger": "loot", "signal": "reward_drop", "blocking": false},
 	{"id": "gather", "hint": "Hold at the glowing resource node until the ritual completes", "trigger": "gather", "signal": "gather_node", "blocking": false},
-	{"id": "craft", "hint": "The forge is ready. Compare the preview and craft your first upgrade", "trigger": "craft", "signal": "forge_preview", "blocking": false},
+	{"id": "craft", "hint": "The forge is ready. Pick an unlocked blueprint and forge your first weapon", "trigger": "craft", "signal": "forge_preview", "blocking": false},
 ]
 
 func get_onboarding_hint() -> String:
@@ -2343,6 +2363,33 @@ func has_material(material_id: String, qty: int = 1) -> bool:
 func get_material_qty(material_id: String) -> int:
 	return int(raw_materials.get(material_id, 0))
 
+## First-encounter codex gate: returns true exactly once per record id, so the
+## discovery director can ask before presenting an introduction.
+func discover_record(record_id: String) -> bool:
+	var id := record_id.strip_edges()
+	if id.is_empty() or discovered_records.has(id):
+		return false
+	discovered_records[id] = true
+	while discovered_records.size() > DISCOVERY_RECORD_CAP:
+		discovered_records.erase(discovered_records.keys()[0])
+	return true
+
+func has_discovered_record(record_id: String) -> bool:
+	return discovered_records.has(record_id.strip_edges())
+
+## Malformed or legacy payloads degrade to an empty set instead of blocking
+## progress; only literal `true` entries survive and the cap still applies.
+func _normalize_discovered_records(saved) -> Dictionary:
+	if not saved is Dictionary:
+		return {}
+	var result := {}
+	for key in saved:
+		if bool(saved[key]):
+			result[str(key)] = true
+			if result.size() >= DISCOVERY_RECORD_CAP:
+				break
+	return result
+
 ## Persist gathering depletion by stable realm/node id. World nodes must use
 ## this dictionary instead of attempting to create dynamic GameState fields.
 func set_gathered_node_state(node_id: String, state: Dictionary) -> void:
@@ -2503,6 +2550,25 @@ func add_weapon(weapon: Dictionary, equip: bool = false, notice: String = "") ->
 		loot_received.emit(loot_notice, loot_count)
 	save_game()
 
+const LEGACY_WEAPON_NAMES := {
+	"MUG MACE": "CINDER MAUL",
+	"POCKET BLADE": "SHARD DAGGER",
+	"SNIP TWINS": "TWIN FANGS",
+	"SODA CANNON": "FEN SCEPTER",
+	"SLAB HAMMER": "ASHFALL MAUL",
+}
+
+## Old saves stored the camera-era display names for the base kits. Only
+## canonical defs are rewritten, so player-named relics keep whatever they
+## were called, even if that happens to match a legacy string.
+func _migrate_legacy_weapon_name(record: Dictionary) -> Dictionary:
+	if not WEAPON_DEFS.has(str(record.get("id", ""))):
+		return record
+	var replacement := str(LEGACY_WEAPON_NAMES.get(str(record.get("name", "")), ""))
+	if not replacement.is_empty():
+		record["name"] = replacement
+	return record
+
 func _normalize_weapon_record(raw_weapon: Dictionary) -> Dictionary:
 	var normalized := raw_weapon.duplicate(true)
 	var weapon_id := str(normalized.get("id", ""))
@@ -2511,6 +2577,7 @@ func _normalize_weapon_record(raw_weapon: Dictionary) -> Dictionary:
 		for key in canonical:
 			if not normalized.has(key):
 				normalized[key] = canonical[key].duplicate(true) if canonical[key] is Array or canonical[key] is Dictionary else canonical[key]
+		_migrate_legacy_weapon_name(normalized)
 	if normalized.has("skill") and not normalized.has("skills"):
 		normalized["skills"] = [normalized["skill"]]
 	normalized.erase("skill")
@@ -2843,6 +2910,25 @@ func unlocked_blueprint_ids() -> Array[String]:
 			ids.append(id)
 	return ids
 
+## Progress line for the first locked blueprint of a foe's family, so the HUD
+## can show what an analysis is working toward.
+func analysis_progress_note(kind: String) -> String:
+	var family := FORGE_CATALOG.family_for_kind(kind)
+	if family.is_empty():
+		return ""
+	for id in FORGE_CATALOG.blueprint_ids():
+		if is_blueprint_unlocked(id):
+			continue
+		var unlock: Dictionary = FORGE_CATALOG.blueprint(id).get("unlock", {})
+		if str(unlock.get("family", "")) != family:
+			continue
+		var required := int(unlock.get("count", 1))
+		var current := mini(int(analyzed_families.get(family, 0)), required)
+		var weapon_name := str(WEAPON_DEFS.get(id, {}).get("name", id))
+		return "BLUEPRINT PROGRESS · %s %d/%d · %s" % [weapon_name, current, required,
+			FORGE_CATALOG.family_label(family)]
+	return ""
+
 func blueprint_progress(blueprint_id: String) -> Dictionary:
 	var plan := FORGE_CATALOG.blueprint(blueprint_id)
 	if plan.is_empty():
@@ -3132,6 +3218,7 @@ func _build_save_config() -> ConfigFile:
 	cfg.set_value("progress", "raw_materials", raw_materials)
 	cfg.set_value("progress", "gathered_nodes", gathered_nodes)
 	cfg.set_value("progress", "discovered_landmarks", discovered_landmarks)
+	cfg.set_value("progress", "discovered_records", discovered_records)
 	cfg.set_value("progress", "onboarding_completed", onboarding_completed)
 	cfg.set_value("progress", "onboarding_step", onboarding_step)
 	cfg.set_value("progress", "quest_objectives", quest_objectives)
@@ -3204,10 +3291,12 @@ func load_game() -> bool:
 	if saved_weapons is Array:
 		for weapon in saved_weapons:
 			if weapon is Dictionary and weapon.has("id"):
-				forged_weapons.append(CONTENT_SCHEMA.migrate_gear(weapon, "weapon"))
+				forged_weapons.append(_migrate_legacy_weapon_name(
+					CONTENT_SCHEMA.migrate_gear(weapon, "weapon")))
 	var saved_equipped = cfg.get_value("progress", "equipped_weapon", {})
 	if saved_equipped is Dictionary and saved_equipped.has("id"):
-		equipped_weapon = CONTENT_SCHEMA.migrate_gear(saved_equipped, "weapon")
+		equipped_weapon = _migrate_legacy_weapon_name(
+			CONTENT_SCHEMA.migrate_gear(saved_equipped, "weapon"))
 	else:
 		equipped_weapon = _get_default_weapon()
 	# Older saves stored the starter weapon only in the equipped slot; adopt it
@@ -3342,6 +3431,8 @@ func load_game() -> bool:
 	gathered_nodes = saved_gn.duplicate(true) if saved_gn is Dictionary else {}
 	var saved_lm = cfg.get_value("progress", "discovered_landmarks", {})
 	discovered_landmarks = saved_lm.duplicate(true) if saved_lm is Dictionary else {}
+	discovered_records = _normalize_discovered_records(
+		cfg.get_value("progress", "discovered_records", {}))
 	world_activity_state = _normalize_world_activity_state(
 		cfg.get_value("progress", "world_activity_state", {}))
 	explored_cells = _normalize_explored_cells(
@@ -3351,6 +3442,7 @@ func load_game() -> bool:
 		0, ONBOARDING_STEPS.size())
 	var saved_objectives = cfg.get_value("progress", "quest_objectives", [])
 	quest_objectives = CONTENT_SCHEMA.migrate_objectives(saved_objectives, OBJECTIVE_TYPES)
+	_seed_stage_objectives(current_stage)
 	pinned_objective_id = str(cfg.get_value("progress", "pinned_objective_id", ""))
 	if get_pinned_objective().is_empty():
 		pinned_objective_id = ""
@@ -3393,6 +3485,14 @@ func load_game() -> bool:
 	inventory_changed.emit()
 	weapon_changed.emit(equipped_weapon)
 	_save_dirty = false
+	# A save that was still plaintext (pre-encryption install) or that had to be
+	# recovered from the backup is rewritten in the current encrypted format at
+	# once, so the on-disk file matches what this build produces and a later
+	# crash cannot resurrect the old container.
+	if bool(load_result.get("legacy_plaintext", false)) \
+			or bool(load_result.get("recovered", false)):
+		save_game()
+		flush_save()
 	return true
 
 func _sanitize_quest_objectives(saved) -> Array[Dictionary]:

@@ -87,6 +87,14 @@ static func attack_timing(kind: String) -> Dictionary:
 @export var base_atk: int = 12
 @export var move_speed: float = 3.6
 @export var arena_radius: float = 20.0
+## Boss presentation (top health bar, phase guidance, boss-combat framing) is
+## an encounter-scoped layer: it only exists while the player is near the
+## fight. The margin is hysteresis so a knockback at the arena edge cannot
+## flicker the bar on and off.
+@export var hud_range_margin: float = 8.0
+const HUD_RANGE_POLL_SECONDS := 0.2
+var _hud_range_in := true
+var _hud_range_poll_in := 0.0
 
 ## === Stage escalation ===
 ## Every phase makes the boss meaningfully stronger and visibly different.
@@ -275,6 +283,7 @@ func _build_boss_details() -> void:
 func _process(delta: float) -> void:
 	if is_defeated or not is_inside_tree():
 		return
+	_update_hud_range(delta)
 	_menace_t += delta
 	if _boss_core_mat != null:
 		var rate := 2.6 if enrage_active else 1.4
@@ -1090,6 +1099,42 @@ func _set_phase_guidance_label(phase_name: String) -> void:
 func _hide_boss_health_bar() -> void:
 	if boss_bar_root:
 		boss_bar_root.visible = false
+
+## Encounter-scoped HUD: walking out of the boss's reach retires the top bar,
+## its phase/telegraph guidance and the wider boss-combat framing; walking back
+## restores them. Polled so the distance check never runs inside an attack
+## callback and the fight's timing is untouched.
+func _update_hud_range(delta: float) -> void:
+	_hud_range_poll_in -= delta
+	if _hud_range_poll_in > 0.0:
+		return
+	_hud_range_poll_in = HUD_RANGE_POLL_SECONDS
+	var player := get_tree().get_first_node_in_group("player") as Node3D
+	if player == null or not is_instance_valid(player):
+		return
+	var flat_offset := Vector3(global_position.x - player.global_position.x, 0.0,
+		global_position.z - player.global_position.z)
+	var in_range := flat_offset.length() \
+		<= maxf(arena_radius, 12.0) + hud_range_margin
+	if in_range == _hud_range_in:
+		return
+	_hud_range_in = in_range
+	if in_range:
+		_show_boss_health_bar()
+		_apply_boss_combat_camera(true)
+	else:
+		_hide_boss_health_bar()
+		_apply_boss_combat_camera(false)
+	# The boss's own floating plate leaves with the top bar so the retired
+	# encounter does not leave a health bar floating over the horizon.
+	var floating := get_node_or_null("EnemyHealthBar")
+	if floating != null and floating.has_method("set_range_visible"):
+		floating.call("set_range_visible", in_range)
+
+func _apply_boss_combat_camera(active: bool) -> void:
+	var camera_rig := get_parent().get_node_or_null("CameraRig")
+	if camera_rig != null and camera_rig.has_method("set_boss_combat"):
+		camera_rig.set_boss_combat(active, arena_radius)
 
 func is_dead() -> bool:
 	return is_defeated

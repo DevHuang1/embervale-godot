@@ -177,7 +177,6 @@ var lantern_is_active: bool = true
 var movement_fx: GPUParticles3D = null
 var ember_trail: GPUParticles3D = null
 var weapon_socket: AttachmentSocket = null
-var current_relic: RelicData = null
 var _armor_gear_root: Node3D = null
 var _cloak_base_mat: Material = null
 var _slope_pitch := 0.0
@@ -254,11 +253,6 @@ func _ready() -> void:
 	$Visual/Rig/ArmR.add_child(hand_socket_r)
 	_refresh_weapon_visual()
 	_apply_armor_visual()
-	
-	# A forged relic overrides whatever hangs on the back.
-	ScanManager.relic_forged.connect(_on_relic_forged)
-	if ScanManager.last_relic != null:
-		_on_relic_forged(ScanManager.last_relic)
 	
 	# Input
 	InputManager.move_input.connect(_on_move_input)
@@ -2458,26 +2452,10 @@ func _refresh_weapon_visual() -> void:
 	if weapon_socket == null:
 		return
 	
-	# A wielded relic-kit item carries its scanned mesh in-hand instead.
-	var relic_wielded: bool = bool(current_weapon.get("relic", false)) \
-		and current_relic != null and current_relic.mesh != null
-	if relic_wielded:
+	var rarity := int(current_weapon.get("rarity", 0))
+	if bool(current_weapon.get("relic", false)) or rarity < 3:
 		weapon_socket.detach()
-	elif current_relic != null and current_relic.mesh != null:
-		# A photo-forged relic takes priority over the rarity staff.
-		var holder := Node3D.new()
-		holder.name = "RelicVisual"
-		var mi := MeshInstance3D.new()
-		mi.mesh = current_relic.mesh
-		holder.add_child(mi)
-		holder.rotation_degrees = Vector3(6.0, 180.0, -8.0)
-		holder.scale = Vector3.ONE * 0.75
-		weapon_socket.attach(holder)
 	else:
-		var rarity := int(current_weapon.get("rarity", 0))
-		if rarity < 3:
-			weapon_socket.detach()
-		else:
 			# Ember-tipped staff slung across the back for rare+ finds
 			var staff := MeshInstance3D.new()
 			staff.name = "WeaponVisual"
@@ -2521,7 +2499,8 @@ func _refresh_hand_weapon() -> void:
 	# Strike reach follows the weapon: swords short and quick, maces
 	# medium, staves long (their bolt closes the last gap).
 	approach_distance = _weapon_reach()
-	match str(current_weapon.get("id", "")):
+	var weapon_id := WEAPON_VISUALS.resolve_id(str(current_weapon.get("id", "")))
+	match weapon_id:
 		"mug_mace":
 			hand_socket_l.detach()
 			_mount_hand_weapon(hand_socket_r, _build_mug_mace_visual(), "mug_mace")
@@ -2557,22 +2536,16 @@ func _refresh_hand_weapon() -> void:
 			_mount_hand_weapon(hand_socket_r, _build_slab_hammer_visual(), "slab_hammer")
 			_drive_socket = hand_socket_r
 			_has_hand_weapon = true
-		"matriarch_scepter", "thorn_mace", "iron_axe", "grove_spear", "hunter_bow", "round_shield":
-			hand_socket_l.detach()
-			hand_socket_r.detach()
-			var generic_socket := hand_socket_l if str(current_weapon.get("id", "")) in ["iron_axe", "grove_spear", "hunter_bow", "round_shield"] else hand_socket_r
-			_mount_hand_weapon(generic_socket, _build_registry_weapon_visual(str(current_weapon.get("id", ""))), str(current_weapon.get("id", "")))
-			_drive_socket = generic_socket
-			_has_hand_weapon = true
 		_:
 			hand_socket_l.detach()
 			hand_socket_r.detach()
 			_drive_socket = null
-			_has_hand_weapon = bool(current_weapon.get("relic", false)) \
-				and current_relic != null and current_relic.mesh != null
-			if _has_hand_weapon:
-				_mount_hand_weapon(hand_socket_r, _build_relic_hand_visual(), "relic")
-				_drive_socket = hand_socket_r
+			_has_hand_weapon = false
+			if not WEAPON_VISUALS.path_for(weapon_id).is_empty():
+				var mapped_socket := hand_socket_l if weapon_id in ["iron_axe", "grove_spear", "hunter_bow", "round_shield"] else hand_socket_r
+				_mount_hand_weapon(mapped_socket, _build_registry_weapon_visual(weapon_id), weapon_id)
+				_drive_socket = mapped_socket
+				_has_hand_weapon = true
 	# Track the attached holder so strikes can swing it (works on the FBX
 	# rig too — sockets get re-parented to the model bones, not rebuilt).
 	if _drive_socket != null and _drive_socket.has_item():
@@ -2601,7 +2574,6 @@ func _mount_hand_weapon(socket: AttachmentSocket, prop: Node3D, weapon_id: Strin
 		"hunter_bow": [Vector3(0.0, -0.04, 0.02), Vector3(0.0, 90.0, 0.0)],
 		"round_shield": [Vector3(0.0, -0.02, 0.02), Vector3(90.0, 0.0, 0.0)],
 		"soda_cannon": [Vector3(0.02, -0.08, 0.02), Vector3(3.0, 0.0, 10.0)],
-		"relic": [Vector3(0.0, -0.02, 0.01), Vector3.ZERO],
 	}.get(weapon_id, [Vector3.ZERO, Vector3.ZERO])
 	prop.position += profile[0] as Vector3
 	prop.rotation_degrees += profile[1] as Vector3
@@ -2760,17 +2732,6 @@ func _build_mug_mace_visual() -> Node3D:
 	rig.add_child(pommel)
 	return rig
 
-func _build_relic_hand_visual() -> Node3D:
-	var rig := Node3D.new()
-	rig.name = "RelicHandVisual"
-	var mi := MeshInstance3D.new()
-	mi.mesh = current_relic.mesh
-	rig.add_child(mi)
-	# Tip the flat extrusion forward out of the fist like a blade
-	rig.rotation_degrees = Vector3(-90, 0, -10)
-	rig.scale = Vector3.ONE * 0.75
-	return rig
-
 ## CC0 weapon models dropped into assets/models/weapons override the
 ## procedural props when present (same silent-fallback pattern as rigs).
 func _mount_weapon_model(weapon_id: String) -> Node3D:
@@ -2786,28 +2747,16 @@ func _mount_weapon_model(weapon_id: String) -> Node3D:
 	var holder := Node3D.new()
 	holder.name = "WeaponModel"
 	holder.add_child(model)
-	# Quaternius FBX files are authored in centimetre-like source units while
-	# Embervale's hand sockets are metre-scaled. Normalize that asset family at
-	# the registry boundary so every caller receives a hand-sized visual.
-	var source_scale := 0.012 if path.contains("/quaternius/") else 1.0
+	# Models arrive in whatever units their pack was authored in; normalize each
+	# one to a hand-readable length measured from its own meshes.
 	match weapon_id:
-		"ember_sword":
+		"ember_sword", "mug_mace", "slab_hammer", "pocket_blade", "snip_twins":
 			model.rotation_degrees = Vector3(90, 0, 0)
-			holder.scale = Vector3.ONE * 0.95 * source_scale
-		"arcane_staff":
-			model.position = Vector3(0, 0.4, 0)
-			holder.scale = Vector3.ONE * source_scale
-		"mug_mace", "slab_hammer":
-			model.rotation_degrees = Vector3(90, 0, 0)
-			holder.scale = Vector3.ONE * 0.9 * source_scale
-		"pocket_blade", "snip_twins":
-			model.rotation_degrees = Vector3(90, 0, 0)
-			holder.scale = Vector3.ONE * 0.7 * source_scale
-		_:
-			holder.scale = Vector3.ONE * source_scale
+	var normalized := WEAPON_VISUALS.normalized_scale(weapon_id, model)
+	holder.scale = Vector3.ONE * normalized
 	holder.set_meta("weapon_id", weapon_id)
 	holder.set_meta("resolved_asset_path", path)
-	holder.set_meta("source_scale", source_scale)
+	holder.set_meta("normalized_scale", normalized)
 	return holder
 
 func _build_sword_visual() -> Node3D:
@@ -3252,13 +3201,45 @@ func _refresh_armor_gear() -> void:
 	if cloak_node != null and is_instance_valid(cloak_node) \
 			and _cloak_base_mat != null:
 		cloak_node.material_override = _cloak_base_mat
-	match str(game_state.equipped_armor.get("id", "")):
+	if ARMOR_VISUALS.is_model(armor_id):
+		_mount_armor_model(armor_id)
+		return
+	match armor_id:
 		"warden_plate":
 			_build_warden_plate_gear()
 		"emberweave_cloak":
 			_build_emberweave_gear()
 		_:
 			pass
+
+## Rigid CC0 armor props ride a skeleton bone with no skinning, so an imported
+## piece only needs a measured scale and an authored seat transform. Scale is
+## normalized from the model's own bounds, like the weapon registry.
+func _mount_armor_model(armor_id: String) -> bool:
+	return _mount_armor_model_record(ARMOR_VISUALS.record_for(armor_id))
+
+func _mount_armor_model_record(record: Dictionary) -> bool:
+	if str(record.get("kind", "")) != "model":
+		return false
+	var path := str(record.get("path", ""))
+	if path.is_empty() or not ResourceLoader.exists(path):
+		return false
+	var packed := load(path) as PackedScene
+	if packed == null:
+		return false
+	var model := packed.instantiate() as Node3D
+	if model == null:
+		return false
+	var bone := str(record.get("bone", ARMOR_VISUALS.DEFAULT_MODEL_BONE))
+	var host := _armor_host("model", bone, Vector3(0, 1.0, 0.0))
+	var target := float(record.get("length", ARMOR_VISUALS.DEFAULT_MODEL_LENGTH))
+	var raw := WEAPON_VISUALS.model_max_dimension(model)
+	if raw > 0.0001:
+		model.scale = Vector3.ONE * (target / raw)
+	model.position = record.get("offset", Vector3.ZERO)
+	model.rotation_degrees = record.get("rotation_degrees", Vector3.ZERO)
+	host.add_child(model)
+	return true
 
 func _armor_host(socket_id: String, bone_name: String,
 		fallback_position: Vector3) -> AttachmentSocket:
@@ -3368,10 +3349,6 @@ func _build_emberweave_gear() -> void:
 	collar.rotation.x = 1.4
 	collar.material_override = ember
 	_armor_gear_root.add_child(collar)
-
-func _on_relic_forged(relic: RelicData) -> void:
-	current_relic = relic
-	_refresh_weapon_visual()
 
 func _load_default_weapon() -> void:
 	current_weapon = game_state.equipped_weapon.duplicate(true)

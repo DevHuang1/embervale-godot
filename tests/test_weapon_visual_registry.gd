@@ -2,6 +2,15 @@ extends SceneTree
 
 func _init() -> void:
 	var registry := preload("res://scripts/systems/weapon_visual_registry.gd")
+	# Every grantable weapon def needs a runtime visual: an unmapped id would
+	# silently render no prop in the hero's hand.
+	var game_state_script := load("res://scripts/autoload/game_state.gd")
+	var defs: Dictionary = game_state_script.get_script_constant_map().get("WEAPON_DEFS", {})
+	for def_id in defs:
+		if registry.path_for(str(def_id)).is_empty():
+			push_error("Weapon def has no runtime visual: %s" % def_id)
+			quit(1)
+			return
 	var required := ["ember_sword", "arcane_staff", "mug_mace", "matriarch_scepter",
 		"pocket_blade", "snip_twins", "slab_hammer", "thorn_mace", "iron_axe",
 		"grove_spear", "hunter_bow", "round_shield", "siltcarver_blade",

@@ -389,6 +389,18 @@ func _paint_authored_rig() -> void:
 func _rig_profile() -> String:
 	return rig_profile_override if not rig_profile_override.is_empty() else "hushling"
 
+## Stable identity for first-encounter codex intros. The exported archetype
+## names realm kin (thorn_charger, mire_stalker, ...); subclasses whose
+## silhouette differs but share the base archetype override the rig profile or
+## this method directly. Bosses never reach the director.
+func discovery_kind() -> String:
+	if not archetype.is_empty() and archetype != "hushling":
+		return archetype
+	var profile := _rig_profile()
+	if not profile.is_empty() and profile != "hushling":
+		return profile
+	return "hushling"
+
 func _build_hushling_silhouette() -> void:
 	# Base body scale varies by archetype — charger reads bigger, ambusher flatter
 	var body_scale := _archetype_body_scale()

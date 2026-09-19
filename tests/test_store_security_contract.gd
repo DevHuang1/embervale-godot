@@ -36,6 +36,7 @@ func _run() -> void:
 	_test_no_secret_in_repository()
 	_test_no_secret_in_log_calls()
 	_test_build_defaults_stay_out_of_the_repository()
+	_test_build_key_sealing()
 
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCRATCH_SAVE))
 	if not _failures.is_empty():
@@ -314,8 +315,61 @@ func _test_build_defaults_stay_out_of_the_repository() -> void:
 	_check(not ("customer_id" in defaults),
 		"the shipped defaults resource must have no identity field")
 
-func _test_no_secret_in_log_calls() -> void:
-	for path in ["res://scripts/autoload/store_manager.gd",
+## The shipped resource seals the public SDK key: a literal copy-paste of the
+## resource must not hand out a working key, a round trip must return exactly
+## the sealed value, and anything tampered with or malformed must fail closed.
+## Sealing is obfuscation (the passphrase ships in the client), so this test
+## verifies the mechanics, not confidentiality.
+func _test_build_key_sealing() -> void:
+	var key := "test_" + "A1b2C3d4E5f6G7h8"
+	var sealed := SECURITY.seal(key)
+	_check(SECURITY.is_sealed(sealed), "a sealed value must carry the scheme marker")
+	_check(not sealed.contains(key), "a sealed value must not contain the plaintext")
+	_check(SECURITY.unseal(sealed) == key, "a sealed key must round-trip exactly")
+	_check(SECURITY.seal(key) != SECURITY.seal(key),
+		"two seals of one key must differ (random salt and IV)")
+	_check(SECURITY.unseal(key) == "", "a plaintext value must not unseal")
+	_check(SECURITY.unseal("") == "" and SECURITY.unseal("rcseal1:") == "",
+		"an empty or marker-only value must fail closed")
+	_check(SECURITY.unseal("rcseal1:!!!!") == "",
+		"an unreadable blob must fail closed")
+	var truncated := sealed.substr(0, sealed.length() - 8)
+	_check(SECURITY.unseal(truncated) != key,
+		"a truncated blob must never yield the key")
+	var flipped := sealed.substr(0, SECURITY.SEAL_MARKER.length() + 8) + "AAAA" \
+		+ sealed.substr(SECURITY.SEAL_MARKER.length() + 12)
+	_check(SECURITY.unseal(flipped) != key,
+		"a tampered blob must never yield the key")
+
+	# The resource resolves a sealed key exactly like a plaintext one and fails
+	# closed when the blob cannot be recovered.
+	var defaults := StoreDefaults.new()
+	defaults.native_api_key = key
+	_check(defaults.resolved_native_api_key() == key,
+		"a plaintext build resource must still resolve (dev and test fixtures)")
+	defaults.native_api_key = ""
+	defaults.native_api_key_sealed = sealed
+	_check(defaults.resolved_native_api_key() == key,
+		"a sealed build resource must resolve through the seal")
+	_check(defaults.has_native_key(), "a resolved key must report as present")
+	defaults.native_api_key_sealed = "rcseal1:AAAA"
+	_check(defaults.resolved_native_api_key() == "",
+		"an unrecoverable sealed key must fail closed")
+
+	# Wiring: the writer seals, the store reads the resolved value, and plaintext
+	# shipping is an explicit opt-out rather than the default.
+	var writer := FileAccess.get_file_as_string("res://tools/write_store_defaults.gd")
+	_check(writer.contains("SECURITY.seal("),
+		"the defaults writer must seal the shipped public key")
+	_check(writer.contains("--no-seal"),
+		"plaintext shipping must stay an explicit opt-out")
+	_check(writer.contains("--from-resource"),
+		"the writer must be able to rotate a key out of an existing resource")
+	var manager := FileAccess.get_file_as_string("res://scripts/autoload/store_manager.gd")
+	_check(manager.contains("resolved_native_api_key()"),
+		"the store must read the resolved (possibly sealed) shipped key")
+
+func _test_no_secret_in_log_calls() -> void:	for path in ["res://scripts/autoload/store_manager.gd",
 			"res://scripts/systems/revenuecat_api_client.gd",
 			"res://scripts/systems/store_security.gd"]:
 		var source := FileAccess.get_file_as_string(path)

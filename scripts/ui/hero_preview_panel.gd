@@ -6,19 +6,8 @@ class_name HeroPreviewPanel
 signal equip_requested(item_id: String, slot: StringName)
 signal drop_rejected(message: String)
 
-const PREVIEW_WEAPON_PATHS: Dictionary = {
-	"ember_sword": "res://assets/models/weapons/ember_sword.glb",
-	"arcane_staff": "res://assets/models/weapons/arcane_staff.glb",
-	"matriarch_scepter": "res://assets/models/weapons/quaternius/Staff.fbx",
-	"mug_mace": "res://assets/models/weapons/quaternius/Hammer_Small.fbx",
-	"siltcarver_blade": "res://assets/models/weapons/quaternius/Dagger_2.fbx",
-	"cinderbound_maul": "res://assets/models/weapons/quaternius/Hammer_Double.fbx",
-	"tideward_staff": "res://assets/models/weapons/quaternius/Spear.fbx",
-	"rootbound_cleaver": "res://assets/models/weapons/quaternius/Claymore.fbx",
-	"moonpact_staff": "res://assets/models/weapons/quaternius/Spear.fbx",
-}
-
 var game_state: Node
+var _preview_hero_height := 1.9
 var _viewport: SubViewport
 var _preview_root: Node3D
 var _weapon_slot: EquipmentSlot
@@ -240,7 +229,9 @@ func _refresh_preview() -> void:
 		hero.name = "AuthoredHero"
 		hero.scale = Vector3.ONE * 0.62
 		_preview_root.add_child(hero)
+		_preview_hero_height = maxf(WeaponVisualRegistry.model_max_dimension(hero), 0.1)
 	else:
+		_preview_hero_height = 1.55
 		var body := MeshInstance3D.new()
 		var capsule := CapsuleMesh.new()
 		capsule.height = 1.55
@@ -254,14 +245,15 @@ func _refresh_preview() -> void:
 
 func _add_current_weapon() -> void:
 	var weapon: Dictionary = game_state.equipped_weapon
-	var path := str(PREVIEW_WEAPON_PATHS.get(str(weapon.get("id", "")), ""))
+	var path := WeaponVisualRegistry.path_for(str(weapon.get("id", "")))
 	var scene := ResourceLoader.load(path, "PackedScene") as PackedScene if not path.is_empty() else null
 	if scene != null:
 		var model := scene.instantiate() as Node3D
 		model.name = "CurrentWeapon"
 		model.position = Vector3(0.73, 1.02, 0.0)
 		model.rotation_degrees = Vector3(0.0, 0.0, -28.0)
-		model.scale = Vector3.ONE * 0.42
+		model.scale = Vector3.ONE * WeaponVisualRegistry.normalized_scale(
+			str(weapon.get("id", "")), model, _preview_hero_height / 1.9)
 		_preview_root.add_child(model)
 		return
 	var blade := MeshInstance3D.new()

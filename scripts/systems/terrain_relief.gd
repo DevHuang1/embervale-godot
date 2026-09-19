@@ -3,6 +3,7 @@ class_name TerrainRelief
 
 const LAYOUT := preload("res://scripts/world/realm_layout_data.gd")
 const GROUND_COMPOSITION := preload("res://scripts/systems/world_ground_composition.gd")
+const WATERWAYS := preload("res://scripts/world/world_waterways.gd")
 
 ## === Terrain Relief ===
 ## Runtime heightmapped ground: replaces the flat PlaneMesh with a
@@ -53,6 +54,10 @@ var _boss_anchor_points: Array[Vector2] = []
 ## Pond basins carved into the heightfield; specs are shared with the water
 ## presentation so the flat disc always sits inside a real depression.
 var _pond_basins: Array[Dictionary] = []
+## Realm river meander (WorldWaterways spec). The carve lives here so the
+## authored core mesh, the streamed tiles and every prop collision sample the
+## exact same channel.
+var _river: Dictionary = {}
 
 ## Per-realm ground palettes for terrain_ground.gdshader. Every explorable
 ## realm gets a distinct underfoot read: grass/dirt/stone families plus a
@@ -156,6 +161,7 @@ func _ready() -> void:
 	_register_layout_boss_anchors()
 	_register_layout_content_anchors()
 	_register_pond_basins()
+	_river = WATERWAYS.river_for(_realm_id())
 	_build_grid()
 	terrain_mesh.mesh = _build_mesh()
 	terrain_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
@@ -196,6 +202,37 @@ func _load_realm_material() -> ShaderMaterial:
 	ground.shader = load(DESKTOP_TERRAIN_SHADER) as Shader
 	return ground
 
+## River + pond shoreline data for the shader's beach band. The shader mirrors
+## WorldWaterways.center_x, and pond slots carry (x, z, basin radius, enabled);
+## every realm binds the same contract so streamed tiles (which share this
+## material) fade into sand at the identical waterline.
+const POND_SHADER_SLOTS := ["pond_a", "pond_b", "pond_c"]
+
+func _bind_shoreline(ground: ShaderMaterial) -> void:
+	var enabled := 0.0
+	if not _river.is_empty():
+		enabled = 1.0
+		ground.set_shader_parameter("river_base_x", float(_river.get("base_x", 0.0)))
+		ground.set_shader_parameter("river_meander", float(_river.get("meander", 0.0)))
+		ground.set_shader_parameter("river_wavelen",
+			maxf(float(_river.get("wavelen", 120.0)), 1.0))
+		ground.set_shader_parameter("river_phase", float(_river.get("phase", 0.0)))
+		ground.set_shader_parameter("river_detail", float(_river.get("detail", 0.25)))
+		# The sand is complete across the water plane; bind its edge, not the
+		# channel half-width, so the beach never shows grass under the water.
+		ground.set_shader_parameter("river_half_width",
+			WATERWAYS.water_half_width(_river))
+	ground.set_shader_parameter("river_enabled", enabled)
+	for i in POND_SHADER_SLOTS.size():
+		var slot: String = POND_SHADER_SLOTS[i]
+		if i >= _pond_basins.size():
+			ground.set_shader_parameter(slot, Vector4.ZERO)
+			continue
+		var basin: Dictionary = _pond_basins[i]
+		var center: Vector2 = basin.get("center", Vector2.ZERO)
+		ground.set_shader_parameter(slot, Vector4(center.x, center.y,
+			maxf(float(basin.get("radius", 3.0)), 0.001), 1.0))
+
 func _apply_palette(ground: ShaderMaterial) -> void:
 	# Keep sampler bindings explicit at runtime.  The terrain material can be
 	# replaced by a realm scene, quality reload, or streamed-world setup; relying
@@ -203,6 +240,7 @@ func _apply_palette(ground: ShaderMaterial) -> void:
 	# Android/import paths, which flattened grass, sand, and soil into tint-only
 	# colors.
 	_bind_ground_texture_layers(ground)
+	_bind_shoreline(ground)
 	var pal: Dictionary = REALM_TERRAIN.get(_realm_id(),
 		REALM_TERRAIN["bramblewood"])
 	# Sand is intentionally explicit: without this binding the layer shader
@@ -229,7 +267,9 @@ func _apply_palette(ground: ShaderMaterial) -> void:
 	ground.set_shader_parameter("macro_breakup_strength", lerpf(0.34, 0.58, moisture))
 	ground.set_shader_parameter("micro_grain_strength", lerpf(0.20, 0.34, moisture))
 	ground.set_shader_parameter("puddle_sheen_strength", lerpf(0.10, 0.34, moisture))
-	ground.set_shader_parameter("tex_blend", 1.0)
+	# Texture stays dominant, but the realm palette must keep a say: at 1.0 the
+	# authored grass/dirt/stone colors were ignored and every realm read green.
+	ground.set_shader_parameter("tex_blend", 0.7)
 	ground.set_shader_parameter("moss_strength", maxf(float(pal.get("moss_strength", 0.0)), 0.42))
 
 func _bind_ground_texture_layers(ground: ShaderMaterial) -> void:
@@ -383,7 +423,22 @@ func height_at(x: float, z: float) -> float:
 				continue
 			var weight := 1.0 - smoothstep(br * 0.45, br, d)
 			h -= (h - floor_y) * weight
-	return h
+	return _carve_river(h, x, z)
+
+## Rivers are a soft V carved after the ponds: full depth across the bed,
+## rising to untouched ground across the bank band. The same function feeds
+## terrain collision, streamed tiles and prop conformity, so nothing can
+## float over or sink into the channel.
+func _carve_river(h: float, x: float, z: float) -> float:
+	if _river.is_empty():
+		return h
+	var half := float(_river.get("width", 5.0)) * 0.5
+	var bank := float(_river.get("bank", 3.0))
+	var d := WATERWAYS.lateral_distance(_river, Vector2(x, z))
+	if d >= half + bank:
+		return h
+	var weight := 1.0 - smoothstep(half, half + bank, d)
+	return h - float(_river.get("depth", 1.0)) * weight
 
 func get_surface_profile(world_position: Vector3) -> Dictionary:
 	var p := Vector2(world_position.x, world_position.z)

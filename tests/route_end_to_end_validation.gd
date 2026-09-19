@@ -460,8 +460,19 @@ func _run_expedition(grove: Node) -> void:
 			_assert_true(terrain.collision_layer == 0,
 				"surface collision parks while the hero is inside a structure")
 		# Indoors the orbit pitch flattens: the outdoor -35 deg put the camera
-		# above the roofline looking down at floor and roof tops.
+		# above the roofline looking down at floor and roof tops. Structure
+		# entry can fire a focus moment a few frames in, which owns the camera
+		# until it is cancelled or expires, so wait for the steady indoor state
+		# (bounded) rather than sampling a cinematic frame.
 		var rig := world.get_node_or_null("CameraRig")
+		if rig != null:
+			for _frame in 240:
+				if bool(rig.get("_cinematic")):
+					rig.call("cancel_cinematic")
+				await process_frame
+				if bool(rig.get("_indoor")):
+					break
+			await _frames(1)
 		if rig != null and str(rig.get("view_mode")) == "third_person":
 			var pitch := float(rig.get("target_angle_v"))
 			_assert_true(pitch >= float(rig.get("indoor_pitch_min")) - 0.001

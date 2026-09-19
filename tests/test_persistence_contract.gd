@@ -8,6 +8,7 @@ const SAVE_SERVICE := preload("res://scripts/systems/save_service.gd")
 
 var _game_state: GameState
 var _failures: int = 0
+var service: SaveService
 
 func _initialize() -> void:
 	call_deferred("_run")
@@ -34,6 +35,7 @@ func _run() -> void:
 	_game_state.save_path = SAVE_PATH
 	_game_state.delete_save()
 	_game_state.reset()
+	service = SAVE_SERVICE.new()
 
 	# Normal mutations are coalesced until an explicit flush.
 	_game_state.add_material("iron_shard", 2)
@@ -42,6 +44,13 @@ func _run() -> void:
 		"coalesced mutation wrote before the flush boundary")
 	_check(_game_state.flush_save(), "initial forced save failed")
 	_check(FileAccess.file_exists(SAVE_PATH), "forced save did not create primary")
+
+	# The persisted container is encrypted: a plaintext reader must not be able
+	# to see the document, while the service and GameState still round-trip it.
+	_check(service.is_encrypted(SAVE_PATH), "flushed save was not encrypted at rest")
+	var raw_bytes := FileAccess.get_file_as_bytes(SAVE_PATH)
+	_check(raw_bytes.size() > 0 and raw_bytes[0] != 0x5B,
+		"encrypted save still begins like a plaintext ConfigFile document")
 
 	# Round-trip preserves damaged HP, content, and progression state.
 	_game_state.hp = 37
@@ -162,8 +171,11 @@ func _run() -> void:
 	legacy.set_value("progress", "current_stage", _game_state.QuestStage.COMPLETE)
 	legacy.set_value("progress", "route_checkpoint_id", "beacon_relit")
 	_check(legacy.save(SAVE_PATH) == OK, "could not write legacy save fixture")
+	_check(not service.is_encrypted(SAVE_PATH), "legacy fixture must be plaintext")
 	_game_state.reset()
 	_check(_game_state.load_game(), "legacy save was not accepted")
+	_check(service.is_encrypted(SAVE_PATH),
+		"a legacy plaintext save was not rewritten in the encrypted format")
 	var legacy_expansion: Dictionary = _game_state.bramblewood_expansion_snapshot()
 	_check(not bool(legacy_expansion.get("started", false))
 		and not bool(legacy_expansion.get("completed", false))
@@ -212,7 +224,6 @@ func _run() -> void:
 		"corrupt activity data affected core state or was not discarded")
 
 	# A failed replacement leaves the existing primary unchanged.
-	var service: SaveService = SAVE_SERVICE.new()
 	var atomic_path := "/tmp/embervale_atomic_contract.cfg"
 	service.delete_files(atomic_path)
 	var original := ConfigFile.new()
@@ -224,10 +235,12 @@ func _run() -> void:
 	replacement.set_value("meta", "marker", "replacement")
 	_check(not service.write_config(replacement, atomic_path),
 		"forced backup failure unexpectedly replaced primary")
-	var unchanged := ConfigFile.new()
-	_check(unchanged.load(atomic_path) == OK
+	var unchanged := service.load_config(atomic_path).get("config") as ConfigFile
+	_check(unchanged != null
 		and str(unchanged.get_value("meta", "marker", "")) == "original",
 		"failed replacement damaged the existing primary")
+	_check(service.is_encrypted(atomic_path),
+		"a direct service write was not encrypted at rest")
 	DirAccess.remove_absolute(backup_directory)
 	service.delete_files(atomic_path)
 

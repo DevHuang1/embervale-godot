@@ -2,26 +2,17 @@ extends RefCounted
 class_name RelicData
 
 ## === RelicData — Forged Relic Resource ===
-## Created by ScanManager after a successful forge.
-## Mounted on Hero.current_relic and displayed in the Field Satchel.
+## Created by the forge flow after a successful craft and wielded by the hero
+## as a `relic_<base_id>` weapon def.
 ##
-## The relic grants a passive modifier (stat bonus or skill enhancement)
-## and optionally displays a forged mesh on the hero's back socket.
-
+## The relic grants a passive modifier (stat bonus or skill enhancement).
+##
 ## Display identity
 var relic_id     : String = ""
 var relic_name   : String = ""
 var description  : String = ""
 var glyph        : String = "◈"
 var rarity       : int    = 1   # 1=common, 2=uncommon, 3=rare, 4=legendary
-
-## Visual (mesh shown on back socket)
-var mesh_scene   : PackedScene = null   # optional; null = no visual
-
-## Photo-forged visual payload (ScanManager + RelicForge):
-## raw Mesh shown on the hero's back socket and the relic trophy pedestal.
-var mesh         : Mesh = null
-var texture      : Texture2D = null
 
 ## Passive bonus type — applied by hero when relic is equipped
 ## Types: "atk_flat", "atk_pct", "hp_flat", "hp_pct",
@@ -94,9 +85,8 @@ func apply_to_hero(hero: Node3D) -> void:
 # Scan-forged weapon kit builder
 # ─────────────────────────────────────────────────────────────────────────────
 
-## Rarity multipliers, mirroring ScanManager.RARITY_WEIGHTS so every combat
-## number in the forged kit derives from the rarity roll alone. The player
-## supplies only names; the numbers are computed here.
+## Rarity multipliers so every combat number in the forged kit derives from
+## the tier alone. The player supplies only names; the numbers are computed here.
 const FORGE_RARITY_MULTS: Array[float] = [1.00, 1.15, 1.30, 1.45, 1.65]
 
 ## Player-facing names are cosmetic: trimmed, control-char-free, length-capped,

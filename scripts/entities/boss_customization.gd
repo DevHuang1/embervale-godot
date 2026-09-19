@@ -2,8 +2,8 @@ extends RefCounted
 class_name BossCustomization
 
 ## === BossCustomization — Player-Personalised Boss Skin ===
-## Set on BossBase.customization after the player scans a real object
-## via ScanManager. Drives:
+## Set on BossBase.customization after the player locks a trophy palette in at
+## the boss altar. Drives:
 ##   - idol_mesh      : a MeshInstance3D node the scan produced
 ##   - palette        : override body_tint + eye_glow on the boss
 ##   - skill          : one pooled skill dict replacing _realm_skill slot

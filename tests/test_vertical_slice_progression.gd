@@ -22,7 +22,7 @@ func _run() -> void:
 	if gs.get_onboarding_hint().is_empty():
 		failures += 1
 		print("FAIL: fresh save has no playable onboarding hint")
-	for trigger in ["movement", "combat", "dodge", "loot", "gather", "craft"]:
+	for trigger in ["movement", "combat", "analyze", "dodge", "loot", "gather", "craft"]:
 		gs.check_onboarding_trigger(trigger)
 	if not gs.onboarding_completed or gs.onboarding_step != gs.ONBOARDING_STEPS.size():
 		failures += 1
@@ -40,8 +40,7 @@ func _run() -> void:
 	if not gs.load_game():
 		failures += 1
 		print("FAIL: progression save did not load")
-	elif gs.quest_objectives.size() != 1 \
-			or int(gs.quest_objectives[0].current_qty) != 1:
+	elif int(gs.get_objective("gather_bramble_wood").get("current_qty", 0)) != 1:
 		failures += 1
 		print("FAIL: quest objective progress did not round-trip")
 
