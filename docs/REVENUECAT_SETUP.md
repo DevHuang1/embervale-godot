@@ -188,7 +188,18 @@ server exposes:
 GET {backend}/entitlements/active?customer_id=<id>
 Authorization: Bearer <app token>
 -> { "items": [ { "entitlement_id": "...", "expires_at": null } ] }
+
+GET {backend}/transactions?customer_id=<id>
+Authorization: Bearer <app token>
+-> { "items": [ { "product_id": "...", "transaction_id": "...", "purchased_at": 0 } ] }
 ```
+
+Both routes are required. A repeatable pack (a consumable) is granted **once
+per purchase**, and its entitlement stays active forever after the first buy —
+so the entitlement read cannot tell a second purchase from the first. The
+transaction page is what the claim ledger keys on; without it a funnel purchase
+would grant nothing at all. `purchased_at` is milliseconds since the epoch, or
+`0` when the provider gives no date.
 
 That is the same shape as RevenueCat's `active_entitlements` response, so one
 parser serves both authorities. `backend/app/main.py` implements it: the route

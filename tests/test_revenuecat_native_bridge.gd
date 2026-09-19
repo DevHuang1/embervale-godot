@@ -575,6 +575,20 @@ func _test_backend_authority_from_shipped_defaults() -> void:
 	_check(store.customer_id().begins_with("ev_"),
 		"the backend authority must still use the device-minted customer id")
 
+	# Repeatable packs are granted per store transaction, so the backend
+	# authority must also read the transaction page — with the same token.
+	var request := store.backend_transactions_request()
+	var request_url := str(request.get("url", ""))
+	_check(request_url.begins_with(
+		"https://embervale-api.onrender.com/transactions?customer_id=ev_"),
+		"the backend authority must read the transaction page (got %s)" % request_url)
+	var carries_token := false
+	var headers: PackedStringArray = request.get("headers", PackedStringArray())
+	for header in headers:
+		if str(header).begins_with("Authorization: Bearer ") and str(header).length() > 30:
+			carries_token = true
+	_check(carries_token, "the transaction read must carry the app bearer token")
+
 	# A token that cannot be sent as a header is refused like a malformed key,
 	# so a tampered resource can never half-configure the backend.
 	var hostile := StoreDefaults.new()
@@ -586,6 +600,8 @@ func _test_backend_authority_from_shipped_defaults() -> void:
 	store.load_config()
 	_check(store.authority_name() != "backend",
 		"a header-unsafe shipped token must never configure the backend authority")
+	_check(store.backend_transactions_request().is_empty(),
+		"a refused token must not leave a transaction request behind")
 
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(defaults))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(device))

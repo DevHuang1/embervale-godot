@@ -16,7 +16,7 @@ from .config import get_settings
 from .db import Base, engine, get_db
 from .models import Account, AuditLog, Entitlement, MutationLedger, PriceVariant, Product, ProviderEvent, ProviderIdentity, PurchaseLedger, SessionRecord
 from .providers import revenuecat_subscriber, verify_revenuecat_signature, verify_stripe_signature
-from .schemas import AccountResponse, ActiveEntitlementItem, ActiveEntitlementsResponse, CheckoutRequest, EntitlementResponse, MutationRequest, OidcExchangeRequest, ProviderLinkRequest, RefreshRequest
+from .schemas import AccountResponse, ActiveEntitlementItem, ActiveEntitlementsResponse, CheckoutRequest, EntitlementResponse, MutationRequest, OidcExchangeRequest, ProviderLinkRequest, RefreshRequest, TransactionItem, TransactionsResponse
 from .security import account_from_token, hash_refresh_token, issue_refresh_token, issue_token, verify_oidc_id_token
 
 logging.basicConfig(level=logging.INFO)
@@ -73,6 +73,8 @@ def current_account(credentials: HTTPAuthorizationCredentials | None = Depends(b
 # ids, but the pattern stays permissive for dashboards that use e-mail-shaped
 # ids while refusing anything that could reshape the upstream URL.
 _APP_USER_ID = re.compile(r"^[A-Za-z0-9_$:.\-@+]{1,128}$")
+# Bound the page the device parses; the client caps its own list at 100 too.
+_MAX_TRANSACTIONS = 100
 
 
 def current_store_app(credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> None:
@@ -126,6 +128,54 @@ def active_entitlements(customer_id: str, _: None = Depends(current_store_app)) 
 			expires_at = int(expiry.timestamp() * 1000)
 		items.append(ActiveEntitlementItem(entitlement_id=str(entitlement_id), expires_at=expires_at))
 	return ActiveEntitlementsResponse(items=items)
+
+
+@app.get("/transactions", response_model=TransactionsResponse)
+def non_subscription_transactions(customer_id: str, _: None = Depends(current_store_app)) -> TransactionsResponse:
+	"""The customer's one-time purchases, in the game's transaction shape.
+
+	A repeatable pack (a consumable) is granted once per purchase, and the only
+	stable key for that is the store transaction id — the entitlement stays
+	active forever after the first buy, so an entitlement read alone cannot tell
+	a second purchase from the first. Only ids and the purchase instant leave
+	the server; no receipt, price, or payment detail is exposed.
+	"""
+	if not _APP_USER_ID.match(customer_id):
+		raise HTTPException(status_code=400, detail="Invalid customer id")
+	try:
+		subscriber = revenuecat_subscriber(customer_id)
+	except Exception as exc:
+		logger.warning("RevenueCat transaction lookup failed: %s", type(exc).__name__)
+		raise HTTPException(status_code=502, detail="Entitlement provider unavailable") from exc
+	non_subscriptions = subscriber.get("subscriber", {}).get("non_subscriptions", {})
+	if not isinstance(non_subscriptions, dict):
+		raise HTTPException(status_code=502, detail="Entitlement provider unavailable")
+	items: list[TransactionItem] = []
+	for product_id, entries in non_subscriptions.items():
+		if not isinstance(entries, list):
+			continue
+		for entry in entries:
+			if not isinstance(entry, dict):
+				continue
+			transaction_id = str(entry.get("id", "")).strip()
+			if not transaction_id:
+				continue
+			purchased_at = 0
+			purchase_date = entry.get("purchase_date")
+			if purchase_date:
+				try:
+					parsed = datetime.fromisoformat(str(purchase_date).replace("Z", "+00:00"))
+					purchased_at = int(parsed.timestamp() * 1000)
+				except (ValueError, OverflowError):
+					purchased_at = 0
+			items.append(TransactionItem(
+				product_id=str(product_id),
+				transaction_id=transaction_id,
+				purchased_at=purchased_at,
+			))
+			if len(items) >= _MAX_TRANSACTIONS:
+				return TransactionsResponse(items=items)
+	return TransactionsResponse(items=items)
 
 
 @app.get("/health")

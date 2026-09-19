@@ -41,6 +41,24 @@ class ActiveEntitlementsResponse(BaseModel):
     items: list[ActiveEntitlementItem]
 
 
+class TransactionItem(BaseModel):
+    """One store purchase in RevenueCat's `non_subscriptions` shape.
+
+    The game claims repeatable consumables per transaction, so a device needs
+    the transaction list — not just the active entitlements — to grant a pack
+    once per purchase.
+    """
+
+    product_id: str
+    transaction_id: str
+    # Milliseconds since the epoch; 0 when the provider gives no date.
+    purchased_at: int = 0
+
+
+class TransactionsResponse(BaseModel):
+    items: list[TransactionItem]
+
+
 class MutationRequest(BaseModel):
     id: str = Field(min_length=1, max_length=255)
     action: str = Field(min_length=1, max_length=64)

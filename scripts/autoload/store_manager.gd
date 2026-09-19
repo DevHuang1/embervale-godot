@@ -586,8 +586,10 @@ func claim_transactions(transactions: Array[Dictionary]) -> Dictionary:
 	return {"granted": granted, "skipped": skipped, "diamonds": diamonds}
 
 ## Consumable transactions exist only where the authority can see the store
-## purchase list. The reference backend speaks entitlements only, so it reports
-## `unsupported` rather than pretending the customer has no purchases.
+## purchase list: the native reader, or the backend proxy's `/transactions`
+## route. Without one, a pack that is granted once per purchase could never be
+## granted at all, so this reports `unsupported` rather than pretending the
+## customer has no purchases.
 func _fetch_non_subscription_transactions() -> Dictionary:
 	if _authority == Authority.NATIVE:
 		if native_bridge == null or not native_bridge.is_available():
@@ -595,8 +597,33 @@ func _fetch_non_subscription_transactions() -> Dictionary:
 				"error": "native_bridge_unavailable",
 				"transactions": [] as Array[Dictionary]}
 		return await native_bridge.fetch_non_subscription_transactions()
+	if _authority == Authority.BACKEND:
+		var request := backend_transactions_request()
+		if request.is_empty():
+			return {"ok": false, "status": "unconfigured",
+				"error": "backend_token_missing", "transactions": [] as Array[Dictionary]}
+		return await _http_get(str(request.get("url", "")),
+			request.get("headers", PackedStringArray()),
+			func(status: int, body: String) -> Dictionary:
+				return RevenueCatApiClient.parse_non_subscription_transactions(status, body))
 	return {"ok": false, "status": "unsupported",
 		"error": "transactions_unsupported", "transactions": [] as Array[Dictionary]}
+
+## The backend transaction read: the same bearer token and route shape as the
+## entitlement read, on the page the game claims consumables from. Exposed for
+## the headless suites, which cannot open a socket.
+func backend_transactions_request() -> Dictionary:
+	if _authority != Authority.BACKEND:
+		return {}
+	var client := BackendApiClient.new(_backend_url)
+	client.configure_token(_account.access_token)
+	if not client.can_request():
+		return {}
+	var base := _backend_url.trim_suffix("/")
+	return {
+		"url": "%s/transactions?customer_id=%s" % [base, customer_id().uri_encode()],
+		"headers": client.authorization_headers(),
+	}
 
 func _fetch_active_entitlements() -> Dictionary:
 	if _authority == Authority.BACKEND:
@@ -634,7 +661,8 @@ func _fetch_via_backend() -> Dictionary:
 	var url := "%s/entitlements/active?customer_id=%s" % [base, customer_id().uri_encode()]
 	return await _http_get(url, client.authorization_headers())
 
-func _http_get(url: String, headers: PackedStringArray) -> Dictionary:
+func _http_get(url: String, headers: PackedStringArray,
+		parser: Callable = Callable()) -> Dictionary:
 	if not url.begins_with("https://"):
 		return {"ok": false, "status": "invalid_request", "error": "insecure_url"}
 	var http := _ensure_http()
@@ -651,6 +679,8 @@ func _http_get(url: String, headers: PackedStringArray) -> Dictionary:
 			status = "redirect_refused"
 		return {"ok": false, "status": status, "error": status}
 	var body := (response[3] as PackedByteArray).get_string_from_utf8()
+	if parser.is_valid():
+		return parser.call(int(response[1]), body)
 	return RevenueCatApiClient.parse_active_entitlements(int(response[1]), body)
 
 func _ensure_http() -> HTTPRequest:
