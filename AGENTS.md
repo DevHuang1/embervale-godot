@@ -26,8 +26,13 @@ coherent slice before opening another large refactor.
 - Pin `gradle_build/min_sdk="24"` in the Android export preset before any Gradle
   build. The preset is gitignored, and Godot 4.7's Gradle-build default is 29,
   which yields an APK that Android 9 (API 28) and older refuse to install with a
-  "parse error". Verify every Android artifact with `aapt2 dump badging` (minSdk
-  24, expected versionCode) before publishing it.
+  "parse error". The same preset carries app identity and must not be left
+  empty: `package/name="Embervale"`, the four `launcher_icons/*` slots, and
+  `splash_screen/icon` all point at `res://assets/branding/app_icon/*`; an empty
+  slot ships the engine's Godot logo on the launcher and the splash. Verify every
+  Android artifact with `aapt2 dump badging` (minSdk 24, expected versionCode,
+  `application-label: Embervale`, branded `mipmap/icon_foreground`) before
+  publishing it.
 - Do not copy protected art, UI, maps, names, lore, or exact designs from other
   RPGs. Use successful games only as quality references.
 

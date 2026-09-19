@@ -21,6 +21,7 @@ own `SOURCE.txt` under `assets/textures/cc0/`.
 | Quaternius Medieval Weapons | hammer and dagger runtime hand-weapon fallbacks | CC0 1.0 | `assets/models/weapons/quaternius/LICENSES.md` | [quaternius.com/packs/medievalweapons.html](https://quaternius.com/packs/medievalweapons.html) |
 | Quaternius Animated Animals | frog, rat, snake, spider, and wasp realm enemies | CC0 1.0 | `assets/models/enemies/quaternius/LICENSES.md` | [quaternius.com](https://quaternius.com/) |
 | Embervale Generated Terrain Surfaces | moss, wet mud, grass, and sand surface sets (albedo + normal + roughness) | Generated in-session with OpenAI image generation; no third-party source license | `assets/textures/stylized/{moss,mud,grass,sand}/` | Consolidated 2026-09-18: the `*_v2` shadow copies were removed and every realm terrain material binds the canonical stylized folders |
+| Embervale App Icon | launcher, adaptive foreground/background, themed monochrome, project icon, boot-splash mark | Project-original, generated deterministically in-repo by `tools/generate_app_icon.gd`; no third-party source | `assets/branding/app_icon/` | Contract: `tests/test_app_icon_assets.gd`. Palette mirrors the UiKit tokens; regenerate with `godot --headless --path . --script tools/generate_app_icon.gd` |
 
 The KayKit Dungeon, Kenney Castle Kit, Kenney Fantasy Town Kit, Quaternius
 Animated Monsters and the five Poly Haven surface sets were added to the
