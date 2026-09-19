@@ -224,7 +224,8 @@ with `STORE_APP_TOKEN` set to the same value.
 2. Tap **BUY ONLINE**. The hosted funnel opens in the browser showing the three
    packs.
 3. Complete a purchase.
-4. Return to the app, tap **RESTORE**. The message reads
+4. Return to the app: it re-checks the provider on the first frame back
+   (**RESTORE** does the same read by hand). The message reads
    "1 pack delivered · +180 ember marks".
 5. Tap RESTORE again on camera. It reads "No new ownership found · nothing was
    double-granted" — that is the idempotency proof.

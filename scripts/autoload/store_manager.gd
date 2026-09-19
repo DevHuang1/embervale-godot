@@ -385,6 +385,20 @@ func open_web_store() -> bool:
 func request_refresh() -> void:
 	_refresh_flow()
 
+## A hosted checkout finishes in the browser, so the purchase lands while the
+## game is in the background. Coming back re-checks the provider immediately
+## rather than making the player find RESTORE; the gate is only armed while a
+## checkout is open, and a plain return with no checkout does nothing.
+func _notification(what: int) -> void:
+	if what != NOTIFICATION_APPLICATION_FOCUS_IN \
+			and what != NOTIFICATION_WM_WINDOW_FOCUS_IN:
+		return
+	if not _purchase_sync.provider_returned():
+		return
+	# Forced: a purchase that just completed must be claimable even if the shop
+	# refreshed seconds before the browser opened.
+	refresh_and_claim.call_deferred(true)
+
 ## Confirms entitlements with the authority, then claims any ungranted pack.
 ## Returns `{ok, status, error, active, granted, skipped, diamonds}`.
 ## `force` skips the refresh throttle: a purchase that just completed must be

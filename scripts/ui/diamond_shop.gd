@@ -248,7 +248,7 @@ func _on_buy_online() -> void:
 		audio.play_ui_cancel()
 		return
 	if bool(_store.open_web_store()):
-		message_label.text = "Finish checkout in your browser, then return and tap RESTORE."
+		message_label.text = "Finish checkout in your browser — packs deliver when you come back."
 		audio.play_ui_blip()
 	else:
 		message_label.text = "The online store could not be opened."

@@ -168,7 +168,9 @@ is right but that customer has not bought anything yet.
 1. Open the **Sandbox** link with the App User ID appended, or just let the app
    open it via **BUY ONLINE**.
 2. Pay with Stripe's test card `4242 4242 4242 4242`, any future expiry, any CVC.
-3. Return to the app and tap **RESTORE**. The message should read
+3. Return to the app: the purchase is re-checked automatically on the first
+   frame back. (Tap **RESTORE** if you want to see the read run by hand.) The
+   message should read
    *"1 pack delivered · +180 ember marks"*.
 4. Tap **RESTORE** again on camera — *"No new ownership found · nothing was
    double-granted"*.
@@ -214,7 +216,8 @@ shows the purchase delivering the marks rather than "nothing new found".
 2. Open the Glintmonger's Case → tap **GLINT** in the HUD action row.
 3. Tap **BUY ONLINE** — the hosted checkout opens in the browser.
 4. Pay with the test card.
-5. Return to the app → **RESTORE** → marks are delivered.
+5. Return to the app — the re-check runs on return — or tap **RESTORE**; marks
+   are delivered.
 6. Tap **RESTORE** again to show the idempotency line.
 7. Spend some marks on a cosmetic to close the loop.
 

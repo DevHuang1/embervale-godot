@@ -33,6 +33,7 @@ func _run() -> void:
 	await _test_native_authority_buy_delivers()
 	await _test_native_pack_buttons_visibility()
 	_test_build_defaults_feed_the_store()
+	await _test_returning_from_checkout_resyncs()
 	_test_backend_authority_from_shipped_defaults()
 	_test_stored_config_is_revalidated()
 	await _test_secret_as_public_key_is_refused()
@@ -540,6 +541,37 @@ func _test_build_defaults_feed_the_store() -> void:
 	store.default_config_path = StoreManager.DEFAULT_CONFIG_PATH
 	store.load_build_defaults = not OS.has_feature("editor")
 	store.native_bridge = BRIDGE.new()
+	store.configure("", "", "", "", "")
+
+## A checkout finishes in the browser, so the game is in the background when the
+## purchase lands. Coming back must re-check the provider by itself — and a
+## return with no checkout must not.
+func _test_returning_from_checkout_resyncs() -> void:
+	var store := _store()
+	if store == null:
+		_failures.append("StoreManager autoload is missing")
+		return
+	store.native_bridge = BRIDGE.new(FakeBridge.new())
+	_check(store.configure("", "", "", "", "", PUBLIC_KEY),
+		"the native authority must configure for the return test")
+	var refreshes := [0]
+	var probe := func(): refreshes[0] += 1
+	store.refresh_started.connect(probe)
+	# The checkout opener arms this; reaching into the service keeps the test
+	# from launching a real browser.
+	store._purchase_sync.begin_provider_purchase()
+	store.notification(Node.NOTIFICATION_APPLICATION_FOCUS_IN)
+	await process_frame
+	await process_frame
+	_check(refreshes[0] == 1,
+		"returning from a checkout must re-check provider ownership once (got %d)"
+			% refreshes[0])
+	store.notification(Node.NOTIFICATION_APPLICATION_FOCUS_IN)
+	await process_frame
+	_check(refreshes[0] == 1,
+		"a return without a new checkout must not re-check again (got %d)" % refreshes[0])
+	if store.refresh_started.is_connected(probe):
+		store.refresh_started.disconnect(probe)
 	store.configure("", "", "", "", "")
 
 ## The Play-less shipping shape: the hosted funnel takes the payment, and the
