@@ -1,7 +1,7 @@
 extends SceneTree
 
 func _init() -> void:
-	var checklist := FileAccess.get_file_as_string("res://RELEASE_CHECKLIST.md")
+	var checklist := FileAccess.get_file_as_string("res://docs/RELEASE_CHECKLIST.md")
 	for section in ["Android package and signing", "Privacy and permissions",
 			"Store and attribution", "Reliability and support", "RevenueCat gate"]:
 		if not checklist.contains(section):
