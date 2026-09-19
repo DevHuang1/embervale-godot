@@ -4,7 +4,7 @@ class_name EconomyCeilingCatalog
 const RULES: Array[Dictionary] = [
 	{"currency": "gold", "purpose": "gear_and_crafting", "earn_route": "combat, gathering, quests, selling", "paid": false, "gameplay_critical": true},
 	{"currency": "diamonds", "purpose": "cosmetics_only", "earn_route": "boss milestones and optional provider grants", "paid": true, "gameplay_critical": false},
-	{"currency": "scans", "purpose": "photo_forging", "earn_route": "free starter grants, quests, boss milestones, fragments", "paid": false, "gameplay_critical": false},
+	{"currency": "scans", "purpose": "foe_analysis_and_forging", "earn_route": "free starter grants, quests, boss milestones, fragments", "paid": false, "gameplay_critical": false},
 ]
 
 static func validate() -> Array[String]:

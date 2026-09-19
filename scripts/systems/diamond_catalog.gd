@@ -8,10 +8,6 @@ class_name DiamondCatalog
 ## compile it directly (autoload identifiers are unavailable to --script mode).
 
 const ITEMS := [
-	{"id": "scan_pack_5", "kind": "scan_pack", "price": 4.99,
-		"name": "Divining Lens Pack", "desc": "5 camera scans + 1 bonus reroll. No guaranteed legendary result.",
-		"duplicate_behavior": "Extra scans fill the capped balance; no duplicate weapon is forced.",
-		"restore_path": "Restore purchases through the account provider."},
 	{"id": "sfx_starlight", "kind": "sfx", "price": 6,
 		"name": "Starlight Strikes", "desc": "Bright crystalline combat voice.",
 		"value": "ember_glass"},
