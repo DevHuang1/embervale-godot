@@ -1,7 +1,7 @@
 extends SceneTree
 
 ## Headless functional check: realms bestiary, scan economy, boss
-## customization storage/payload roundtrip, palette extraction, elite
+## customization storage/payload roundtrip, trophy palettes, elite
 ## volley flag and live customization application on a real boss node.
 
 func _initialize() -> void:
@@ -59,21 +59,17 @@ func _run() -> void:
 		failures += 1
 		print("FAIL: Heartwood hard tier lost its Spore Weaver role")
 
-	# === Palette extraction ===
-	var img := Image.create(32, 32, false, Image.FORMAT_RGB8)
-	img.fill(Color(0.9, 0.12, 0.1))
-	img.fill_rect(Rect2i(10, 10, 12, 12), Color(0.1, 0.2, 0.92))
-	var pal: Array[Color] = RelicForge.extract_palette(img, 3)
-	if pal.size() != 3:
+	# === Trophy palettes ===
+	var trophies: Array = Bestiary.boss_def("matriarch").get("trophies", [])
+	if trophies.size() < 4:
 		failures += 1
-		print("FAIL: palette size ", pal.size())
-	var vivid := false
-	for c in pal:
-		if absf(c.r - c.b) > 0.25:
-			vivid = true
-	if not vivid:
-		failures += 1
-		print("FAIL: palette lost the vivid subject colors")
+		print("FAIL: trophy palette catalog incomplete -> ", trophies.size())
+	for raw_trophy in trophies:
+		var trophy: Dictionary = raw_trophy
+		var palette: Array = trophy.get("palette", [])
+		if palette.size() < 2 or not (palette[0] is Color):
+			failures += 1
+			print("FAIL: trophy palette malformed -> ", trophy.get("id", ""))
 
 	# === Storage + save/load roundtrip ===
 	var skill_def: Dictionary = pool[0]

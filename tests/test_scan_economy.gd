@@ -4,31 +4,36 @@ func _initialize() -> void:
 	_run.call_deferred()
 
 func _run() -> void:
-	var gs := get_root().get_node_or_null("GameState") as GameState
-	var sm := get_root().get_node_or_null("ScanManager") as ScanManager
-	if gs == null or sm == null:
-		print("FAIL: required autoloads missing")
+	var gs = get_root().get_node_or_null("GameState")
+	if gs == null:
+		print("FAIL: GameState autoload missing")
 		quit(1)
 		return
+	gs.save_path = "/tmp/embervale_scan_economy_test.cfg"
+	gs.delete_save()
+	gs.reset()
 	gs.scans_remaining = 1
 	var intents_before: int = gs.get_pending_cloud_intents().size()
-	sm.is_scanning = false
-	sm.start_scan()
-	await process_frame
+	if not gs.consume_scan():
+		print("FAIL: consume_scan refused with 1 left")
+		quit(1)
+		return
 	if gs.scans_remaining != 0:
-		print("FAIL: normal scan did not consume exactly one charge")
+		print("FAIL: consume_scan did not spend exactly one charge")
 		quit(1)
 		return
 	if gs.get_pending_cloud_intents().size() <= intents_before:
-		print("FAIL: scan consumption did not enqueue cloud intent")
+		print("FAIL: charge consumption did not enqueue cloud intent")
 		quit(1)
 		return
-	sm.is_scanning = false
-	sm.start_scan()
-	await process_frame
+	if gs.consume_scan():
+		print("FAIL: consume_scan succeeded at zero")
+		quit(1)
+		return
 	if gs.scans_remaining != 0:
-		print("FAIL: unavailable scan changed the charge")
+		print("FAIL: refused consume changed the charge")
 		quit(1)
 		return
+	gs.delete_save()
 	print("ALL SCAN ECONOMY TESTS PASSED")
 	quit(0)
