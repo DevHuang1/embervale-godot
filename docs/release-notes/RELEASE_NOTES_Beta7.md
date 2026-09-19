@@ -1,12 +1,12 @@
 # Embervale Mobile — Beta 7
 
 **Build date:** 2026-09-19 · **Engine:** Godot 4.7.2.stable · **ABI:** arm64-v8a-only (Android 7.0+ / minSdk 24; targetSdk 36)
-**Package:** `com.devhuang1.embervale` · **App label:** Embervale Mobile
+**Package:** `com.devhuang1.embervale` · **App label:** Embervale
 **versionCode:** `7` · **versionName:** `Beta 7`
 
-**Artifact:** `exports/beta7/Embervale-Beta7-arm64-v8a.apk` (181.6 MB / 190,405,599 bytes)
+**Artifact:** `exports/beta7/Embervale-Beta7-arm64-v8a.apk` (182.5 MB / 191,357,124 bytes)
 **Checksums:** `exports/beta7/SHA256SUMS.txt`
-(SHA-256: `c3fc573eff147b006a1ddc01461ef64c2d5e00df6e0473e50d1988b3368909a8`)
+(SHA-256: `771f3d97f3d99d9d11a651c7e85838f1a9c1427391d3b96fb5f8db1c0c8136ca`)
 
 > Signed with Godot's bundled development certificate — the **same certificate as
 > Beta 1–6**, so this installs straight over any earlier beta and keeps existing
@@ -21,6 +21,20 @@
 > same client. No secret (`sk_...`) is present in any APK. Run
 > `tools/write_store_defaults.gd -- --clear` before a build that must carry no
 > store configuration at all.
+
+## App identity
+
+- The APK now ships a real **Embervale app icon** — an ember flame inside a
+  copper vale-ring on the dark vale field — as a full adaptive icon
+  (background + safe-zone foreground + Android 13 **monochrome** themed layer),
+  a legacy launcher icon for API 24–25, the project icon, and the boot /
+  Android 12 splash mark. **No Godot logo remains anywhere in the install.**
+- The launcher label is now **Embervale** (was "Embervale Mobile").
+- The family is generated deterministically — no imported art — by
+  `tools/generate_app_icon.gd`, and `tests/test_app_icon_assets.gd` guards exact
+  sizes, opaque plates, transparent corners, the 66dp adaptive safe zone, a pure
+  white monochrome layer, and the project/preset wiring. Regenerate with:
+  `godot --headless --path . --script tools/generate_app_icon.gd`
 
 ## What changed since Beta 6
 
@@ -60,7 +74,7 @@
 
 1. Open the release on your Android phone → download the APK (confirm the size) → open it.
 2. If asked, allow "Install unknown apps" for the browser/files app you used.
-3. Install → launch **Embervale Mobile**.
+3. Install → the launcher shows the **Embervale** flame icon → launch **Embervale**.
 
 Store test: open the Glintmonger's Case (HUD **GLINT**) → **BUY** a pack →
 complete the Test Store sheet → the marks arrive → **RESTORE** again to see the
