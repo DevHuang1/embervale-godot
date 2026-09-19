@@ -262,6 +262,7 @@ func _apply_shipped_defaults(path: String) -> void:
 	_apply_project(defaults.project_id)
 	_apply_funnel(defaults.funnel_url)
 	_apply_backend(defaults.backend_url)
+	_apply_access_token(defaults.access_token)
 	# A sealed field that cannot be recovered is corrupt or hostile, not absent:
 	# clear the key instead of leaving an earlier source's value in place.
 	if defaults.native_api_key.strip_edges().is_empty() \
@@ -293,6 +294,22 @@ func _apply_backend(backend_url: String) -> void:
 	_backend_url = backend if StoreSecurity.validate_backend_url(backend).is_empty() else ""
 	if _backend_url.is_empty():
 		push_warning("StoreManager: ignored a shipped backend URL that is not a safe HTTPS endpoint.")
+
+## The backend authority authenticates with a low-privilege app token that is
+## rotatable by rewriting the shipped resource. A value that could not be sent
+## as a header is dropped rather than half-applied, exactly like a bad key.
+func _apply_access_token(access_token: String) -> void:
+	var token := access_token.strip_edges()
+	if token.is_empty():
+		return
+	if not StoreSecurity.is_safe_header_value(token):
+		# A value that cannot be sent as a header is hostile or corrupt, not
+		# absent: drop any earlier token instead of letting it survive a
+		# tampered resource.
+		push_warning("StoreManager: ignored a shipped access token that is not a safe header value.")
+		_account.configure_token("")
+		return
+	_account.configure_token(token)
 
 func _apply_native_key(native_api_key: String) -> void:
 	var native_key := native_api_key.strip_edges()

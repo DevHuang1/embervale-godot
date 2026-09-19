@@ -24,6 +24,11 @@ services:
         sync: false
       - key: REVENUECAT_WEBHOOK_SECRET
         sync: false
+      # Low-privilege token the shipped game client presents on
+      # GET /entitlements/active. Must match EMBERVALE_STORE_ACCESS_TOKEN in the
+      # build's store_defaults.tres; an unset value refuses every read.
+      - key: STORE_APP_TOKEN
+        sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET

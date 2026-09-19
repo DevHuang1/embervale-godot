@@ -72,6 +72,8 @@ select the Stripe config → **Import** → pick products and prices → then st
 | project id (`proj...`) | `EMBERVALE_REVENUECAT_PROJECT_ID` | written into `res://store_defaults.tres` |
 | funnel base URL | `EMBERVALE_STORE_FUNNEL_URL` | written into `res://store_defaults.tres` |
 | public SDK key (`goog_...`) | `EMBERVALE_REVENUECAT_PUBLIC_KEY` | written into `res://store_defaults.tres` |
+| backend URL (Render) | `EMBERVALE_STORE_BACKEND_URL` | written into `res://store_defaults.tres` |
+| app token (client credential) | `EMBERVALE_STORE_ACCESS_TOKEN` | written into `res://store_defaults.tres` |
 | secret key (`sk_...`) | `EMBERVALE_REVENUECAT_SECRET` (never shipped) | — not allowed |
 | App User ID (`ev_...`) | `user://store.cfg` (auto-minted) | `user://store.cfg` (auto-minted) |
 
@@ -83,9 +85,32 @@ plain files):
 EMBERVALE_REVENUECAT_PROJECT_ID="projXXXXXXXX" \
 EMBERVALE_STORE_FUNNEL_URL="https://signup.cat/<link_id>" \
 EMBERVALE_REVENUECAT_PUBLIC_KEY="goog_XXXXXXXX" \
+EMBERVALE_STORE_BACKEND_URL="https://embervale-api.onrender.com" \
+EMBERVALE_STORE_ACCESS_TOKEN="<the Render STORE_APP_TOKEN>" \
 godot --headless --path . --script tools/write_store_defaults.gd
 # -> STORE DEFAULTS WRITTEN   (remove again with: -- --clear)
 ```
+
+## Deploy the entitlement proxy (Render)
+
+The funnel takes the payment; the proxy answers "what does this customer own?"
+so the provider secret never ships. Deploy `backend/render.yaml`:
+
+1. Render → **New → Blueprint** → connect this repository.
+2. Set **Blueprint Path** to `backend/render.yaml` (Render defaults to the repo
+   root, and this repository is a Godot project, not a monorepo root).
+3. Fill the `sync: false` values: `REVENUECAT_API_KEY` (the `sk_...` key),
+   `REVENUECAT_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY` (`sk_test_...` for the
+   sandbox), `STRIPE_WEBHOOK_SECRET`, `STRIPE_SUCCESS_URL`,
+   `STRIPE_CANCEL_URL`, `ALLOWED_ORIGINS`, and **`STORE_APP_TOKEN`** — generate
+   a long random string and use the same value as
+   `EMBERVALE_STORE_ACCESS_TOKEN` in the build.
+4. Point the Stripe webhook at `https://<service>/v1/webhooks/stripe` and the
+   RevenueCat webhook at `https://<service>/v1/webhooks/revenuecat`.
+5. Health check: `GET /health` → `{"status":"ok"}`.
+
+A sandbox funnel URL must never be published: anyone holding it can "buy" with
+Stripe's test card. Sandbox builds are private QA builds.
 
 ## On-device check (native reader)
 

@@ -33,6 +33,7 @@ func _run() -> void:
 	await _test_native_authority_buy_delivers()
 	await _test_native_pack_buttons_visibility()
 	_test_build_defaults_feed_the_store()
+	_test_backend_authority_from_shipped_defaults()
 	_test_stored_config_is_revalidated()
 	await _test_secret_as_public_key_is_refused()
 
@@ -532,6 +533,59 @@ func _test_build_defaults_feed_the_store() -> void:
 	store.load_config()
 	_check(store.authority_name() == "native",
 		"the build gate must be the only thing keeping the shipped resource out")
+
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(defaults))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(device))
+	store.config_path = "user://store.cfg"
+	store.default_config_path = StoreManager.DEFAULT_CONFIG_PATH
+	store.load_build_defaults = not OS.has_feature("editor")
+	store.native_bridge = BRIDGE.new()
+	store.configure("", "", "", "", "")
+
+## The Play-less shipping shape: the hosted funnel takes the payment, and the
+## backend proxy reads entitlements with the provider secret kept server-side.
+## The device carries only the low-privilege app token.
+func _test_backend_authority_from_shipped_defaults() -> void:
+	var store := _store()
+	if store == null:
+		_failures.append("StoreManager autoload is missing")
+		return
+	var defaults := "user://test_store_backend_defaults.tres"
+	var device := "user://test_store_backend_device.cfg"
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(defaults))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(device))
+	store.default_config_path = defaults
+	store.config_path = device
+	store.load_build_defaults = true
+	store.native_bridge = BRIDGE.new(FakeBridge.new())
+	var build := StoreDefaults.new()
+	build.project_id = "proj_backend_defaults"
+	build.funnel_url = "https://signup.cat/link_ship"
+	build.backend_url = "https://embervale-api.onrender.com"
+	build.access_token = "app_token_A1b2C3d4"
+	_check(ResourceSaver.save(build, defaults) == OK,
+		"the backend defaults resource must be writable for the test")
+	store.load_config()
+	_check(store.authority_name() == "backend",
+		"a shipped backend_url + token must configure the backend authority (got %s)"
+			% store.authority_name())
+	_check(store.is_available(), "the backend authority must report available")
+	_check(store.checkout_url().begins_with("https://signup.cat/link_ship/"),
+		"the funnel must stay the checkout path on the backend authority")
+	_check(store.customer_id().begins_with("ev_"),
+		"the backend authority must still use the device-minted customer id")
+
+	# A token that cannot be sent as a header is refused like a malformed key,
+	# so a tampered resource can never half-configure the backend.
+	var hostile := StoreDefaults.new()
+	hostile.project_id = "proj_backend_defaults"
+	hostile.funnel_url = "https://signup.cat/link_ship"
+	hostile.backend_url = "https://embervale-api.onrender.com"
+	hostile.access_token = "bad\ntoken"
+	ResourceSaver.save(hostile, defaults)
+	store.load_config()
+	_check(store.authority_name() != "backend",
+		"a header-unsafe shipped token must never configure the backend authority")
 
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(defaults))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(device))

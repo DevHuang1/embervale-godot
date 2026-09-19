@@ -28,6 +28,19 @@ class EntitlementResponse(BaseModel):
     expires_at: datetime | None
 
 
+class ActiveEntitlementItem(BaseModel):
+    """One active entitlement in RevenueCat's `active_entitlements` shape."""
+
+    entitlement_id: str
+    # Milliseconds since the epoch; null means a lifetime grant. The game's
+    # parser treats any past or malformed expiry as lapsed.
+    expires_at: int | None = None
+
+
+class ActiveEntitlementsResponse(BaseModel):
+    items: list[ActiveEntitlementItem]
+
+
 class MutationRequest(BaseModel):
     id: str = Field(min_length=1, max_length=255)
     action: str = Field(min_length=1, max_length=64)

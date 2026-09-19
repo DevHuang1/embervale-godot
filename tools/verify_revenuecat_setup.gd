@@ -71,8 +71,12 @@ func _check_shipped_defaults() -> bool:
 	var project_id := defaults.project_id.strip_edges()
 	var funnel_url := defaults.funnel_url.strip_edges()
 	var native_key := defaults.native_api_key.strip_edges()
+	var backend_url := defaults.backend_url.strip_edges()
+	var access_token := defaults.access_token.strip_edges()
 	print("  project  : %s" % ("set" if not project_id.is_empty() else "absent"))
 	print("  checkout : %s" % ("set" if not funnel_url.is_empty() else "absent"))
+	print("  backend  : %s" % ("set" if not backend_url.is_empty() else "absent"))
+	print("  token    : %s" % ("set" if not access_token.is_empty() else "absent"))
 	print("  identity : device-minted (never shipped)")
 	if not project_id.is_empty():
 		var problem := SECURITY.validate_project_id(project_id)
@@ -88,6 +92,15 @@ func _check_shipped_defaults() -> bool:
 		var problem := SECURITY.validate_public_sdk_key(native_key)
 		if not problem.is_empty():
 			_failures.append("Shipped native_api_key is rejected (%s)." % problem)
+	if not backend_url.is_empty():
+		var problem := SECURITY.validate_backend_url(backend_url)
+		if not problem.is_empty():
+			_failures.append("Shipped backend_url is rejected (%s)." % problem)
+	if not access_token.is_empty():
+		if not SECURITY.is_safe_header_value(access_token):
+			_failures.append("Shipped access_token is rejected (unsafe_header_value).")
+		if backend_url.is_empty():
+			_failures.append("Shipped access_token has no backend_url to authenticate to.")
 	if funnel_url.is_empty() and native_key.is_empty():
 		_failures.append("Shipped defaults carry neither a native_api_key nor a funnel_url; "
 			+ "the build cannot reach RevenueCat.")

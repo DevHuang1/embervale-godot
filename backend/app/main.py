@@ -1,6 +1,8 @@
+import hmac
 import json
 import logging
 import hashlib
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -14,7 +16,7 @@ from .config import get_settings
 from .db import Base, engine, get_db
 from .models import Account, AuditLog, Entitlement, MutationLedger, PriceVariant, Product, ProviderEvent, ProviderIdentity, PurchaseLedger, SessionRecord
 from .providers import revenuecat_subscriber, verify_revenuecat_signature, verify_stripe_signature
-from .schemas import AccountResponse, CheckoutRequest, EntitlementResponse, MutationRequest, OidcExchangeRequest, ProviderLinkRequest, RefreshRequest
+from .schemas import AccountResponse, ActiveEntitlementItem, ActiveEntitlementsResponse, CheckoutRequest, EntitlementResponse, MutationRequest, OidcExchangeRequest, ProviderLinkRequest, RefreshRequest
 from .security import account_from_token, hash_refresh_token, issue_refresh_token, issue_token, verify_oidc_id_token
 
 logging.basicConfig(level=logging.INFO)
@@ -41,7 +43,8 @@ async def security_middleware(request: Request, call_next):
 	response.headers["X-Content-Type-Options"] = "nosniff"
 	response.headers["X-Frame-Options"] = "DENY"
 	response.headers["Referrer-Policy"] = "no-referrer"
-	response.headers["Cache-Control"] = "no-store" if request.url.path.startswith("/v1") else "no-cache"
+	cacheable_path = not request.url.path.startswith("/v1") and not request.url.path.startswith("/entitlements/")
+	response.headers["Cache-Control"] = "no-cache" if cacheable_path else "no-store"
 	return response
 
 def audit(db: Session, request: Request | None, account_id: str | None, event: str, metadata: dict | None = None) -> None:
@@ -64,6 +67,65 @@ def current_account(credentials: HTTPAuthorizationCredentials | None = Depends(b
 	if account is None or account.disabled or not account.verified:
 		raise HTTPException(status_code=401, detail="Invalid session")
 	return account_id
+
+
+# RevenueCat app user ids this route will look up. The game mints `ev_<hex>`
+# ids, but the pattern stays permissive for dashboards that use e-mail-shaped
+# ids while refusing anything that could reshape the upstream URL.
+_APP_USER_ID = re.compile(r"^[A-Za-z0-9_$:.\-@+]{1,128}$")
+
+
+def current_store_app(credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> None:
+	"""Authenticates the shipped game client on the read-only store route.
+
+	The client holds a low-privilege app token. It can read the entitlements of
+	the RevenueCat customer it names and nothing else; the provider secret stays
+	on the server. An unset server token refuses every request rather than
+	falling open, and the comparison is constant-time.
+	"""
+	expected = settings.store_app_token
+	presented = credentials.credentials if credentials is not None else ""
+	if not expected or not presented or not hmac.compare_digest(expected, presented):
+		raise HTTPException(status_code=401, detail="Authentication required")
+
+
+@app.get("/entitlements/active", response_model=ActiveEntitlementsResponse)
+def active_entitlements(customer_id: str, _: None = Depends(current_store_app)) -> ActiveEntitlementsResponse:
+	"""Read-through to RevenueCat in the `active_entitlements` list shape.
+
+	The game parses this response with the same parser it uses for RevenueCat's
+	own API, so the device never needs a provider secret. The route is read-only
+	on purpose: granting stays in the app's claim ledger, keyed by entitlement.
+	"""
+	if not _APP_USER_ID.match(customer_id):
+		raise HTTPException(status_code=400, detail="Invalid customer id")
+	try:
+		subscriber = revenuecat_subscriber(customer_id)
+	except Exception as exc:
+		logger.warning("RevenueCat lookup failed for a store refresh: %s", type(exc).__name__)
+		raise HTTPException(status_code=502, detail="Entitlement provider unavailable") from exc
+	entitlements = subscriber.get("subscriber", {}).get("entitlements", {})
+	if not isinstance(entitlements, dict):
+		raise HTTPException(status_code=502, detail="Entitlement provider unavailable")
+	now_value = datetime.now(timezone.utc)
+	items: list[ActiveEntitlementItem] = []
+	for entitlement_id, value in entitlements.items():
+		if not isinstance(value, dict):
+			continue
+		expires_at: int | None = None
+		expires_date = value.get("expires_date")
+		if expires_date:
+			try:
+				expiry = datetime.fromisoformat(str(expires_date).replace("Z", "+00:00"))
+			except ValueError:
+				continue
+			if expiry.tzinfo is None:
+				expiry = expiry.replace(tzinfo=timezone.utc)
+			if expiry <= now_value:
+				continue
+			expires_at = int(expiry.timestamp() * 1000)
+		items.append(ActiveEntitlementItem(entitlement_id=str(entitlement_id), expires_at=expires_at))
+	return ActiveEntitlementsResponse(items=items)
 
 
 @app.get("/health")

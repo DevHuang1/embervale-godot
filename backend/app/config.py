@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:3000"
     revenuecat_api_key: str = ""
     revenuecat_webhook_secret: str = ""
+    # Low-privilege token the shipped game client presents on the read-only
+    # entitlements route. It can only read the named customer's entitlements;
+    # the provider secret never leaves the server.
+    store_app_token: str = ""
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_success_url: str = "https://example.invalid/checkout/success"

@@ -181,16 +181,30 @@ godot --path . scenes/main/main.tscn
 ```
 
 Backend authority (shipping shape, no secret on the device): set
-`EMBERVALE_STORE_BACKEND_URL` and `EMBERVALE_STORE_ACCESS_TOKEN`, and have the
-server expose:
+`EMBERVALE_STORE_BACKEND_URL` and `EMBERVALE_STORE_ACCESS_TOKEN`, and the
+server exposes:
 
 ```
 GET {backend}/entitlements/active?customer_id=<id>
+Authorization: Bearer <app token>
 -> { "items": [ { "entitlement_id": "...", "expires_at": null } ] }
 ```
 
 That is the same shape as RevenueCat's `active_entitlements` response, so one
-parser serves both authorities.
+parser serves both authorities. `backend/app/main.py` implements it: the route
+compares the bearer token to `STORE_APP_TOKEN` in constant time, looks the
+customer up through RevenueCat with the server-side `REVENUECAT_API_KEY`, and
+returns only entitlement ids and expiries (`expires_at` in milliseconds, `null`
+for a lifetime grant). Lapsed and unparseable expiries are dropped, so the
+device never turns an expired row into a grant.
+
+The app token ships in `res://store_defaults.tres` (gitignored) through
+`EMBERVALE_STORE_ACCESS_TOKEN`. It is a rotatable client credential, not a
+provider secret: it can only read the entitlements of the customer id the game
+names, and it is validated as a safe header value before use — a tampered or
+header-unsafe value clears any earlier token instead of half-configuring the
+store. Deploy shape: `backend/render.yaml` (Blueprint path `backend/render.yaml`)
+with `STORE_APP_TOKEN` set to the same value.
 
 ## Demo script (Shipaton video, under 2 minutes)
 

@@ -23,6 +23,11 @@ class_name StoreDefaults
 @export var project_id := ""
 @export var funnel_url := ""
 @export var backend_url := ""
+## Low-privilege app token for the backend authority. It can only read the
+## entitlements of the RevenueCat customer the game names — the provider secret
+## stays on the server — so it is a rotatable client credential, not a secret.
+## It is validated as a safe header value before it is ever sent.
+@export var access_token := ""
 
 const RESOURCE_PATH := "res://store_defaults.tres"
 

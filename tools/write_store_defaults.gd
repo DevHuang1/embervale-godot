@@ -8,8 +8,10 @@ extends SceneTree
 ##   godot --headless --path . --script tools/write_store_defaults.gd
 ##
 ## Optional: EMBERVALE_REVENUECAT_PROJECT_ID, EMBERVALE_STORE_FUNNEL_URL,
-## EMBERVALE_STORE_BACKEND_URL. A secret (`sk_...`) is refused, and `--clear`
-## removes the file for a build that must not carry test keys.
+## EMBERVALE_STORE_BACKEND_URL, EMBERVALE_STORE_ACCESS_TOKEN. A secret
+## (`sk_...`) is refused, and `--clear` removes the file for a build that must
+## not carry test keys. The access token is the low-privilege app credential the
+## backend proxy expects; it can only read the named customer's entitlements.
 ##
 ## The public SDK key is SEALED by default (`--no-seal` writes it plain):
 ## obfuscation only, so a literal copy-paste of the resource does not hand out a
@@ -42,6 +44,7 @@ func _run() -> void:
 	var project_id := OS.get_environment("EMBERVALE_REVENUECAT_PROJECT_ID").strip_edges()
 	var funnel_url := OS.get_environment("EMBERVALE_STORE_FUNNEL_URL").strip_edges()
 	var backend_url := OS.get_environment("EMBERVALE_STORE_BACKEND_URL").strip_edges()
+	var access_token := OS.get_environment("EMBERVALE_STORE_ACCESS_TOKEN").strip_edges()
 	if source != null:
 		# A previous defaults resource is the fallback for any field the
 		# environment does not override (used when recovering a shipped key).
@@ -53,8 +56,10 @@ func _run() -> void:
 			funnel_url = source.funnel_url.strip_edges()
 		if backend_url.is_empty():
 			backend_url = source.backend_url.strip_edges()
+		if access_token.is_empty():
+			access_token = source.access_token.strip_edges()
 
-	_check_inputs(key, project_id, funnel_url, backend_url)
+	_check_inputs(key, project_id, funnel_url, backend_url, access_token)
 	if not _failures.is_empty():
 		_report()
 		return
@@ -71,6 +76,7 @@ func _run() -> void:
 	defaults.project_id = project_id
 	defaults.funnel_url = funnel_url
 	defaults.backend_url = backend_url
+	defaults.access_token = access_token
 	var error := ResourceSaver.save(defaults, PATH)
 	if error != OK:
 		_failures.append("Could not write %s (error %d)." % [PATH, error])
@@ -84,6 +90,7 @@ func _run() -> void:
 	print("  project_id     : %s" % ("set" if not project_id.is_empty() else "absent"))
 	print("  funnel_url     : %s" % ("set" if not funnel_url.is_empty() else "absent"))
 	print("  backend_url    : %s" % ("set" if not backend_url.is_empty() else "absent"))
+	print("  access_token   : %s" % ("set" if not access_token.is_empty() else "absent"))
 	print("  identity       : device-minted (never shipped)")
 	print("STORE DEFAULTS WRITTEN")
 	quit(0)
@@ -113,7 +120,7 @@ func _clear() -> void:
 	quit(0)
 
 func _check_inputs(key: String, project_id: String, funnel_url: String,
-		backend_url: String) -> void:
+		backend_url: String, access_token: String) -> void:
 	if key.is_empty() and funnel_url.is_empty():
 		_failures.append("Nothing to ship: set EMBERVALE_REVENUECAT_PUBLIC_KEY "
 			+ "(SDK path) and/or EMBERVALE_STORE_FUNNEL_URL (web path).")
@@ -135,6 +142,11 @@ func _check_inputs(key: String, project_id: String, funnel_url: String,
 		var backend_problem := SECURITY.validate_backend_url(backend_url)
 		if not backend_problem.is_empty():
 			_failures.append("EMBERVALE_STORE_BACKEND_URL is refused (%s)." % backend_problem)
+	if not access_token.is_empty() and not SECURITY.is_safe_header_value(access_token):
+		_failures.append("EMBERVALE_STORE_ACCESS_TOKEN is refused (unsafe_header_value).")
+	if not access_token.is_empty() and backend_url.is_empty():
+		_failures.append("EMBERVALE_STORE_ACCESS_TOKEN needs EMBERVALE_STORE_BACKEND_URL: "
+			+ "the token is only sent to the backend authority.")
 
 func _report() -> void:
 	for failure in _failures:
