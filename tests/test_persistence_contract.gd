@@ -121,6 +121,28 @@ func _run() -> void:
 		and camp.call("is_shortcut_unlocked", "bramblewood", "rootway_shortcut"),
 		"Rootway facility did not survive round-trip")
 
+	# Mini-map discovery cells survive a round-trip, stay bounded, and reject
+	# duplicates or malformed entries instead of growing the save.
+	_check(_game_state.mark_explored("bramblewood", 17),
+		"first explored cell was not recorded")
+	_check(not _game_state.mark_explored("bramblewood", 17),
+		"duplicate explored cell was accepted twice")
+	_check(not _game_state.mark_explored("bramblewood", -3),
+		"negative explored cell was accepted")
+	_game_state.mark_explored("bramblewood", 42)
+	_check(_game_state.is_explored("bramblewood", 17)
+		and not _game_state.is_explored("mistfen", 17),
+		"explored cell lookup leaked across realms")
+	_game_state.save_game()
+	_check(_game_state.flush_save(), "explored-cell save failed")
+	_game_state.reset()
+	_check(_game_state.load_game(), "explored-cell load failed")
+	_check(_game_state.is_explored("bramblewood", 17)
+		and _game_state.is_explored("bramblewood", 42),
+		"explored cells did not survive round-trip")
+	_check(not _game_state.is_explored("bramblewood", 99),
+		"unvisited cell was reported explored after load")
+
 	# A corrupt primary falls back to the last known-good backup.
 	_game_state.gold = 222
 	_game_state.save_game()

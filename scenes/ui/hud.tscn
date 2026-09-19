@@ -65,7 +65,7 @@ grow_vertical = 2
 text = "ROLL"
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_font_sizes = {"font_size": 13}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.88, 0.94, 0.86, 1)}
 
 [node name="JumpButton" type="Control" parent="Root"]
@@ -97,7 +97,7 @@ grow_vertical = 2
 text = "JUMP"
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_font_sizes = {"font_size": 13}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.88, 0.91, 0.97, 1)}
 
 [node name="MinimapContainer" type="Control" parent="Root"]
@@ -127,14 +127,14 @@ theme_override_constants = {"separation": 4}
 [node name="LevelBadge" type="Label" parent="Root/PlayerPlate/PlateVBox/PlateHeader"]
 layout_mode = 2
 text = "LV 01"
-theme_override_font_sizes = {"font_size": 16}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.961, 0.722, 0.255, 1)}
 
 [node name="WarmthText" type="Label" parent="Root/PlayerPlate/PlateVBox/PlateHeader"]
 layout_mode = 2
 size_flags_horizontal = 10
 text = "34/34"
-theme_override_font_sizes = {"font_size": 16}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.95, 0.82, 0.62, 1)}
 
 [node name="WarmthBar" type="ProgressBar" parent="Root/PlayerPlate/PlateVBox"]
@@ -176,7 +176,7 @@ theme_override_constants = {"panel_inset": 14}
 [node name="ChapterLabel" type="Label" parent="Root/QuestLedger/QuestLedgerVBox"]
 text = "I. THE QUIET GROVE"
 horizontal_alignment = 0
-theme_override_font_sizes = {"font_size": 16}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.43, 0.27, 0.18, 1)}
 
 [node name="TitleLabel" type="Label" parent="Root/QuestLedger/QuestLedgerVBox"]
@@ -189,26 +189,26 @@ theme_override_colors = {"font_color": Color(0.09, 0.21, 0.17, 1)}
 text = "Follow the pale path until the bramble sprite stirs."
 horizontal_alignment = 0
 autowrap_mode = 2
-theme_override_font_sizes = {"font_size": 17}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.3, 0.27, 0.2, 1)}
 
 [node name="ObjectiveLabel" type="Label" parent="Root/QuestLedger/QuestLedgerVBox"]
 text = "No side objectives active."
 autowrap_mode = 2
-theme_override_font_sizes = {"font_size": 14}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.36, 0.32, 0.24, 1)}
 
 [node name="CheckpointLabel" type="Label" parent="Root/QuestLedger/QuestLedgerVBox"]
 text = "CHECKPOINT  ·  GROVE ARRIVAL"
 autowrap_mode = 2
-theme_override_font_sizes = {"font_size": 11}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.66, 0.48, 0.2, 1)}
 
 [node name="LessonButton" type="Button" parent="Root/QuestLedger/QuestLedgerVBox"]
 custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 text = "OPEN CHAPTER LESSON"
-theme_override_font_sizes/font_size = 13
+theme_override_font_sizes/font_size = 18
 
 [node name="MetaRow" type="VBoxContainer" parent="Root"]
 layout_mode = 1
@@ -228,20 +228,20 @@ theme_override_constants/separation = 12
 [node name="GoldLabel" type="Label" parent="Root/MetaRow/TopRow"]
 text = "GOLD  30"
 tooltip_text = "Gold — buy gear at the trader"
-theme_override_font_sizes = {"font_size": 16}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(1, 0.84, 0.45, 1)}
 
 [node name="DiamondLabel" type="Label" parent="Root/MetaRow/TopRow"]
 text = "DIAMONDS  0"
 tooltip_text = "Diamonds — cosmetic treasures only"
-theme_override_font_sizes = {"font_size": 16}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.55, 0.85, 1, 1)}
 
 [node name="SettingsButton" type="Button" parent="Root/MetaRow/TopRow"]
 custom_minimum_size = Vector2(96, 44)
 text = "MENU"
 tooltip_text = "Settings"
-theme_override_font_sizes/font_size = 14
+theme_override_font_sizes/font_size = 18
 
 [node name="ActionRow" type="HBoxContainer" parent="Root/MetaRow"]
 alignment = 2
@@ -261,7 +261,7 @@ tooltip_text = "Field Satchel (I)"
 text = "0"
 horizontal_alignment = 2
 vertical_alignment = 2
-theme_override_font_sizes = {"font_size": 14}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(1, 1, 1, 1)}
 
 [node name="ScanButton" type="Button" parent="Root/MetaRow/ActionRow"]
@@ -333,27 +333,27 @@ border_color = Color(0.42, 0.3, 0.14, 1)
 [node name="CombatStatus" type="Label" parent="Root/CombatCard/CombatVBox"]
 text = "LOCKED  ·  THREAT  ·  THE HUSHLING\nHP 28 / 28"
 horizontal_alignment = 1
-theme_override_font_sizes = {"font_size": 17}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.62, 0.72, 0.52, 1)}
 
 [node name="TargetDirectionLabel" type="Label" parent="Root/CombatCard/CombatVBox"]
 text = "TARGET IN VIEW"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 13
+theme_override_font_sizes/font_size = 18
 theme_override_colors = {"font_color": Color(0.55, 0.86, 0.62, 1)}
 
 [node name="EnemyScanButton" type="Button" parent="Root/CombatCard/CombatVBox"]
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 text = "ANALYZE FOE"
-theme_override_font_sizes/font_size = 14
+theme_override_font_sizes/font_size = 18
 
 [node name="TargetSwitchButton" type="Button" parent="Root/CombatCard/CombatVBox"]
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 text = "NEXT TARGET"
 tooltip_text = "Switch the locked target to the next nearby enemy"
-theme_override_font_sizes/font_size = 14
+theme_override_font_sizes/font_size = 18
 
 [node name="BossHealthBar" type="PanelContainer" parent="Root"]
 visible = false
@@ -392,7 +392,7 @@ border_color = Color(0.42, 0.3, 0.14, 1)
 text = "PHASE 1"
 horizontal_alignment = 1
 vertical_alignment = 2
-theme_override_font_sizes = {"font_size": 16}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(1, 0.84, 0.47, 1), "font_outline_color": Color(0, 0, 0, 0.7)}
 theme_override_constants = {"outline_size": 4}
 
@@ -446,14 +446,14 @@ theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1)}
 [node name="LootTitle" type="Label" parent="Root/LootToast/LootVBox"]
 text = "LOOT SECURED"
 horizontal_alignment = 2
-theme_override_font_sizes = {"font_size": 15}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.961, 0.722, 0.255, 1)}
 
 [node name="LootNotice" type="Label" parent="Root/LootToast/LootVBox"]
 text = "Hushling cache secured..."
 horizontal_alignment = 2
 autowrap_mode = 2
-theme_override_font_sizes = {"font_size": 15}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.80, 0.77, 0.66, 1)}
 
 [node name="SkillBar" type="Control" parent="Root"]
@@ -501,7 +501,7 @@ text = "STRIKE"
 horizontal_alignment = 1
 vertical_alignment = 2
 offset_bottom = -8.0
-theme_override_font_sizes = {"font_size": 10}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(1, 0.92, 0.72, 1)}
 
 [node name="Skill0Button" type="Control" parent="Root/SkillBar"]
@@ -543,7 +543,7 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 2
-theme_override_font_sizes = {"font_size": 12}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1), "font_shadow_color": Color(0, 0, 0, 0.75)}
 theme_override_constants = {"shadow_offset_x": 1, "shadow_offset_y": 2}
 
@@ -586,7 +586,7 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 2
-theme_override_font_sizes = {"font_size": 12}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1), "font_shadow_color": Color(0, 0, 0, 0.75)}
 theme_override_constants = {"shadow_offset_x": 1, "shadow_offset_y": 2}
 
@@ -629,6 +629,6 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 vertical_alignment = 2
-theme_override_font_sizes = {"font_size": 12}
+theme_override_font_sizes = {"font_size": 18}
 theme_override_colors = {"font_color": Color(0.96, 0.84, 0.47, 1), "font_shadow_color": Color(0, 0, 0, 0.75)}
 theme_override_constants = {"shadow_offset_x": 1, "shadow_offset_y": 2}

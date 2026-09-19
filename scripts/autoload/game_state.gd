@@ -3,6 +3,7 @@ extends Node
 const CONTENT_SCHEMA := preload("res://scripts/systems/content_schema.gd")
 const CONTENT_REGISTRY := preload("res://scripts/systems/content_registry.gd")
 const CRAFTING_DATA := preload("res://scripts/systems/crafting_data.gd")
+const FORGE_CATALOG := preload("res://scripts/systems/forge_catalog.gd")
 const BESTIARY_DATA := preload("res://scripts/systems/bestiary.gd")
 const BOSS_ROSTER := preload("res://scripts/systems/boss_roster_catalog.gd")
 const BOSS_ASSET_MANIFEST := preload("res://scripts/systems/boss_asset_manifest.gd")
@@ -81,6 +82,13 @@ func _make_consumable(item_id: String) -> Dictionary:
 var raw_materials: Dictionary = {}
 var gathered_nodes: Dictionary = {}
 var discovered_landmarks: Dictionary = {}
+## Per-realm explored mini-map cells for the discovery layer. Additive: legacy
+## saves start with an empty map, malformed payloads are dropped, and the cap
+## bounds both the save size and the minimap's lookup cost. Cells are 12 m
+## world-anchored squares, so the cap covers roughly half a square kilometre of
+## genuinely new travel before discovery stops recording.
+const EXPLORED_CELL_CAP := 2048
+var explored_cells: Dictionary = {}
 ## Additive hybrid persistence for optional realm activities.  The four maps
 ## are intentionally independent from quest/checkpoint state so a malformed
 ## activity payload can be discarded without losing core progression.
@@ -95,7 +103,7 @@ var world_activity_state: Dictionary = {
 # === Weapon registry: each style drives its own attack animation + FX kit ===
 const WEAPON_DEFS := {
 	"mug_mace": {
-		"id": "mug_mace", "name": "MUG MACE", "glyph": "mace", "style": "blunt",
+		"id": "mug_mace", "name": "CINDER MAUL", "glyph": "mace", "style": "blunt",
 		"element": "fire", "price": 20,
 		"atk": 7, "swing_time":     0.32, "range": 8.2,
 		"skills": [
@@ -162,25 +170,25 @@ const WEAPON_DEFS := {
 				"heal": 18, "desc": "Turn the old root's vigor into restored warmth."}
 		]
 	},
-	"pocket_blade": {"id": "pocket_blade", "name": "POCKET BLADE", "glyph": "blade", "style": "slash", "element": "shadow", "atk": 5, "swing_time": 0.26, "range": 6.4, "price": 15,
+	"pocket_blade": {"id": "pocket_blade", "name": "SHARD DAGGER", "glyph": "blade", "style": "slash", "element": "shadow", "atk": 5, "swing_time": 0.26, "range": 6.4, "price": 15,
 		"skills": [
 			{"name": "FLASH BANG", "icon": "explosion", "type": "explosion", "cooldown": 6.0, "radius": 4.0, "dmg_mult": 1.5},
 			{"name": "QUIET STEP", "icon": "dash_strike", "type": "dash_strike", "cooldown": 3.5, "dmg_mult": 1.4},
 			{"name": "SHADOW CUT", "icon": "strike", "type": "strike", "cooldown": 2.0, "dmg_mult": 1.8}
 		]},
-	"snip_twins": {"id": "snip_twins", "name": "SNIP TWINS", "glyph": "blade", "style": "slash", "element": "shock", "atk": 6, "swing_time": 0.32, "range": 7.2,
+	"snip_twins": {"id": "snip_twins", "name": "TWIN FANGS", "glyph": "blade", "style": "slash", "element": "shock", "atk": 6, "swing_time": 0.32, "range": 7.2,
 		"skills": [
 			{"name": "SNIP DASH", "icon": "dash_strike", "type": "dash_strike", "cooldown": 3.5, "dmg_mult": 1.2},
 			{"name": "SPLIT ARC", "icon": "whirl", "type": "whirl", "cooldown": 2.8, "radius": 3.2, "dmg_mult": 1.5},
 			{"name": "SHEAR LINE", "icon": "strike", "type": "strike", "cooldown": 2.2, "dmg_mult": 1.9}
 		]},
-	"soda_cannon": {"id": "soda_cannon", "name": "SODA CANNON", "glyph": "potion", "style": "magic", "element": "water", "atk": 6, "swing_time": 0.34, "range": 7.6,
+	"soda_cannon": {"id": "soda_cannon", "name": "FEN SCEPTER", "glyph": "potion", "style": "magic", "element": "water", "atk": 6, "swing_time": 0.34, "range": 7.6,
 		"skills": [
 			{"name": "SODA SPRAY", "icon": "comet", "type": "comet", "cooldown": 2.5, "radius": 3.0, "dmg_mult": 1.6},
 			{"name": "FIZZ BURST", "icon": "explosion", "type": "explosion", "cooldown": 3.5, "radius": 3.5, "dmg_mult": 1.8},
 			{"name": "COOLING SIP", "icon": "heal_bloom", "type": "heal_bloom", "cooldown": 5.0, "heal": 12}
 		]},
-	"slab_hammer": {"id": "slab_hammer", "name": "SLAB HAMMER", "glyph": "mace", "style": "blunt", "element": "thunder", "atk": 10, "swing_time": 0.52, "range": 9.2,
+	"slab_hammer": {"id": "slab_hammer", "name": "ASHFALL MAUL", "glyph": "mace", "style": "blunt", "element": "thunder", "atk": 10, "swing_time": 0.52, "range": 9.2,
 		"skills": [
 			{"name": "EM PULSE", "icon": "explosion", "type": "heavy_aoe", "cooldown": 7.0, "radius": 6.0, "dmg_mult": 1.8},
 			{"name": "GROUND BREAK", "icon": "explosion", "type": "aoe", "cooldown": 4.5, "radius": 4.5, "dmg_mult": 1.7},
@@ -546,6 +554,7 @@ const SCAN_FRAGMENTS_PER_SCAN := 10
 @export var scans_remaining: int = FREE_SCANS
 @export var scan_fragments: int = 0
 var boss_customs: Dictionary = {}  # boss_id -> payload Dictionary
+var analyzed_families: Dictionary = {}
 signal scans_changed(count: int)
 signal scan_fragments_changed(fragments: int)
 signal application_paused
@@ -768,6 +777,7 @@ func reset() -> void:
 	raw_materials = {}
 	gathered_nodes = {}
 	discovered_landmarks = {}
+	explored_cells = {}
 	world_activity_state = _empty_world_activity_state()
 	quest_objectives = []
 	pinned_objective_id = ""
@@ -803,6 +813,7 @@ func reset() -> void:
 
 	scans_remaining = FREE_SCANS
 	scan_fragments = 0
+	analyzed_families = {}
 	boss_customs = {}
 	boss_reward_selections = {}
 	purchase_ledger.clear()
@@ -1502,6 +1513,56 @@ func _empty_world_activity_state() -> Dictionary:
 func get_world_activity_state() -> Dictionary:
 	return world_activity_state.duplicate(true)
 
+## === Mini-map discovery ===
+## Bounded per-realm explored-cell sets. A cell is only ever added by the
+## minimap as the player physically reaches it, so the map reveals itself
+## through play and a hand-edited save can at worst pre-reveal its own map.
+func _normalize_explored_cells(value: Variant) -> Dictionary:
+	var result: Dictionary = {}
+	if not value is Dictionary:
+		return result
+	var source: Dictionary = value
+	for realm_value in source:
+		var realm := str(realm_value).strip_edges()
+		if realm.is_empty():
+			continue
+		var raw_cells: Variant = source[realm_value]
+		if not raw_cells is Array:
+			continue
+		var cells: Array[int] = []
+		for raw_cell in (raw_cells as Array):
+			var cell := int(raw_cell)
+			if cell < 0 or cells.has(cell):
+				continue
+			cells.append(cell)
+			if cells.size() >= EXPLORED_CELL_CAP:
+				break
+		if not cells.is_empty():
+			result[realm] = cells
+	return result
+
+func explored_cells_for(realm_id: String) -> Array:
+	var cells: Array = explored_cells.get(realm_id.strip_edges(), [])
+	return cells.duplicate()
+
+func is_explored(realm_id: String, cell_index: int) -> bool:
+	var cells: Array = explored_cells.get(realm_id.strip_edges(), [])
+	return cells.has(cell_index)
+
+## Records one explored cell. Returns true only when it is newly added, so the
+## minimap can coalesce redraws; save_game() is debounced by the save service.
+func mark_explored(realm_id: String, cell_index: int) -> bool:
+	var realm := realm_id.strip_edges()
+	if realm.is_empty() or cell_index < 0:
+		return false
+	var cells: Array = explored_cells.get(realm, [])
+	if cells.has(cell_index) or cells.size() >= EXPLORED_CELL_CAP:
+		return false
+	cells.append(cell_index)
+	explored_cells[realm] = cells
+	save_game()
+	return true
+
 func is_world_activity_completed(realm_id: String, activity_id: String) -> bool:
 	var completed: Dictionary = world_activity_state.get("completed", {}) \
 		if world_activity_state.get("completed", {}) is Dictionary else {}
@@ -2101,7 +2162,8 @@ func get_purchase_ledger() -> Array[Dictionary]:
 # them, so a claim stays idempotent across save/load cycles instead of being
 # granted again on the next entitlement refresh.
 const PROVIDER_LEDGER_KEYS: Array[String] = ["provider", "provider_record_id",
-	"provider_entitlement", "provider_expires_at"]
+	"provider_entitlement", "provider_expires_at", "provider_transaction",
+	"provider_product"]
 
 func is_provider_claim_recorded(record_id: String) -> bool:
 	var wanted := record_id.strip_edges()
@@ -2748,6 +2810,93 @@ func forge_relic_weapon(base: Dictionary, rarity: int, item_name: String,
 	add_weapon(def, true, "%s bound into your kit." % def.name)
 	return def
 
+# === Forge blueprints (camera-free weapon path) ===
+func register_analysis(kind: String) -> Array[String]:
+	var family := FORGE_CATALOG.family_for_kind(kind)
+	if family.is_empty():
+		return []
+	var before := unlocked_blueprint_ids()
+	analyzed_families[family] = int(analyzed_families.get(family, 0)) + 1
+	record_activity("ANALYSIS · %s %d" % [family.to_upper(), analyzed_families[family]])
+	save_game()
+	var unlocked: Array[String] = []
+	for id in unlocked_blueprint_ids():
+		if id not in before:
+			unlocked.append(id)
+	return unlocked
+
+func is_blueprint_unlocked(blueprint_id: String) -> bool:
+	var plan := FORGE_CATALOG.blueprint(blueprint_id)
+	if plan.is_empty():
+		return false
+	var unlock: Dictionary = plan.get("unlock", {})
+	if unlock.has("boss"):
+		return has_boss_killed(str(unlock["boss"]))
+	if unlock.has("family"):
+		return int(analyzed_families.get(str(unlock["family"]), 0)) >= int(unlock.get("count", 1))
+	return false
+
+func unlocked_blueprint_ids() -> Array[String]:
+	var ids: Array[String] = []
+	for id in FORGE_CATALOG.blueprint_ids():
+		if is_blueprint_unlocked(id):
+			ids.append(id)
+	return ids
+
+func blueprint_progress(blueprint_id: String) -> Dictionary:
+	var plan := FORGE_CATALOG.blueprint(blueprint_id)
+	if plan.is_empty():
+		return {"unlocked": false, "kind": "", "current": 0, "required": 0, "label": "Unknown blueprint"}
+	var unlocked := is_blueprint_unlocked(blueprint_id)
+	var unlock: Dictionary = plan.get("unlock", {})
+	if unlock.has("boss"):
+		var boss_key := str(unlock["boss"])
+		return {"unlocked": unlocked, "kind": "boss",
+			"current": 1 if unlocked else 0, "required": 1,
+			"label": "Defeat %s" % FORGE_CATALOG.boss_label(boss_key)}
+	var family := str(unlock.get("family", ""))
+	var required := int(unlock.get("count", 1))
+	var current := int(analyzed_families.get(family, 0))
+	return {"unlocked": unlocked, "kind": "family", "current": current,
+		"required": required, "label": "Analyze %d %s" % [required, FORGE_CATALOG.family_label(family)]}
+
+func forge_blueprint(blueprint_id: String, tier: int, item_name: String,
+		skill_names: Array) -> Dictionary:
+	var base: Dictionary = WEAPON_DEFS.get(blueprint_id, {}).duplicate(true)
+	if base.is_empty():
+		return {"success": false, "message": "Blueprint is not defined."}
+	if not is_blueprint_unlocked(blueprint_id):
+		var progress := blueprint_progress(blueprint_id)
+		return {"success": false,
+			"message": "Blueprint locked · %s." % str(progress.get("label", ""))}
+	var tier_index := clampi(int(tier), 0, FORGE_CATALOG.tier_count() - 1)
+	var cost := FORGE_CATALOG.tier_cost(tier_index)
+	for mat_id in cost:
+		var needed := int(cost[mat_id])
+		if not MATERIAL_DEFS.has(str(mat_id)):
+			return {"success": false, "message": "Forge cost contains an invalid material."}
+		if not has_material(str(mat_id), needed):
+			return {"success": false, "message": "Need %d %s." % [
+				needed, str(MATERIAL_DEFS[mat_id].get("name", mat_id))]}
+	for mat_id in cost:
+		var remaining := get_material_qty(str(mat_id)) - int(cost[mat_id])
+		if remaining > 0:
+			raw_materials[mat_id] = remaining
+		else:
+			raw_materials.erase(mat_id)
+	materials_changed.emit()
+	var def := RelicData.build_weapon_def(base, tier_index, item_name, skill_names)
+	add_weapon(def, true, "%s forged into your kit." % def.name)
+	update_objective("craft", blueprint_id, 1, false)
+	check_onboarding_trigger("craft")
+	record_activity("FORGED · %s" % blueprint_id)
+	cloud_sync_queue.enqueue("forge-%s-%d" % [blueprint_id, Time.get_ticks_msec()],
+		"forge_blueprint", {"blueprint": blueprint_id, "tier": tier_index,
+			"materials": cost.duplicate(true)})
+	save_game()
+	return {"success": true, "message": "%s forged." % def.name, "def": def,
+		"tier": tier_index, "cost": cost}
+
 # === Scan economy ===
 func earn_scan() -> void:
 	if scans_remaining >= MAX_SCANS:
@@ -2938,6 +3087,7 @@ func _build_save_config() -> ConfigFile:
 	cfg.set_value("progress", "route_respawn_position", route_respawn_position)
 	cfg.set_value("progress", "bramblewood_expansion", bramblewood_expansion)
 	cfg.set_value("progress", "world_activity_state", world_activity_state)
+	cfg.set_value("progress", "explored_cells", explored_cells)
 	cfg.set_value("progress", "xp", xp)
 	cfg.set_value("progress", "level", level)
 	cfg.set_value("progress", "hp", hp)
@@ -2962,6 +3112,7 @@ func _build_save_config() -> ConfigFile:
 	cfg.set_value("progress", "cloud_sync_queue", cloud_sync_queue.pending())
 	cfg.set_value("progress", "scans_remaining", scans_remaining)
 	cfg.set_value("progress", "scan_fragments", scan_fragments)
+	cfg.set_value("progress", "analyzed_families", analyzed_families)
 	cfg.set_value("progress", "boss_customs", boss_customs)
 	cfg.set_value("progress", "stat_points", stat_points)
 	cfg.set_value("progress", "stats", {"str": stat_str, "dex": stat_dex,
@@ -3109,8 +3260,13 @@ func load_game() -> bool:
 			# a forged claim cannot block or fabricate a real one.
 			var is_provider_row := purchase.has("provider_record_id") \
 				or purchase.has("provider_entitlement")
-			var provider_ok := not is_provider_row \
-				or STORE_SECURITY.validate_provider_row(purchase).is_empty()
+			var provider_ok := not is_provider_row
+			if is_provider_row:
+				# A consumable row is keyed by its transaction, an entitlement row
+				# by its entitlement: each is validated against its own contract.
+				provider_ok = (STORE_SECURITY.validate_provider_transaction_row(purchase)
+					if purchase.has("provider_transaction")
+					else STORE_SECURITY.validate_provider_row(purchase)).is_empty()
 			if provider_ok:
 				for key in PROVIDER_LEDGER_KEYS:
 					if purchase.has(key):
@@ -3125,6 +3281,8 @@ func load_game() -> bool:
 	scan_fragments = int(scan_state.get("fragments", 0))
 	scans_changed.emit(scans_remaining)
 	scan_fragments_changed.emit(scan_fragments)
+	analyzed_families = CONTENT_SCHEMA.migrate_analysis_state(
+		cfg.get_value("progress", "analyzed_families", {}))
 	var saved_customs = cfg.get_value("progress", "boss_customs", {})
 	boss_customs = saved_customs.duplicate(true) if saved_customs is Dictionary else {}
 	stat_points = clampi(int(cfg.get_value("progress", "stat_points", 0)),
@@ -3186,6 +3344,8 @@ func load_game() -> bool:
 	discovered_landmarks = saved_lm.duplicate(true) if saved_lm is Dictionary else {}
 	world_activity_state = _normalize_world_activity_state(
 		cfg.get_value("progress", "world_activity_state", {}))
+	explored_cells = _normalize_explored_cells(
+		cfg.get_value("progress", "explored_cells", {}))
 	onboarding_completed = bool(cfg.get_value("progress", "onboarding_completed", false))
 	onboarding_step = clampi(int(cfg.get_value("progress", "onboarding_step", 0)),
 		0, ONBOARDING_STEPS.size())

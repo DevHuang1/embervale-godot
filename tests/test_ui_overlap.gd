@@ -91,6 +91,42 @@ func _run() -> void:
 	var hud := grove.get_node("HUD")
 	failures += await _audit(hud, HUD_NODES, "HUD")
 
+	# Expanded realm map: the map grows, the vitals plate yields to it, and no
+	# visible chrome overlaps while it is open. Constants are read off the
+	# script so this stays a plain Control reference (no early class load).
+	var minimap := hud.get_node_or_null("Root/MinimapContainer") as Control
+	var plate := hud.get_node_or_null("Root/PlayerPlate") as Control
+	if minimap == null or plate == null:
+		failures += 1
+		print("FAIL: minimap or player plate is missing")
+	else:
+		var constants: Dictionary = (minimap.get_script() as GDScript).get_script_constant_map()
+		var small := float(constants.get("SMALL", 0.0))
+		var big := float(constants.get("BIG", 0.0))
+		var big_legend := float(constants.get("BIG_LEGEND_HEIGHT", 0.0))
+		minimap.call("_toggle")
+		await _frames(4)
+		if not bool(minimap.get("expanded")):
+			failures += 1
+			print("FAIL: minimap did not expand")
+		if absf(minimap.size.x - big) > 0.5 \
+				or absf(minimap.size.y - (big + big_legend)) > 0.5:
+			failures += 1
+			print("FAIL: expanded minimap kept its collapsed box ", minimap.size)
+		if plate.visible:
+			failures += 1
+			print("FAIL: player plate stayed visible under the expanded map")
+		failures += await _audit(hud, HUD_NODES, "HUD-EXPANDED")
+		minimap.call("_toggle")
+		await _frames(4)
+		if bool(minimap.get("expanded")) or not plate.visible:
+			failures += 1
+			print("FAIL: collapsing the minimap did not restore the plate")
+		if absf(minimap.size.x - small) > 0.5:
+			failures += 1
+			print("FAIL: collapsed minimap kept its expanded box ", minimap.size)
+		failures += await _audit(hud, HUD_NODES, "HUD-COLLAPSED")
+
 	# Runtime exclusivity: showing the boss bar must retire the combat card.
 	var card := hud.get_node("Root/CombatCard") as Control
 	var boss := hud.get_node("Root/BossHealthBar") as Control

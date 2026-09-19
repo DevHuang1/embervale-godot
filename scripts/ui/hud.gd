@@ -30,6 +30,9 @@ const REWARD_REVEAL_MODEL := preload("res://scripts/systems/reward_reveal_model.
 @onready var target_direction_label : Label = $Root/CombatCard/CombatVBox/TargetDirectionLabel
 @onready var enemy_scan_button : Button = $Root/CombatCard/CombatVBox/EnemyScanButton
 @onready var target_switch_button : Button = $Root/CombatCard/CombatVBox/TargetSwitchButton
+## Elemental buildup readout. Built in code and parented into the combat card,
+## which is where the elite-status validation expects to find it.
+var elemental_hud: ElementalHud = null
 @onready var boss_health_bar : PanelContainer = $Root/BossHealthBar
 @onready var boss_name : Label = $Root/BossHealthBar/BossName
 @onready var boss_hp_bar : ProgressBar = $Root/BossHealthBar/BossHPBar
@@ -103,6 +106,13 @@ const BOSS_BAR_MAX_WIDTH := 660.0
 const COMBAT_CARD_MAX_WIDTH := 430.0
 const META_ROW_MAX_WIDTH := 600.0
 
+## Action cluster metrics. The cluster is positioned in code so sizes and gaps
+## are identical on every viewport instead of drifting per scene authoring.
+const SKILL_BUTTON_SIZE := 116.0
+const ACTION_BUTTON_SIZE := 176.0
+const ACTION_GAP := 14.0
+const ACTION_MARGIN := 16.0
+
 const SKILL_RUNES := {
 	"aoe": "AOE",
 	"explosion": "BLAST",
@@ -129,6 +139,11 @@ func _ready() -> void:
 			and move_joystick.has_signal("direction_changed"):
 		move_joystick.direction_changed.connect(
 			func(direction: Vector2) -> void: input_manager.move_input.emit(direction))
+	# The expanded realm map grows over the player plate. Yield the plate while
+	# the map is open so neither overlaps, and restore it on collapse.
+	var minimap := get_node_or_null("Root/MinimapContainer")
+	if minimap != null and minimap.has_signal("minimap_toggled"):
+		minimap.minimap_toggled.connect(_on_minimap_toggled)
 	# Skill bar buttons - lazy find
 	for i in 3:
 		var btn = get_node_or_null("Root/SkillBar/Skill%dButton" % i)
@@ -137,12 +152,15 @@ func _ready() -> void:
 		skill_buttons.append(btn)
 		skill_glyph_labels.append(glyph)
 		skill_cd_labels.append(cd)
+		if cd != null:
+			UiKit.style_label(cd, &"RowLabel", 22)
 		if btn:
 			var idx := i
 			if btn is FightButton:
 				btn.fight_pressed.connect(func(): input_manager.skill_slot_pressed.emit(idx))
 			elif btn is BaseButton:
 				btn.pressed.connect(func(): input_manager.skill_slot_pressed.emit(idx))
+	_build_elemental_hud()
 	_wire_action_buttons()
 	_build_camp_button()
 	_build_compact_actions_toggle()
@@ -176,6 +194,12 @@ func _connect_dungeon_completion() -> void:
 		return
 	if not expansion.dungeon_completed.is_connected(_on_dungeon_completed):
 		expansion.dungeon_completed.connect(_on_dungeon_completed)
+
+## Keeps the expanded map from stacking on top of the vitals plate.
+func _on_minimap_toggled(expanded: bool) -> void:
+	var plate := get_node_or_null("Root/PlayerPlate") as Control
+	if plate != null:
+		plate.visible = not expanded
 
 func _on_dungeon_completed(dungeon_id: String) -> void:
 	var entries: Array[Dictionary] = [{
@@ -335,13 +359,25 @@ func _build_compact_actions_toggle() -> void:
 	_actions_toggle.tooltip_text = "Show inventory, scan, shop, stats, and camp"
 	_actions_toggle.custom_minimum_size = Vector2(104, 44)
 	UiKit.style_secondary_button(_actions_toggle)
-	_actions_toggle.add_theme_font_size_override("font_size", 14)
+	_actions_toggle.add_theme_font_size_override("font_size", 18)
 	_actions_toggle.pressed.connect(_toggle_compact_actions)
 	top_row.add_child(_actions_toggle)
 
 func _toggle_compact_actions() -> void:
 	_compact_actions_open = not _compact_actions_open
 	_layout_compact_actions()
+
+## Installs the elemental buildup indicator inside the combat card. It polls the
+## live target itself, so the card only has to hand it the current enemy.
+func _build_elemental_hud() -> void:
+	if elemental_hud != null:
+		return
+	var vbox := get_node_or_null("Root/CombatCard/CombatVBox") as VBoxContainer
+	if vbox == null:
+		return
+	elemental_hud = ElementalHud.new()
+	elemental_hud.name = "ElementalHud"
+	vbox.add_child(elemental_hud)
 
 func _layout_compact_actions() -> void:
 	if _actions_toggle == null or action_row == null:
@@ -358,8 +394,63 @@ func _layout_compact_actions() -> void:
 		var button := child as Button
 		if button == null:
 			continue
-		button.custom_minimum_size.y = 44.0
-		button.add_theme_font_size_override("font_size", 14)
+		button.custom_minimum_size.y = 56.0
+		button.add_theme_font_size_override("font_size", 18)
+
+## Places Attack plus the three rite buttons as one aligned cluster pinned to
+## the bottom-right safe corner: rites in a row above the strike button.
+## One source of truth for the combat cluster's size, so the action row and any
+## copy placed above it can never disagree about where the cluster starts.
+func _cluster_metrics() -> Dictionary:
+	var viewport_width := get_viewport().get_visible_rect().size.x
+	var cluster_width := ACTION_MARGIN + ACTION_BUTTON_SIZE + ACTION_GAP \
+		+ 3.0 * (SKILL_BUTTON_SIZE + ACTION_GAP)
+	var scale := 1.0
+	if viewport_width > 0.0 and cluster_width > viewport_width * 0.86:
+		scale = clampf(viewport_width * 0.86 / cluster_width, 0.66, 1.0)
+	return {
+		"scale": scale,
+		"attack": ACTION_BUTTON_SIZE * scale,
+		"skill": SKILL_BUTTON_SIZE * scale,
+		"gap": ACTION_GAP * scale,
+		"margin": ACTION_MARGIN * scale,
+	}
+
+func _layout_action_cluster() -> void:
+	var bar := get_node_or_null("Root/SkillBar") as Control
+	if bar == null:
+		return
+	# Narrow portrait: shrink the whole cluster rather than letting the leftmost
+	# rite slide under the minimap or off the screen.
+	var metrics := _cluster_metrics()
+	var attack_size := float(metrics["attack"])
+	var skill_size := float(metrics["skill"])
+	var gap := float(metrics["gap"])
+	var margin := float(metrics["margin"])
+	var attack := bar.get_node_or_null("AttackButton") as Control
+	if attack != null:
+		attack.custom_minimum_size = Vector2(attack_size, attack_size)
+		_anchor_bottom_right(attack, attack_size, attack_size, margin, margin)
+	var skill_right := margin + attack_size + gap
+	var skill_bottom := margin + attack_size + gap
+	for i in 3:
+		var btn := bar.get_node_or_null("Skill%dButton" % i) as Control
+		if btn == null:
+			continue
+		btn.custom_minimum_size = Vector2(skill_size, skill_size)
+		_anchor_bottom_right(btn, skill_size, skill_size,
+			skill_right + float(i) * (skill_size + gap), skill_bottom)
+
+func _anchor_bottom_right(control: Control, width: float, height: float,
+		right: float, bottom: float) -> void:
+	control.anchor_left = 1.0
+	control.anchor_top = 1.0
+	control.anchor_right = 1.0
+	control.anchor_bottom = 1.0
+	control.offset_right = -right
+	control.offset_left = -right - width
+	control.offset_bottom = -bottom
+	control.offset_top = -bottom - height
 
 func _build_activity_line() -> void:
 	var strip := PanelContainer.new()
@@ -379,14 +470,14 @@ func _build_activity_line() -> void:
 	margin.add_child(pulse_box)
 	var pulse_heading := Label.new()
 	pulse_heading.text = "ROUTE PULSE"
-	UiKit.style_label(pulse_heading, &"Eyebrow", 10)
+	UiKit.style_label(pulse_heading, &"Eyebrow", 20)
 	pulse_heading.add_theme_color_override("font_color", UiKit.SAGE_BRIGHT)
 	pulse_box.add_child(pulse_heading)
 	_activity_line = Label.new()
 	_activity_line.name = "NearbyActivityLabel"
 	_activity_line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_activity_line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	UiKit.style_label(_activity_line, &"Body", 13)
+	UiKit.style_label(_activity_line, &"Body", 20)
 	_activity_line.add_theme_color_override("font_color", UiKit.CREAM_DIM)
 	pulse_box.add_child(_activity_line)
 	$Root/QuestLedger/QuestLedgerVBox.add_child(strip)
@@ -399,11 +490,15 @@ func _apply_hud_chrome() -> void:
 	if player_plate != null:
 		player_plate.add_theme_stylebox_override("panel",
 			UiKit.item_card_stylebox(UiKit.EMBER, false))
-	UiKit.style_label(chapter_label, &"Eyebrow", 13)
-	UiKit.style_label(title_label, &"Title", 20)
-	UiKit.style_label(instruction_label, &"Body", 15)
-	UiKit.style_label(objective_label, &"Caption", 13)
-	UiKit.style_label(checkpoint_label, &"Caption", 11)
+	UiKit.style_label(chapter_label, &"Eyebrow", 20)
+	UiKit.style_label(title_label, &"Title", 30)
+	UiKit.style_label(instruction_label, &"Body", 20)
+	UiKit.style_label(objective_label, &"Caption", 20)
+	UiKit.style_label(checkpoint_label, &"Caption", 18)
+	if field_note != null and not _field_note_visible:
+		# The field note is transient: it must not idle on the scene's authored
+		# placeholder line (which carried a language glyph) before the first note.
+		field_note.text = ""
 	chapter_label.add_theme_color_override("font_color", UiKit.SAGE_BRIGHT)
 	title_label.add_theme_color_override("font_color", UiKit.EMBER_BRIGHT)
 	instruction_label.add_theme_color_override("font_color", UiKit.CREAM_DIM)
@@ -413,12 +508,45 @@ func _apply_hud_chrome() -> void:
 ## Safe-area inset plus narrow-portrait clamping for the HUD's full-width
 ## elements. Presentation only: no gameplay timing or telegraph changes.
 func _apply_frame_layout() -> void:
+	_layout_action_cluster()
+	_layout_field_note()
+
 	var root := get_node_or_null("Root") as Control
 	if root == null:
 		return
 	var viewport_size := get_viewport().get_visible_rect().size
 	UiKit.apply_safe_area(root, viewport_size)
 	_layout_wide_bars(viewport_size)
+
+## Field notes used to sit in a fixed 640px band across the bottom, which ran
+## straight over the joystick on a phone. They now sit above the stick, wrap,
+## and stay left-aligned to the safe margin.
+func _layout_field_note() -> void:
+	if field_note == null or not is_instance_valid(field_note):
+		return
+	var viewport_size := get_viewport().get_visible_rect().size
+	var joystick := get_node_or_null("Root/MoveJoystick") as Control
+	var joystick_height := 208.0
+	if joystick != null:
+		joystick_height = absf(joystick.offset_top) if joystick.offset_top < 0.0 \
+			else maxf(joystick.size.y, joystick.custom_minimum_size.y)
+	var cluster := _cluster_metrics()
+	var cluster_top := float(cluster["margin"]) + float(cluster["attack"]) \
+		+ float(cluster["gap"]) + float(cluster["skill"])
+	var note_width := minf(viewport_size.x * 0.66, 560.0)
+	field_note.anchor_left = 0.0
+	field_note.anchor_right = 0.0
+	field_note.anchor_top = 1.0
+	field_note.anchor_bottom = 1.0
+	field_note.offset_left = 24.0
+	field_note.offset_right = 24.0 + note_width
+	# Clear whichever is taller: the joystick on the left or the action cluster
+	# on the right. The note sits above both instead of across them.
+	field_note.offset_bottom = -(maxf(joystick_height, cluster_top) + 18.0)
+	field_note.offset_top = field_note.offset_bottom - 68.0
+	field_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	field_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	UiKit.style_label(field_note, &"Body", 20)
 
 func _layout_wide_bars(viewport_size: Vector2) -> void:
 	var half_limit := maxf(viewport_size.x * 0.5 - FRAME_MARGIN, 110.0)
@@ -490,7 +618,7 @@ func _on_journal_pressed() -> void:
 	var copy := game_state.get_quest_copy(game_state.current_stage)
 	var title := Label.new()
 	title.text = "EXPEDITION JOURNAL  ·  %s" % str(copy.get("chapter", "CURRENT CHAPTER")).to_upper()
-	UiKit.style_label(title, &"MenuTitle", 20)
+	UiKit.style_label(title, &"MenuTitle", 32)
 	box.add_child(title)
 	var map := Label.new()
 	var chapters := [
@@ -505,7 +633,7 @@ func _on_journal_pressed() -> void:
 		var marker := "CLEARED" if chapter_index < int(game_state.current_stage) else ("CURRENT" if chapter_index == int(game_state.current_stage) else "LOCKED")
 		map_lines.append("%s  ·  %s  ·  %s" % [marker, str(chapter[1]), str(chapter[2])])
 	map.text = "\n".join(map_lines)
-	UiKit.style_label(map, &"Caption", 13)
+	UiKit.style_label(map, &"Caption", 18)
 	box.add_child(map)
 	var route := Label.new()
 	route.text = "PRIMARY ROUTE\n%s\n\n%s\nWHY  ·  %s\nRISK  ·  %s\nREWARD  ·  %s\nNEXT  ·  %s" % [
@@ -513,11 +641,11 @@ func _on_journal_pressed() -> void:
 		str(copy.get("why", "")), str(copy.get("risk", "")),
 		str(copy.get("reward", "")), str(copy.get("next_action", ""))]
 	route.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(route, &"Body", 15)
+	UiKit.style_label(route, &"Body", 20)
 	box.add_child(route)
 	var checkpoint := Label.new()
 	checkpoint.text = "CURRENT MILESTONE  ·  %s" % str(game_state.route_checkpoint_id).replace("_", " ").to_upper()
-	UiKit.style_label(checkpoint, &"Caption", 14)
+	UiKit.style_label(checkpoint, &"Caption", 18)
 	box.add_child(checkpoint)
 	var route_map := Label.new()
 	var route_nodes := [
@@ -544,7 +672,7 @@ func _on_journal_pressed() -> void:
 		var route_marker := "●" if route_id == str(game_state.route_checkpoint_id) else ("✓" if _checkpoint_is_reached(route_id, str(game_state.route_checkpoint_id)) else "○")
 		route_map_lines.append("%s  %s  ·  %s" % [route_marker, str(route_node[1]), str(route_node[2])])
 	route_map.text = "\n".join(route_map_lines)
-	UiKit.style_label(route_map, &"Caption", 13)
+	UiKit.style_label(route_map, &"Caption", 18)
 	box.add_child(route_map)
 	var recovery: Dictionary = game_state.get_activity_recovery() if game_state.has_method("get_activity_recovery") else {}
 	if not recovery.is_empty():
@@ -552,7 +680,7 @@ func _on_journal_pressed() -> void:
 		recovery_label.name = "ActivityRecovery"
 		recovery_label.text = "RECOVERY  ·  %s\n%s\n%s" % [str(recovery.get("status", "unknown")).to_upper(), str(recovery.get("reason", "Activity snapshot preserved.")), str(recovery.get("next_action", "Return to the recorded checkpoint."))]
 		recovery_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		UiKit.style_label(recovery_label, &"Caption", 13)
+		UiKit.style_label(recovery_label, &"Caption", 18)
 		box.add_child(recovery_label)
 	var realm_id := str(game_state.get("current_realm") if game_state.get("current_realm") != null else "bramblewood")
 	var realm_profile: Dictionary = RealmIdentityCatalog.for_realm(realm_id)
@@ -562,11 +690,11 @@ func _on_journal_pressed() -> void:
 		str(realm_profile.get("resource_ritual", "Gather local materials")),
 		str(realm_profile.get("landmark_reward", "Discover a landmark"))]
 	identity.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(identity, &"Caption", 13)
+	UiKit.style_label(identity, &"Caption", 18)
 	box.add_child(identity)
 	var optional := Label.new()
 	optional.text = "OPTIONAL OBJECTIVES"
-	UiKit.style_label(optional, &"Caption", 14)
+	UiKit.style_label(optional, &"Caption", 18)
 	box.add_child(optional)
 	var objectives_box := VBoxContainer.new()
 	objectives_box.name = "ObjectivePinRows"
@@ -577,7 +705,7 @@ func _on_journal_pressed() -> void:
 	if objectives.is_empty():
 		var empty := Label.new()
 		empty.text = "None active"
-		UiKit.style_label(empty, &"Caption", 13)
+		UiKit.style_label(empty, &"Caption", 18)
 		objectives_box.add_child(empty)
 	else:
 		for objective in objectives:
@@ -589,7 +717,7 @@ func _on_journal_pressed() -> void:
 			objective_label.text = "• %s  %d/%d" % [str(objective.get("description", "Objective")), int(objective.get("current_qty", 0)), int(objective.get("target_qty", 1))]
 			objective_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			objective_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			UiKit.style_label(objective_label, &"Caption", 13)
+			UiKit.style_label(objective_label, &"Caption", 18)
 			row.add_child(objective_label)
 			var pin := Button.new()
 			var is_pinned := objective_id == pinned_id
@@ -601,18 +729,18 @@ func _on_journal_pressed() -> void:
 			row.add_child(pin)
 			objectives_box.add_child(row)
 	var reward_direction := Label.new()
-	reward_direction.text = "REWARD DIRECTION\nComplete route objectives to earn gold, XP, and scan progress."
+	reward_direction.text = "REWARD DIRECTION\nComplete route objectives to earn gold, XP, and lens progress."
 	reward_direction.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(reward_direction, &"Caption", 13)
+	UiKit.style_label(reward_direction, &"Caption", 18)
 	box.add_child(reward_direction)
 	var ownership := Label.new()
 	ownership.name = "OwnershipLedgerSummary"
-	ownership.text = "OWNERSHIP LEDGER\nGold %d · Diamonds %d · Scans %d\nWeapons %d · Armor %d · Purchases %d" % [
+	ownership.text = "OWNERSHIP LEDGER\nGold %d · Diamonds %d · Lens %d\nWeapons %d · Armor %d · Purchases %d" % [
 		game_state.gold, game_state.diamonds, game_state.scans_remaining,
 		game_state.forged_weapons.size(), game_state.forged_armors.size(),
 		game_state.get_purchase_ledger().size()]
 	ownership.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(ownership, &"Caption", 13)
+	UiKit.style_label(ownership, &"Caption", 18)
 	box.add_child(ownership)
 	var history := Label.new()
 	history.name = "RecentRewardHistory"
@@ -629,7 +757,7 @@ func _on_journal_pressed() -> void:
 			break
 	history.text = "RECENT ACTIVITY\n%s" % ("\n".join(history_lines) if not history_lines.is_empty() else "No recent activity")
 	history.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(history, &"Caption", 13)
+	UiKit.style_label(history, &"Caption", 18)
 	box.add_child(history)
 	var close := Button.new()
 	close.text = "CLOSE JOURNAL"
@@ -738,18 +866,47 @@ func _on_weapon_changed(weapon: Dictionary) -> void:
 		var btn   = skill_buttons[i]       if i < skill_buttons.size()       else null
 		if i < skills.size():
 			if glyph:
-				var kind := str(skills[i].get("type", ""))
 				glyph.text = ""
-				if btn is FightButton:
-					(btn as FightButton).skill_kind = kind
 			if btn is FightButton:
-				(btn as FightButton).set_action_state("available", "Ready when the cooldown is clear")
+				var fight := btn as FightButton
+				var skill: Dictionary = skills[i]
+				fight.skill_kind = str(skill.get("type", ""))
+				fight.tooltip_data = {
+					"name": str(skill.get("name", "RITE")).to_upper(),
+					"key": ["Q", "E", "R"][i],
+					"type_label": str(SKILL_RUNES.get(fight.skill_kind, "RITE")),
+					"cooldown": float(skill.get("cooldown", 0.0)),
+					"desc": str(skill.get("desc", "")),
+					"effect": _skill_effect_text(skill),
+				}
+				fight.set_action_state("available", "Ready when the cooldown is clear")
 			elif btn: btn.disabled = false
 		else:
 			if glyph: glyph.text = "—"
-			if btn is FightButton: (btn as FightButton).skill_kind = ""
-			if btn is FightButton: (btn as FightButton).set_action_state("unavailable", "Equip a weapon skill")
+			if btn is FightButton:
+				var empty := btn as FightButton
+				empty.skill_kind = ""
+				empty.tooltip_data = {}
+				empty.set_action_state("unavailable", "Equip a weapon skill")
 			elif btn: btn.disabled = true
+
+## One-line effect summary built from the skill's own numbers, so the tooltip
+## explains what the rite does without inventing copy.
+func _skill_effect_text(skill: Dictionary) -> String:
+	var parts: Array[String] = []
+	var dmg := float(skill.get("dmg_mult", 0.0))
+	if dmg > 0.0:
+		parts.append("×%.1f damage" % dmg)
+	var radius := float(skill.get("radius", 0.0))
+	if radius > 0.0:
+		parts.append("%.0fm area" % radius)
+	var power := float(skill.get("power", 0.0))
+	if power > 0.0:
+		parts.append("%.1f force" % power)
+	var duration := float(skill.get("duration", 0.0))
+	if duration > 0.0:
+		parts.append("%.1fs" % duration)
+	return " · ".join(parts)
 
 func _on_skill_cooldown_changed(slot: int, remaining: float) -> void:
 	if slot < 0 or slot >= 3: return
@@ -799,7 +956,7 @@ func _build_interact_button() -> void:
 	_interact_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_interact_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_interact_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_interact_label.add_theme_font_size_override("font_size", 13)
+	_interact_label.add_theme_font_size_override("font_size", 18)
 	_interact_label.add_theme_color_override("font_color", Color(1.0, 0.92, 0.72))
 	_interact_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_interact_button.add_child(_interact_label)
@@ -869,6 +1026,8 @@ func _set_lock_glow(on: bool) -> void:
 func show_combat_card(enemy: Node3D) -> void:
 	if enemy == null or not is_instance_valid(enemy): hide_combat_card(); return
 	if combat_card: combat_card.visible = true
+	if elemental_hud != null:
+		elemental_hud.set_target(enemy)
 	if _analyzed_enemy_id != enemy.get_instance_id():
 		_analyzed_enemy_id = 0
 	if enemy_name: enemy_name.text = str(enemy.get("display_name") if enemy.get("display_name") != null else enemy.name)
@@ -876,6 +1035,8 @@ func show_combat_card(enemy: Node3D) -> void:
 
 func hide_combat_card() -> void:
 	if combat_card: combat_card.visible = false
+	if elemental_hud != null:
+		elemental_hud.set_target(null)
 
 func _update_combat_card(enemy: Node3D) -> void:
 	if enemy == null or not is_instance_valid(enemy): return
@@ -896,9 +1057,9 @@ func _update_combat_card(enemy: Node3D) -> void:
 	if enemy_scan_button:
 		var analyzed := _analyzed_enemy_id == enemy.get_instance_id()
 		var scan_state := UiKit.action_state("analyzed" if analyzed else ("unavailable" if game_state.scans_remaining <= 0 else "available"),
-			"This foe is already resolved" if analyzed else ("Earn or purchase a scan" if game_state.scans_remaining <= 0 else "Reveal bounded combat stats"))
+			"This foe is already resolved" if analyzed else ("Earn a lens charge from a quest" if game_state.scans_remaining <= 0 else "Reveal bounded combat stats"))
 		enemy_scan_button.disabled = bool(scan_state.get("disabled", false))
-		enemy_scan_button.text = "FOE ANALYZED" if analyzed else "ANALYZE FOE  ·  %d SCAN" % game_state.scans_remaining
+		enemy_scan_button.text = "FOE ANALYZED" if analyzed else "ANALYZE FOE  ·  %d LENS" % game_state.scans_remaining
 		enemy_scan_button.tooltip_text = "%s · %s" % [str(scan_state.get("label", "")), str(scan_state.get("detail", ""))]
 
 func _target_role_from_name(target_name: String) -> String:
@@ -952,17 +1113,30 @@ func _on_enemy_scan_pressed() -> void:
 	if analyzed or game_state.scans_remaining <= 0:
 		return
 	if not game_state.consume_scan():
-		if combat_status: combat_status.text = "No scans remaining — earn one from a quest."
+		if combat_status: combat_status.text = "No lens charges — earn one from a quest."
 		return
 	var report := Bestiary.scan_report(enemy)
 	if report.is_empty():
 		if combat_status: combat_status.text = "Lens could not resolve this foe."
 		return
+	var unlocked: Array = []
+	if game_state.has_method("register_analysis"):
+		unlocked = game_state.register_analysis(str(report.get("kind", "")))
+	var scan_manager := get_node_or_null("/root/ScanManager")
+	if scan_manager != null and scan_manager.has_method("pulse_reveal"):
+		scan_manager.call("pulse_reveal")
+	var unlock_line := ""
+	if not unlocked.is_empty():
+		var names: Array[String] = []
+		for blueprint_id in unlocked:
+			var def: Dictionary = game_state.WEAPON_DEFS.get(str(blueprint_id), {})
+			names.append(str(def.get("name", blueprint_id)))
+		unlock_line = "\nBLUEPRINT UNLOCKED · %s" % ", ".join(names)
 	if combat_status:
-		combat_status.text = "HP %d · ATK %d · SPD %.1f\nPHYS RES %d%% · MAGIC RES %d%%\n%s\n%s" % [
+		combat_status.text = "HP %d · ATK %d · SPD %.1f\nPHYS RES %d%% · MAGIC RES %d%%\n%s\n%s%s" % [
 			int(report.hp), int(report.attack), float(report.speed),
 			int(report.physical_resist), int(report.magic_resist), str(report.reward),
-			str(report.ecology)]
+			str(report.ecology), unlock_line]
 	if enemy_scan_button:
 		_analyzed_enemy_id = enemy.get_instance_id()
 		enemy_scan_button.disabled = true
@@ -1345,17 +1519,9 @@ func _on_satchel_pressed() -> void:
 		(s as SatchelUI).toggle()
 
 func _on_scan_pressed() -> void:
-	# Route through InputManager.scan_pressed — the ForgeMenu is the single
-	# listener that opens itself and drives the scan request UI. Calling
-	# ScanManager.start_scan() directly here bypassed the menu, so scans
-	# started invisibly with no feedback.
 	var im := get_node_or_null("/root/InputManager")
 	if im and im.has_signal("scan_pressed"):
 		im.emit_signal("scan_pressed")
-	else:
-		var sm := get_node_or_null("/root/ScanManager")
-		if sm and sm.has_method("start_scan"):
-			sm.call("start_scan")
 
 func _on_shop_pressed() -> void:
 	var shop := get_tree().current_scene.find_child("ShopMenu", true, false)
