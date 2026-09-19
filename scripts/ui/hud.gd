@@ -1400,6 +1400,7 @@ func _refresh_lesson_action() -> void:
 	lesson_button.tooltip_text = "%s · %s" % [str(state.get("label", "")), str(state.get("detail", ""))]
 
 func _on_lesson_pressed() -> void:
+	_retire_other_menus("QuizMenu")
 	var menu := get_node_or_null("QuizMenu")
 	if menu == null:
 		var packed := load("res://scenes/ui/quiz_menu.tscn") as PackedScene
@@ -1625,10 +1626,35 @@ func _process(delta: float) -> void:
 		var ph  := int(_active_boss.get("current_phase") if _active_boss.get("current_phase") != null else 0)
 		update_boss_bar(hp, mhp, ph)
 
+## Every overlay menu this HUD can raise. The HUD sits below the menu layers,
+## but a sheet whose dimmer is input-ignoring still leaves the HUD reachable,
+## so a second menu could open on top of the first and closing the top one left
+## the other behind — two sheets, one never going away.
+const OVERLAY_MENUS: Array[String] = ["SatchelUI", "ShopMenu", "SettingsMenu",
+	"ForgeMenu", "StatsScreen", "DiamondShop"]
+
+## One sheet at a time: every open path retires the others first.
+func _retire_other_menus(except: String) -> void:
+	var scene := get_tree().current_scene
+	if scene != null:
+		for menu_name in OVERLAY_MENUS:
+			if menu_name == except:
+				continue
+			var node := scene.find_child(menu_name, true, false)
+			if node != null and node.has_method("close"):
+				node.call("close")
+	if except == "QuizMenu":
+		return
+	var quiz := get_node_or_null("QuizMenu")
+	# A sheet is a CanvasLayer, not a CanvasItem: read the property, never cast.
+	if quiz != null and bool(quiz.get("visible")) and quiz.has_method("close"):
+		quiz.call("close")
+
 func _on_settings_pressed() -> void:
 	# SettingsMenu lives in the gameplay scene and freezes the world while
 	# open. Opening it here (rather than flipping get_tree().paused directly)
 	# keeps the ref-counted world-freeze balanced with every other menu.
+	_retire_other_menus("SettingsMenu")
 	var s := get_tree().current_scene.find_child("SettingsMenu", true, false)
 	if s is SettingsMenu:
 		(s as SettingsMenu).open()
@@ -1636,6 +1662,7 @@ func _on_settings_pressed() -> void:
 		get_tree().paused = not get_tree().paused
 
 func _on_satchel_pressed() -> void:
+	_retire_other_menus("SatchelUI")
 	var s := get_tree().current_scene.find_child("SatchelUI", true, false)
 	if s is SatchelUI:
 		(s as SatchelUI).toggle()
@@ -1646,6 +1673,7 @@ func _on_scan_pressed() -> void:
 		im.emit_signal("scan_pressed")
 
 func _on_shop_pressed() -> void:
+	_retire_other_menus("ShopMenu")
 	var shop := get_tree().current_scene.find_child("ShopMenu", true, false)
 	if shop is ShopMenu:
 		(shop as ShopMenu).open()
@@ -1673,6 +1701,7 @@ func _glint_shop() -> Node:
 	return scene.find_child("DiamondShop", true, false)
 
 func _on_glint_pressed() -> void:
+	_retire_other_menus("DiamondShop")
 	var shop := _glint_shop()
 	if shop != null and shop.has_method("open"):
 		shop.call("open")
@@ -1680,6 +1709,7 @@ func _on_glint_pressed() -> void:
 		_push_field_note("The Glintmonger is not here yet.")
 
 func _on_stats_pressed() -> void:
+	_retire_other_menus("SatchelUI")
 	var s := get_tree().current_scene.find_child("SatchelUI", true, false)
 	if s is SatchelUI:
 		(s as SatchelUI).show_stats()

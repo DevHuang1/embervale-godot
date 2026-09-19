@@ -301,6 +301,13 @@ func _hide_result() -> void:
 	_refresh_blueprint_list()
 
 func _on_close_pressed() -> void:
+	close()
+
+## Public close, so a surface opening over the forge retires it instead of
+## stacking a second sheet on top of it.
+func close() -> void:
+	if not visible:
+		return
 	visible = false
 	_hide_result()
 

@@ -935,14 +935,23 @@ func _rarity_color(rarity: int) -> Color:
 	return UiKit.rarity_color(rarity)
 
 func _on_close_pressed() -> void:
+	close()
+
+## Public close, so a surface opening over the satchel retires it instead of
+## stacking a second sheet on top of it.
+func close() -> void:
+	if not visible:
+		return
 	_hide_inspect_sheet()
 	visible = false
 
 func toggle() -> void:
-	visible = not visible
 	if visible:
-		open_tab(&"items")
-		_rebuild_inventory()
+		close()
+		return
+	visible = true
+	open_tab(&"items")
+	_rebuild_inventory()
 
 func show_stats() -> void:
 	visible = true

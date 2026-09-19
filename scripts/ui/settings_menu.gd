@@ -630,6 +630,13 @@ func _build_data_export_row() -> void:
 func open() -> void:
 	visible = true
 
+## Public close, so a surface opening over this one retires it instead of
+## stacking a second sheet on top of it.
+func close() -> void:
+	if not visible:
+		return
+	visible = false
+
 ## Return to the main menu: persist settings + progress, then release the
 ## world-freeze. clear_ui_freeze() is the hard reset here — this menu is
 ## freed by change_scene_to_file() while visible, so a normal pop would leak
@@ -682,7 +689,7 @@ func _process(_delta: float) -> void:
 
 func _on_back_pressed() -> void:
 	audio.play_ui_back()
-	visible = false
+	close()
 
 ## A menu freed while it still holds the world must not leave it paused behind
 ## it. Every freeze-holding surface shares this guarantee, matching the altar's
