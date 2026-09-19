@@ -13,10 +13,10 @@ func _rig_profile() -> String:
 func _ready() -> void:
 	# Ranged profile: hold standoff, reposition instead of lunging in.
 	orbit_distance = 8.5
-	lunge_speed = 5.6
-	feint_speed = 4.8
-	orbit_speed = 2.8
-	recover_speed = 3.6
+	lunge_speed = 4.3
+	feint_speed = 3.7
+	orbit_speed = 2.1
+	recover_speed = 2.7
 	burst_cooldown = 4.2
 	burst_damage = 7
 	sfx_profile = "venom_spit"

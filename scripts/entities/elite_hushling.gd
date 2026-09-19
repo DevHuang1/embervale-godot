@@ -14,8 +14,8 @@ var _elite_core_material: StandardMaterial3D = null
 func _ready() -> void:
     max_hp = 72
     base_atk = 7
-    move_speed = 2.6       # Slower than base Hushling (was 2.9)
-    lunge_speed = 9.0
+    move_speed = 1.9       # Elite pace, still under the hero's 3.4 m/s stride
+    lunge_speed = 6.9
     burst_cooldown = 5.5
     counter_windup = 0.72
     special_cooldown = 9.0

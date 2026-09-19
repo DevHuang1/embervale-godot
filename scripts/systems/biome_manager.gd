@@ -11,6 +11,10 @@ const GATHERING_NODE_SCRIPT := preload("res://scripts/world/gathering_node.gd")
 const MOBILE_LOD_SCRIPT := preload("res://scripts/systems/mobile_lod_controller.gd")
 const BIOME_BOSS_DIRECTOR_SCRIPT := preload("res://scripts/systems/boss_encounter_director.gd")
 const BOSS_ROSTER := preload("res://scripts/systems/boss_roster_catalog.gd")
+const BOSS_COMPOUND_SCRIPT := preload("res://scripts/world/boss_compound.gd")
+const BOSS_COMPOUND_CATALOG := preload("res://scripts/systems/boss_compound_catalog.gd")
+# ENEMY_VISUALS is inherited from WorldManager; redeclaring the same const in
+# this subclass is a hard GDScript parse error, so use the parent's binding.
 
 ## === Biome Manager ===
 ## Turns a grove-derived scene into one explorable biome: fixed realm
@@ -40,6 +44,9 @@ const POCKET_SPAWN_INNER := 0.30
 const POCKET_SPAWN_OUTER := 0.62
 
 var _spawn_pockets: Array[Dictionary] = []
+## Rotates the realm roster across pocket fill calls so successive groups mix
+## kinds instead of repeating one archetype per tier.
+var _roster_cursor := 0
 var _structures_built := false
 var _pocket_sweep_in := 1.0
 
@@ -47,9 +54,8 @@ var _despawn_sweep_in := 0.25
 
 var _biome_def: Dictionary = {}
 var _gates: Array[Dictionary] = []  # {node, dest}
-var _arena_stone: Node3D = null
+var _arena_compound: BossCompound = null
 var _biome_boss: Node3D = null
-var _boss_down_at := -1.0
 var _traveling := false
 var _arrival_focus_played := false
 var _bramblewood_expedition: Node3D = null
@@ -229,7 +235,7 @@ func _play_realm_arrival() -> void:
 	if _arrival_focus_played:
 		return
 	_arrival_focus_played = true
-	var focus: Node3D = _arena_stone if _arena_stone != null else hero
+	var focus: Node3D = _arena_compound if _arena_compound != null else hero
 	if focus == null or not is_instance_valid(focus):
 		return
 	var camera_rig := get_node_or_null("CameraRig")
@@ -342,12 +348,12 @@ func _spawn_biome_pack(origin: Vector3) -> void:
 	# Keep the arena stone readable: packs materialise outside the boss circle
 	# unless the hero is already far away from it.
 	var anchor := origin
-	if _arena_stone != null and is_instance_valid(_arena_stone):
-		var to_arena := origin - _arena_stone.global_position
+	if _arena_compound != null and is_instance_valid(_arena_compound):
+		var to_arena := origin - _arena_compound.global_position
 		to_arena.y = 0.0
 		if to_arena.length() < ARENA_CLEAR_RADIUS:
 			var push := to_arena.normalized() if to_arena.length() > 0.1 else Vector3.BACK
-			anchor = _arena_stone.global_position + push * ARENA_CLEAR_RADIUS
+			anchor = _arena_compound.global_position + push * ARENA_CLEAR_RADIUS
 			anchor.y = origin.y
 	var comp: Dictionary = _biome_def.get("pack", {})
 	var hard_count := int(comp.get("hard", 0))
@@ -441,14 +447,51 @@ func _spawn_pocket_group(pocket: Dictionary, living: Array) -> int:
 		var spot := origin + Vector3(cos(angle) * dist, 0.2, sin(angle) * dist)
 		# A pocket ring can reach into a boss arena or a gate; never let an
 		# individual spawn land there even when the pocket origin is legal.
+		# Elite pockets keep their dedicated elite scene; normal/hard pockets
+		# rotate the realm roster so every mob kind appears across the map.
+		var roster_kind := "" if tier == "elite" else _next_pocket_kind(tier)
 		var enemy := _spawn_tiered_enemy(
-			push_clear_of_zones(spot, _reserved_zones()), tier)
+			push_clear_of_zones(spot, _reserved_zones()), tier, roster_kind)
 		if enemy == null:
 			continue
 		enemy.set_meta("spawn_pocket_id", str(pocket.get("id", "")))
 		living.append(enemy)
 		spawned += 1
 	return spawned
+
+## The realm's authored enemy roster mapped to spawnable scene ids. Entries the
+## shared kind->scene catalog cannot serve are dropped so a typo never silently
+## falls back to a hushling.
+func _realm_roster() -> Array[String]:
+	var result: Array[String] = []
+	var profile := RealmLayoutData.profile(_visual_realm_id())
+	var values: Variant = profile.get("enemies", [])
+	if not values is Array:
+		return result
+	for value in values:
+		var scene_id := str(value).strip_edges()
+		if scene_id.is_empty() or result.has(scene_id):
+			continue
+		if not ENEMY_VISUALS.ENEMY_SCENES.has(scene_id):
+			continue
+		result.append(scene_id)
+	return result
+
+## Next pocket member kind: the realm roster plus the tier's signature Bestiary
+## kind, rotated so a realm fields its whole roster map-wide instead of one
+## archetype per tier.
+func _next_pocket_kind(tier: String) -> String:
+	var cycle := _realm_roster()
+	var variant_tier := "hard" if tier == "hard" else "normal"
+	var signature := str(Bestiary.variant_for(_visual_realm_id(), variant_tier) \
+		.get("kind", ""))
+	if not signature.is_empty() and not cycle.has(signature):
+		cycle.append(signature)
+	if cycle.is_empty():
+		return ""
+	var pick := cycle[_roster_cursor % cycle.size()]
+	_roster_cursor += 1
+	return pick
 
 ## === Presentation LOD ===
 ## One shared, distance-budgeted controller for every authoritative prop and
@@ -480,7 +523,8 @@ func _hostile_budget_remaining() -> int:
 			total += 1
 	return POCKET_GLOBAL_CAP - total
 
-func _spawn_tiered_enemy(world_pos: Vector3, tier: String) -> Node3D:
+func _spawn_tiered_enemy(world_pos: Vector3, tier: String,
+		scene_id: String = "") -> Node3D:
 	var elite := tier == "elite"
 	var variant_tier := "elite" if elite else ("hard" if tier == "hard" else "normal")
 	var realm_id := _visual_realm_id()
@@ -488,17 +532,26 @@ func _spawn_tiered_enemy(world_pos: Vector3, tier: String) -> Node3D:
 	if v.is_empty():
 		return null
 	var kind := str(v.get("kind", "hushling"))
+	# The tier's Bestiary kind is the fallback; the roster/pocket spread can
+	# request a concrete scene id instead. Every id resolves through the shared
+	# catalog so pockets far from the authored route field rigged creatures.
+	var request_id := scene_id if not scene_id.is_empty() else kind
 	var scene_path := "res://scenes/entities/elite_hushling.tscn" if elite \
-		else ("res://scenes/entities/spitter.tscn" if kind == "spitter" \
-		else ("res://scenes/entities/moonfen_fenling.tscn" if kind in ["fenling", "moonfen_fenling"] \
-		else ("res://scenes/entities/relic_leech.tscn" if kind == "relic_leech" \
-		else "res://scenes/entities/hushling.tscn")))
+		else ENEMY_VISUALS.scene_for(request_id)
 	var scene: PackedScene = load(scene_path)
 	if scene == null:
 		return null
 	var enemy: Node3D = scene.instantiate()
 	if enemy == null:
 		return null
+	# Realm elite identity: the elite keeps its scene mechanics but wears the
+	# realm's creature rig at its own silhouette height. Both must be set before
+	# add_child, which is when the rig mounts.
+	if elite and v.has("rig"):
+		if "rig_profile_override" in enemy:
+			enemy.set("rig_profile_override", str(v.get("rig", "")))
+		if "authored_rig_height" in enemy:
+			enemy.set("authored_rig_height", float(v.get("rig_height", 0.0)))
 	add_child(enemy)
 	enemy.global_position = world_pos
 	_register_detail_lod(enemy)
@@ -511,7 +564,10 @@ func _spawn_tiered_enemy(world_pos: Vector3, tier: String) -> Node3D:
 	md.base_atk_bonus = int(v.get("atk_bonus", 0))
 	md.move_speed_mult = float(v.get("speed", 1.0))
 	md.configure_entity(enemy)
-	if enemy.has_method("configure_archetype") and not enemy is RealmArchetypeEnemy:
+	# A roster pick owns its identity through its own scene script; only the
+	# tier-kind fallback applies a Bestiary archetype on top.
+	if scene_id.is_empty() and enemy.has_method("configure_archetype") \
+			and not enemy is RealmArchetypeEnemy:
 		enemy.configure_archetype(kind)
 	if bool(v.get("volley", false)) and "thorn_volley" in enemy:
 		enemy.thorn_volley = true
@@ -883,7 +939,7 @@ func _make_monolith(dest: String, pos: Vector3) -> Node3D:
 	gate.set_meta("terrain_conformed", terrain != null)
 	return gate
 
-## === Arena: walk the stone to wake the biome boss ===
+## === Compound: step into the ruin to wake the biome boss ===
 
 func _build_arena() -> void:
 	if _expansion_accessible():
@@ -891,45 +947,38 @@ func _build_arena() -> void:
 	var boss_id := str(_biome_def.get("boss_id", ""))
 	if boss_id.is_empty():
 		return  # final-boss biome: the Matriarch answers the quest rite only
-	_arena_stone = Node3D.new()
-	_arena_stone.name = "ArenaStone"
-	_arena_stone.add_to_group("boss_arena")
-	var pillar := MeshInstance3D.new()
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.5
-	cyl.bottom_radius = 0.72
-	cyl.height = 1.5
-	pillar.mesh = cyl
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.12, 0.10, 0.09)
-	mat.emission_enabled = true
-	mat.emission = _fx_tint()
-	mat.emission_energy_multiplier = 0.7
-	pillar.material_override = mat
-	_arena_stone.add_child(pillar)
-	var ring := MeshInstance3D.new()
-	var tor := TorusMesh.new()
-	tor.inner_radius = BOSS_DIRECTOR_SCRIPT.ARENA_MARKER_INNER_RADIUS
-	tor.outer_radius = BOSS_DIRECTOR_SCRIPT.ARENA_MARKER_OUTER_RADIUS
-	ring.mesh = tor
-	ring.material_override = mat
-	_arena_stone.add_child(ring)
-	ring.position = Vector3(0, 0.08, 0)
-	var label := Label3D.new()
-	var def := Bestiary.boss_def(boss_id)
-	label.text = str(def.get("name", "THE BEAST"))
-	label.font_size = 72
-	label.pixel_size = 0.004
-	label.modulate = _fx_tint()
-	label.outline_size = 16
-	label.position = Vector3(0, 2.3, 0)
-	_arena_stone.add_child(label)
-	add_child(_arena_stone)
-	_arena_stone.global_position = RealmLayoutData.profile(_visual_realm_id()).get(
+	var theme := BOSS_COMPOUND_CATALOG.theme_for(boss_id)
+	var arena_pos: Vector3 = RealmLayoutData.profile(_visual_realm_id()).get(
 		"arena", player_spawn.global_position + Vector3(0, 0.1, -20))
+	_arena_compound = BOSS_COMPOUND_SCRIPT.new()
+	_arena_compound.name = "BossCompound"
+	_arena_compound.add_to_group("boss_arena")
+	add_child(_arena_compound)
+	_arena_compound.setup({
+		"boss_id": boss_id,
+		"realm_id": _visual_realm_id(),
+		"compound_radius": float(theme.get("radius", 22.0)),
+		"trigger_radius": float(theme.get("trigger", 5.5)),
+		"director": _boss_director,
+		"host": self,
+		"allowed": _primary_boss_allowed,
+	})
+	_arena_compound.global_position = arena_pos
 	var terrain := get_node_or_null("Terrain") as TerrainRelief
 	if terrain != null:
-		terrain.conform_anchor(_arena_stone, 0.08)
+		terrain.conform_anchor(_arena_compound, 0.06)
+	_arena_compound.boss_spawned.connect(_on_arena_boss_spawned)
+	_arena_compound.boss_died.connect(_on_arena_boss_died)
+	_arena_compound.boss_despawned.connect(_on_arena_boss_despawned)
+
+func _primary_boss_allowed() -> bool:
+	# The shared grove presents Whispergrove until the quest completes; the
+	# Thorn Regent's compound stays dormant until then, exactly like the old
+	# stage-gated arena stone.
+	if biome_id == Bestiary.REALM_BRAMBLEWOOD \
+			and int(game_state.current_stage) < int(game_state.QuestStage.COMPLETE):
+		return false
+	return true
 
 func _build_side_bosses() -> void:
 	if not _side_boss_markers.is_empty():
@@ -945,51 +994,41 @@ func _build_side_bosses() -> void:
 		var boss_id := BOSS_ROSTER.canonical_id_for(str(definition.get("id", "")))
 		if BOSS_ROSTER.definition_for(boss_id).is_empty():
 			continue
-		var marker := Node3D.new()
-		marker.name = "SideBossStone_%s" % boss_id
-		marker.add_to_group("boss_arena")
-		var stone_mesh := CylinderMesh.new()
-		stone_mesh.top_radius = 0.42
-		stone_mesh.bottom_radius = 0.68
-		stone_mesh.height = 1.0
-		stone_mesh.radial_segments = 8
-		var stone := MeshInstance3D.new()
-		stone.name = "Stone"
-		stone.mesh = stone_mesh
-		var stone_material := StandardMaterial3D.new()
-		stone_material.albedo_color = _realm_tint().darkened(0.62)
-		stone_material.emission_enabled = true
-		stone_material.emission = _fx_tint()
-		stone_material.emission_energy_multiplier = 0.42
-		stone.material_override = stone_material
-		marker.add_child(stone)
-		var ring := MeshInstance3D.new()
-		ring.name = "SummonRing"
-		var ring_mesh := TorusMesh.new()
-		ring_mesh.inner_radius = BOSS_DIRECTOR_SCRIPT.ARENA_MARKER_INNER_RADIUS
-		ring_mesh.outer_radius = BOSS_DIRECTOR_SCRIPT.ARENA_MARKER_OUTER_RADIUS
-		ring_mesh.ring_segments = 18
-		ring.mesh = ring_mesh
-		ring.position.y = 0.06
-		ring.material_override = stone_material
-		marker.add_child(ring)
-		var label := Label3D.new()
-		label.name = "BossLabel"
-		label.text = str(definition.get("display_name", boss_id)).to_upper()
-		label.font_size = 42
-		label.pixel_size = 0.004
-		label.outline_size = 10
-		label.modulate = _fx_tint()
-		label.position = Vector3(0.0, 1.65, 0.0)
-		marker.add_child(label)
-		add_child(marker)
 		var position_value: Variant = definition.get("position", Vector3.ZERO)
-		if position_value is Vector3:
-			marker.global_position = position_value
+		if not position_value is Vector3:
+			continue
+		var theme := BOSS_COMPOUND_CATALOG.theme_for(boss_id)
+		var compound := BOSS_COMPOUND_SCRIPT.new()
+		compound.name = "BossCompound_%s" % boss_id
+		compound.add_to_group("boss_arena")
+		add_child(compound)
+		var compound_radius := maxf(float(definition.get("arena_radius", 18.0)), 16.0)
+		compound.setup({
+			"boss_id": boss_id,
+			"realm_id": _visual_realm_id(),
+			"compound_radius": compound_radius,
+			"trigger_radius": float(theme.get("trigger", 5.5)),
+			"director": _boss_director,
+			"host": self,
+			"allowed": _side_boss_allowed,
+		})
+		compound.global_position = position_value
 		var terrain := get_node_or_null("Terrain") as TerrainRelief
 		if terrain != null:
-			terrain.conform_anchor(marker, 0.06)
-		_side_boss_markers.append({"id": boss_id, "node": marker, "down_at": -1.0})
+			terrain.conform_anchor(compound, 0.06)
+		compound.boss_spawned.connect(_on_side_boss_spawned)
+		compound.boss_died.connect(_on_side_boss_died)
+		compound.boss_despawned.connect(_on_side_boss_despawned)
+		_side_boss_markers.append({"id": boss_id, "node": compound})
+
+func _side_boss_allowed() -> bool:
+	# Optional side bosses wake only after the primary boss is cleared, and
+	# never while another compound boss is already on the field.
+	if not _primary_boss_cleared():
+		return false
+	if _biome_boss != null and is_instance_valid(_biome_boss):
+		return false
+	return true
 
 func _expansion_accessible() -> bool:
 	return biome_id == Bestiary.REALM_BRAMBLEWOOD and game_state != null \
@@ -1000,9 +1039,9 @@ func _build_bramblewood_expansion() -> void:
 	if not _expansion_accessible() or (_bramblewood_expedition != null \
 			and is_instance_valid(_bramblewood_expedition)):
 		return
-	if _arena_stone != null and is_instance_valid(_arena_stone):
-		_arena_stone.queue_free()
-		_arena_stone = null
+	if _arena_compound != null and is_instance_valid(_arena_compound):
+		_arena_compound.queue_free()
+		_arena_compound = null
 	_bramblewood_expedition = BRAMBLEWOOD_EXPEDITION_SCRIPT.new()
 	_bramblewood_expedition.name = "BramblewoodExpedition"
 	add_child(_bramblewood_expedition)
@@ -1026,65 +1065,37 @@ func _build_realm_activity_director() -> void:
 	_realm_activity_director.setup(self, activity_realm, abs(int(biome_id.hash())))
 
 func _engage_arena_boss() -> void:
-	var boss_id := str(_biome_def.get("boss_id", ""))
-	var def := Bestiary.boss_def(boss_id)
-	if def.is_empty() or _arena_stone == null:
+	if _arena_compound == null or not is_instance_valid(_arena_compound):
 		return
 	if _biome_boss != null and is_instance_valid(_biome_boss):
 		return
-	if _boss_director == null:
-		return
-	var player_position := hero.global_position if hero != null \
-		and is_instance_valid(hero) else _arena_stone.global_position
-	var boss_position := BOSS_DIRECTOR_SCRIPT.entry_position_for(
-		_arena_stone.global_position, player_position)
-	boss_position.y += 0.1
-	_biome_boss = _boss_director.spawn_boss(boss_id, false, boss_position)
-	if _biome_boss == null:
-		return
-	# Hide the summoning stone once its lord walks
-	_arena_stone.visible = false
-	if camera_rig:
-		camera_rig.add_shake(0.6)
-		camera_rig.play_boss_intro(_biome_boss)
-	audio.play_enemy_telegraph()
-	game_state.quest_progress.emit(str(def.get("intro", "The arena wakes.")))
-	if _biome_boss.has_signal("died"):
-		_biome_boss.died.connect(_on_arena_boss_died)
+	_arena_compound.force_spawn()
 
 func _engage_side_boss(index: int) -> void:
-	if _boss_director == null or _biome_boss != null and is_instance_valid(_biome_boss):
+	if _biome_boss != null and is_instance_valid(_biome_boss):
 		return
 	if index < 0 or index >= _side_boss_markers.size():
 		return
 	var entry := _side_boss_markers[index]
-	var marker := entry.get("node") as Node3D
-	if marker == null or not is_instance_valid(marker) or not marker.visible:
+	var compound := entry.get("node") as BossCompound
+	if compound == null or not is_instance_valid(compound):
 		return
-	var boss_id := str(entry.get("id", ""))
-	var definition := BOSS_ROSTER.definition_for(boss_id)
-	var player_position := hero.global_position if hero != null \
-		and is_instance_valid(hero) else marker.global_position
-	var boss_position := BOSS_DIRECTOR_SCRIPT.entry_position_for(
-		marker.global_position, player_position)
-	boss_position.y += 0.1
-	_biome_boss = _boss_director.spawn_boss(boss_id, false, boss_position)
-	if _biome_boss == null:
-		return
-	marker.visible = false
-	if camera_rig:
-		camera_rig.add_shake(0.6)
-		camera_rig.play_boss_intro(_biome_boss)
-	audio.play_enemy_telegraph()
-	game_state.quest_progress.emit("%s answers the side arena." % str(definition.get("name", boss_id)).capitalize())
-	if _biome_boss.has_signal("died"):
-		_biome_boss.died.connect(_on_side_boss_died.bind(index))
+	compound.force_spawn()
 
-func _on_side_boss_died(index: int) -> void:
+func _on_arena_boss_spawned(boss: Node3D) -> void:
+	_biome_boss = boss
+
+func _on_arena_boss_despawned(_boss_id: String) -> void:
 	_biome_boss = null
-	if index < 0 or index >= _side_boss_markers.size():
-		return
-	_side_boss_markers[index]["down_at"] = Time.get_ticks_msec() / 1000.0
+
+func _on_side_boss_spawned(boss: Node3D) -> void:
+	_biome_boss = boss
+
+func _on_side_boss_despawned(_boss_id: String) -> void:
+	_biome_boss = null
+
+func _on_side_boss_died(_boss_id: String) -> void:
+	_biome_boss = null
 
 func _primary_boss_cleared() -> bool:
 	if game_state == null or not game_state.has_method("has_boss_killed"):
@@ -1094,35 +1105,23 @@ func _primary_boss_cleared() -> bool:
 		required_key = "boss_whispergrove_root_harrow"
 	return bool(game_state.call("has_boss_killed", required_key))
 
-func _process_side_bosses(player_position: Vector3) -> void:
-	if not _primary_boss_cleared() or _biome_boss != null and is_instance_valid(_biome_boss):
-		return
-	var now := Time.get_ticks_msec() / 1000.0
-	for index in _side_boss_markers.size():
-		var entry := _side_boss_markers[index]
-		var marker := entry.get("node") as Node3D
-		if marker == null or not is_instance_valid(marker):
-			continue
-		var down_at := float(entry.get("down_at", -1.0))
-		if down_at > 0.0:
-			if now - down_at < 30.0:
-				continue
-			_side_boss_markers[index]["down_at"] = -1.0
-			marker.visible = true
-		if marker.visible and player_position.distance_to(marker.global_position) \
-				< BOSS_DIRECTOR_SCRIPT.ARENA_TRIGGER_RADIUS:
-			_engage_side_boss(index)
-			return
+func _process_side_bosses(_player_position: Vector3) -> void:
+	# Side-boss compounds own their trigger, gate, retreat and rematch timing.
+	# Kept as the roster hook the map validation expects; no polling is needed.
+	pass
 
 func _reset_biome_boss() -> void:
-	if _biome_boss != null and is_instance_valid(_biome_boss) \
-			and _biome_boss.has_method("reset_encounter"):
-		_biome_boss.call("reset_encounter")
-
-func _on_arena_boss_died() -> void:
+	if _arena_compound != null and is_instance_valid(_arena_compound):
+		_arena_compound.reset_encounter()
+	for entry in _side_boss_markers:
+		var compound := entry.get("node") as BossCompound
+		if compound != null and is_instance_valid(compound):
+			compound.reset_encounter()
 	_biome_boss = null
-	_boss_down_at = Time.get_ticks_msec() / 1000.0
-	game_state.quest_progress.emit("The biome exhales. The stone will wake again if you seek a rematch.")
+
+func _on_arena_boss_died(_boss_id: String) -> void:
+	_biome_boss = null
+	game_state.quest_progress.emit("The biome exhales. The ruin will stir again if you seek a rematch.")
 
 ## === Frame: relic spin + proximity triggers ===
 ## NOTE: does not chain to WorldManager._process — the base version calls
@@ -1156,19 +1155,6 @@ func _process(delta: float) -> void:
 		if pos.distance_to(node.global_position) < 1.9:
 			_travel_to(str(g.get("dest")))
 			return
-	# Arena
-	if _arena_stone != null and is_instance_valid(_arena_stone) and _arena_stone.visible \
-			and not (biome_id == Bestiary.REALM_BRAMBLEWOOD \
-			and current_grove_state < GameState.QuestStage.COMPLETE) \
-			and pos.distance_to(_arena_stone.global_position) \
-			< BOSS_DIRECTOR_SCRIPT.ARENA_TRIGGER_RADIUS:
-		_engage_arena_boss()
-		return
-	# Rematch: the stone re-rises half a minute after a kill
-	if _boss_down_at > 0.0 and Time.get_ticks_msec() / 1000.0 - _boss_down_at > 30.0:
-		_boss_down_at = -1.0
-		if _arena_stone != null and is_instance_valid(_arena_stone):
-			_arena_stone.visible = true
 	_process_side_bosses(pos)
 
 func _travel_to(dest: String) -> void:

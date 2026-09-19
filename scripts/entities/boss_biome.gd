@@ -56,6 +56,12 @@ func _ready() -> void:
 func _boss_key() -> String:
 	return "biome_%s" % def_id
 
+func boss_display_name() -> String:
+	return str(_def.get("name", name)).to_upper()
+
+func boss_display_title() -> String:
+	return str(_def.get("title", ""))
+
 func _apply_biome_palette() -> void:
 	var body_mesh := get_node_or_null("Visual/Body") as MeshInstance3D
 	if body_mesh == null or not (body_mesh.material_override is ShaderMaterial):

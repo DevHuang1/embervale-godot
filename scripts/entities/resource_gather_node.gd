@@ -175,8 +175,10 @@ func _do_gather() -> void:
 	if ws and ws.has_method("mark_gathered"):
 		ws.call("mark_gathered", _node_id, respawn_time_sec)
 
-	# FloatingText
+	# Snapping stems is loud: nearby mobs with real hearing come to look.
 	var hero := _find_hero()
+	if hero != null and hero.has_method("emit_noise"):
+		hero.call("emit_noise", 7.0)
 	if hero:
 		FloatingText.spawn_on_entity(hero,
 			"+%d %s" % [qty, material_id.replace("_", " ").capitalize()],

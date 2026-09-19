@@ -131,6 +131,12 @@ var encounter_origin := Vector3.ZERO
 var encounter_generation: int = 1
 var _death_finalized := false
 var _death_tween: Tween = null
+# Optional compound leash: a bounded ruin the boss cannot leave. The quest
+# Matriarch and standalone bosses leave this off; compound-spawned bosses set it
+# so "the boss cannot leave its compound" is enforced at the movement source.
+var _leash_active := false
+var _leash_center := Vector3.ZERO
+var _leash_radius := 0.0
 
 # Player personalization (idol mesh, palette, one pool skill, SFX preset).
 # Null = the untouched default boss.
@@ -138,6 +144,10 @@ var customization: BossCustomization = null
 var sfx_profile: String = "vanilla"
 ## Realm bosses select a Blender profile before calling super._ready().
 var authored_model_profile: String = "boss_matriarch"
+## Optional world-space height for the mounted authored model; 0 keeps the
+## model's own scale. Structure bosses set this so a borrowed CC0 rig matches
+## the fight's silhouette instead of the exporter's units.
+var authored_rig_height: float = 0.0
 @export_range(0, 1) var authored_visual_variant: int = 0
 ## True when an authored glowing model actually mounted this boot. Derived
 ## bosses skip procedural identity builds (spikes/halo) that would otherwise
@@ -324,6 +334,7 @@ func _physics_process(delta: float) -> void:
 	_update_ai(delta)
 	
 	move_and_slide()
+	_enforce_leash()
 
 func _update_timers(delta: float) -> void:
 	if stun_timer > 0:
@@ -957,6 +968,39 @@ func _spawn_rewards() -> void:
 func set_encounter_origin(origin: Vector3) -> void:
 	encounter_origin = origin
 
+## === Compound leash ===
+## The boss is confined to a circular compound. Horizontal only, so vertical
+## attacks (jumps, burrows) are unaffected; the clamp runs after move_and_slide
+## so no attack or telegraph timing changes.
+func set_leash(center: Vector3, radius: float) -> void:
+	_leash_active = true
+	_leash_center = center
+	_leash_radius = maxf(radius, 1.0)
+
+func clear_leash() -> void:
+	_leash_active = false
+	_leash_radius = 0.0
+
+func _enforce_leash() -> void:
+	if not _leash_active or _leash_radius <= 0.0:
+		return
+	var offset := Vector3(global_position.x - _leash_center.x, 0.0,
+		global_position.z - _leash_center.z)
+	if offset.length() <= _leash_radius:
+		return
+	var clamped := _leash_center + offset.normalized() * _leash_radius
+	clamped.y = global_position.y
+	global_position = clamped
+
+## Player-facing identity used by the HUD nameplate and title cards. Derived
+## bosses override these with roster name/title; the base falls back to the node
+## name so standalone/legacy bosses still show something readable.
+func boss_display_name() -> String:
+	return str(name).to_upper()
+
+func boss_display_title() -> String:
+	return ""
+
 ## Full retry transaction used by WorldManager after player defeat. Derived
 ## bosses extend this to clear summons/phase props but must call super.
 func reset_encounter() -> void:
@@ -1013,6 +1057,9 @@ func _show_boss_health_bar() -> void:
 	boss_bar_root = hud.get_node_or_null("Root/BossHealthBar")
 	boss_hp_bar = hud.get_node_or_null("Root/BossHealthBar/BossHPBar")
 	boss_phase_label = hud.get_node_or_null("Root/BossHealthBar/PhaseIndicator")
+	var name_label := hud.get_node_or_null("Root/BossHealthBar/BossName") as Label
+	if name_label != null:
+		name_label.text = boss_display_name()
 	if boss_bar_root:
 		boss_bar_root.visible = true
 	_refresh_boss_bar()

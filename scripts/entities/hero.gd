@@ -7,6 +7,9 @@ class_name Hero
 
 signal position_changed(position: Vector3)
 signal interact_pressed
+## Combat noise the enemy AI listens for. Radius is how far the sound carries;
+## a mob still needs enough hearing_radius of its own to notice it.
+signal noise_emitted(position: Vector3, radius: float)
 
 @onready var game_state: GameState = GameState
 @onready var audio: AudioManager = AudioManager
@@ -85,6 +88,8 @@ var approach_distance: float = 1.42
 var hit_flash_timer: float = 0.0
 var invulnerable_timer: float = 0.0
 var stun_timer: float = 0.0
+## Throttle so a swing cannot spam noise events within one beat.
+var _noise_cooldown := 0.0
 
 # Dodge state
 var dodge_timer: float = 0.0
@@ -626,7 +631,16 @@ func _try_dodge(screen_dir: Vector2) -> void:
 	CombatFx.spawn_burst(self, global_position + Vector3(0, 0.15, 0),
 		Color(0.42, 0.52, 0.34, 0.6), 14, 3.2, 0.4, 0.16)
 	has_move_target = false
+	emit_noise(6.5)
 	game_state.check_onboarding_trigger("dodge")
+
+## Broadcasts a combat noise event for enemy sensing. Throttled: a flurry of
+## swings reads as one loud beat instead of one event per frame.
+func emit_noise(radius: float) -> void:
+	if _noise_cooldown > 0.0:
+		return
+	_noise_cooldown = 0.22
+	noise_emitted.emit(global_position, radius)
 
 func effective_dodge_iframes() -> float:
 	return recovery_assist_iframes(dodge_iframes,
@@ -706,6 +720,8 @@ func stun(seconds: float) -> void:
 	is_moving = false
 
 func _update_timers(delta: float) -> void:
+	if _noise_cooldown > 0.0:
+		_noise_cooldown -= delta
 	if hit_flash_timer > 0:
 		hit_flash_timer -= delta
 		var intensity = clampf(hit_flash_timer / 0.2, 0.0, 1.0)
@@ -843,13 +859,11 @@ func _build_swing_trail() -> void:
 	proc.gravity = Vector3.ZERO
 	proc.scale_min = 0.5
 	proc.scale_max = 1.2
-	var ramp := Gradient.new()
-	ramp.set_color(0, Color(1.0, 0.82, 0.42, 0.9))
-	ramp.set_color(1, Color(0.95, 0.4, 0.08, 0.0))
-	var ramp_tex := GradientTexture1D.new()
-	ramp_tex.gradient = ramp
-	proc.color_ramp = ramp_tex
+	proc.color_ramp = GradientTexture1D.new()
 	swing_trail.process_material = proc
+	# Style shapes the arc, element colors it: a maul leaves a heavy slow puff
+	# while a staff leaves a drifting arc, and both take their element's hue.
+	WeaponIdentity.apply_to_trail(swing_trail, weapon_style(), _equipped_element())
 	var quad := QuadMesh.new()
 	quad.size = Vector2(0.14, 0.14)
 	var mat := StandardMaterial3D.new()
@@ -1295,6 +1309,8 @@ func _update_movement_audio(delta: float) -> void:
 				Bestiary.REALM_HEARTWOOD:
 					surface = "stone"
 			audio.play_footstep_surface(surface, speed_ratio)
+			# Running is audible: keen ears notice a sprint long before eyes do.
+			emit_noise(4.5 + 3.0 * speed_ratio)
 			# Trodden paths: every planted step wears the persistent map
 			var ws := get_node_or_null("/root/WorldState")
 			if ws != null and ws.wear != null:
@@ -1380,6 +1396,7 @@ func _authored_impact_seconds(cue: String, impact_fraction: float) -> float:
 
 ## Lock onto a target for a press-driven approach; one strike on arrival.
 func _begin_attack_target(enemy: Node3D) -> void:
+	emit_noise(9.0)
 	game_state.engage_enemy(enemy)
 	game_state.check_onboarding_trigger("combat")
 	_attack_run_target = enemy.get_instance_id()
@@ -1432,6 +1449,7 @@ func _animate_weapon_swing(combo_step: int = 0, total_override: float = -1.0) ->
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 func _perform_auto_strike(enemy: Node3D) -> void:
+	emit_noise(9.0)
 	var strike_data = game_state.perform_auto_strike()
 	if strike_data.is_empty():
 		return
@@ -2426,11 +2444,17 @@ func take_damage(amount: int, knockback_dir: Vector3) -> bool:
 func get_body_velocity() -> Vector3:
 	return velocity
 
+## Retunes the in-hand presentation when the weapon changes. No nodes are
+## rebuilt, so a mid-fight swap cannot hitch or leak particle emitters.
+func _refresh_weapon_identity() -> void:
+	WeaponIdentity.apply_to_trail(swing_trail, weapon_style(), _equipped_element())
+
 func _on_weapon_changed(weapon: Dictionary) -> void:
 	current_weapon = weapon.duplicate(true)
 	_refresh_weapon_visual()
 
 func _refresh_weapon_visual() -> void:
+	_refresh_weapon_identity()
 	if weapon_socket == null:
 		return
 	

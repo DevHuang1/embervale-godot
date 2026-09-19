@@ -65,19 +65,28 @@ func _run() -> void:
 		print("FAIL: bridge did not pick up the attack cue, got ", bridge.current_cue())
 	for _i in 12:
 		await process_frame
+	# Same cue + new serial must restart the clip even mid-play. Stage the clip
+	# explicitly instead of sampling after a frame budget: on a loaded machine
+	# (or with a busier world) the clip can finish first and a held last frame
+	# reads as position 0, which makes the restart comparison meaningless.
+	bridge.player.play(bridge._resolve("light_1"))
+	bridge.player.seek(0.3, true)
 	var pos_before: float = bridge.player.current_animation_position
-	animator.swing_serial += 1
-	st["attack_serial"] = int(animator.swing_serial)
-	bridge._process(0.016)
-	await process_frame
-	var pos_after: float = bridge.player.current_animation_position
-	if bridge.current_cue() == "light_1" and pos_after < pos_before:
-		print("PASS: same-cue attack restarted the swing clip (",
-			snappedf(pos_before, 0.001), "s -> ", snappedf(pos_after, 0.001), "s)")
-	else:
+	if pos_before <= 0.01:
 		failures += 1
-		print("FAIL: same-cue attack did not restart the clip (",
-			snappedf(pos_before, 0.001), "s -> ", snappedf(pos_after, 0.001), "s)")
+		print("FAIL: could not stage the swing clip mid-play")
+	else:
+		animator.swing_serial += 1
+		st["attack_serial"] = int(animator.swing_serial)
+		bridge._process(0.016)
+		var pos_after: float = bridge.player.current_animation_position
+		if bridge.current_cue() == "light_1" and pos_after < pos_before:
+			print("PASS: same-cue attack restarted the swing clip (",
+				snappedf(pos_before, 0.001), "s -> ", snappedf(pos_after, 0.001), "s)")
+		else:
+			failures += 1
+			print("FAIL: same-cue attack did not restart the clip (",
+				snappedf(pos_before, 0.001), "s -> ", snappedf(pos_after, 0.001), "s)")
 
 	world.queue_free()
 	if failures == 0:

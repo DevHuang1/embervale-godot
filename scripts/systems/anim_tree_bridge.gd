@@ -30,7 +30,7 @@ const CUE_SPEEDS := {"light_1": 1.25, "light_2": 1.35, "light_3": 1.1}
 ## friends name clips "Idle", "Walk_01", "Attack", ... not our cue ids).
 const CUE_ALIASES := {
 	"idle": ["idle", "flying", "fly", "float"],
-	"walk": ["walk", "walking", "fly", "flying"],
+	"walk": ["walk", "walking", "fly", "flying", "jump"],
 	"run": ["run", "jog", "sprint", "walk"],
 	"light_1": ["attack1", "swordattack", "attack", "slash", "hit1"],
 	"light_2": ["attack2", "slash2", "hit2", "swordattack", "attack"],
@@ -38,7 +38,7 @@ const CUE_ALIASES := {
 	"heavy": ["heavy", "slam", "swordattack", "attack"],
 	"cast": ["cast", "spell", "magic", "attack"],
 	"buff": ["buff", "cast", "spell"],
-	"hit": ["hurt", "take_hit", "damage", "hit"],
+	"hit": ["hurt", "take_hit", "damage", "hit", "jump"],
 	"dodge": ["dodge", "roll", "evade"],
 	"death": ["death", "die", "dead"],
 }

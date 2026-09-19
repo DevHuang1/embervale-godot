@@ -12,3 +12,4 @@ silhouette_kind = "fins"
 profile_sfx = "grave_moss"
 max_hp = 36
 base_atk = 4
+authored_rig_height = 0.40

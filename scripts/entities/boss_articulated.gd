@@ -42,8 +42,15 @@ func _ready() -> void:
 	move_speed = float(_def.get("speed", 3.5)) \
 		* ROSTER.BOSS_TRAVEL_SPEED_MULTIPLIER
 	arena_radius = 20.0
-	authored_model_profile = ASSET_MANIFEST.model_profile_for(canonical_id)
-	if authored_model_profile.is_empty():
+	# The manifest owns the canonical realm roster, but an enterable-structure
+	# boss arrives with its own borrowed CC0 rig already chosen by its builder
+	# (StructureInterior sets authored_model_profile before add_child). Only
+	# overwrite when the manifest actually knows this boss, or every structure
+	# boss silently loses its model and renders as the procedural fallback.
+	var manifest_profile := ASSET_MANIFEST.model_profile_for(canonical_id)
+	if not manifest_profile.is_empty():
+		authored_model_profile = manifest_profile
+	elif authored_model_profile.is_empty() or authored_model_profile == "boss_matriarch":
 		authored_model_profile = "procedural_%s" % canonical_id
 	authored_model_mounted = false
 	sfx_profile = str(_def.get("sfx_profile", "vanilla"))
@@ -77,6 +84,12 @@ func _exit_tree() -> void:
 	# Skill visuals are owned by this encounter context; scene teardown must
 	# cancel them even when the host exits without a gameplay reset.
 	CombatFx.cancel_context_effects(self)
+
+func boss_display_name() -> String:
+	return str(_def.get("name", name)).to_upper()
+
+func boss_display_title() -> String:
+	return str(_def.get("title", ""))
 
 func _bind_authored_visual() -> void:
 	if not authored_model_mounted:

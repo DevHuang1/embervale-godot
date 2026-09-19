@@ -301,8 +301,11 @@ func _attack_magma_fist(player: Node3D) -> void:
 	_shake_camera(0.38)
 	CombatFx.spawn_slash(self, player.global_position + Vector3(0, 1.2, 0), COL_MAGMA)
 	CombatFx.spawn_burst(self, player.global_position + Vector3(0, 0.8, 0), COL_LAVA, 18, 6.0, 0.4, 0.18)
-	_deal_area_damage(player.global_position, 3.5, int(base_atk * 1.6))
-	if player.has_method("notify_enemy_strike"):
+	# One resolution: the old pair dealt the fist twice (area damage then the
+	# dodge-aware strike). Keep the ground-eruption whiff on airborne targets.
+	if player.has_method("is_airborne") and player.is_airborne():
+		FloatingText.spawn_on_entity(player, "miss", Color(0.8, 0.8, 0.7))
+	elif player.has_method("notify_enemy_strike"):
 		player.call("notify_enemy_strike", self, int(base_atk * 1.6))
 
 func _attack_lava_pillars(player: Node3D) -> void:

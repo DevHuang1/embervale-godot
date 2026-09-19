@@ -373,8 +373,13 @@ func _attack_gravity_field(player: Node3D) -> void:
 	t.timeout.connect(func():
 		if is_defeated or gen != encounter_generation: return
 		CombatFx.spawn_shockwave(self, global_position, 8.0, COL_VOID, 0.55)
-		_deal_area_damage(global_position, 8.0, int(base_atk * 1.4))
-		if player.has_method("notify_enemy_strike"):
+		# Range + airborne whiff, then one dodge-aware strike. The old pair
+		# dealt the blast twice, and the notify call ignored the radius.
+		if global_position.distance_to(player.global_position) > 8.0:
+			return
+		if player.has_method("is_airborne") and player.is_airborne():
+			FloatingText.spawn_on_entity(player, "miss", Color(0.8, 0.8, 0.7))
+		elif player.has_method("notify_enemy_strike"):
 			player.call("notify_enemy_strike", self, int(base_atk * 1.4)))
 
 func _process(delta: float) -> void:

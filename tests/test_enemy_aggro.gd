@@ -12,6 +12,13 @@ func _init() -> void:
 	_check(source.contains("_has_player_line_of_sight"), "line-of-sight gate exists")
 	_check(source.contains("is_player_engaged"), "engagement query exists")
 	_check(source.contains("velocity.x = move_toward"), "disengaged enemies stop moving")
+	# Per-archetype sensing: cone sight, hearing, and an anchor leash the mob
+	# breaks off to walk home instead of freezing wherever it was kited.
+	_check(source.contains("MobSensing.profile_for"), "archetype sensing profile is read")
+	_check(source.contains("_can_sense_player"), "cone/hearing perception gate exists")
+	_check(source.contains("_leash_radius"), "anchor leash exists")
+	_check(source.contains("_returning") and source.contains("_idle_movement"),
+		"leash return and idle wander exist")
 	print("ENEMY AGGRO CONTRACT PASSED" if failures.is_empty() else "FAILURES: ", failures)
 	quit(1 if not failures.is_empty() else 0)
 

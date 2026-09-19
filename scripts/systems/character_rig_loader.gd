@@ -36,6 +36,12 @@ const EXTERNAL_MODEL_PATHS := {
 	"enemy_ember_warden": "res://assets/models/enemies/quaternius/Wasp.fbx",
 	"enemy_relic_leech": "res://assets/models/enemies/quaternius/Snake_angry.fbx",
 	"boss_thornwarden": "res://assets/models/boss_variants/boss_bramblewood_thornregent.glb",
+	# Enterable-structure bosses borrow CC0 Quaternius rigs (see
+	# assets/models/quaternius_monsters/License.txt). StructureInterior sets
+	# authored_rig_height so each one matches its fight's silhouette.
+	"boss_keep_warden": "res://assets/models/quaternius_monsters/Skeleton.fbx",
+	"boss_hollowroot_matron": "res://assets/models/quaternius_monsters/Slime.fbx",
+	"boss_pyramid_sealed_one": "res://assets/models/quaternius_monsters/Dragon.fbx",
 }
 
 # Model registry (populated by try_if_wire on first load)
@@ -149,6 +155,19 @@ static func _normalize_height(rig: Node3D, target_height: float) -> void:
 	if h <= 0.001:
 		return
 	rig.scale *= Vector3.ONE * (target_height / h)
+
+## World-space height of the authored rig mounted under `entity`, or 0 when no
+## rig is present. Callers that size collision against the visible creature use
+## this instead of `authored_rig_height` so a failed normalization (or a rig
+## whose host scales it further) is measured rather than assumed.
+static func mounted_height(entity: Node3D) -> float:
+	var visual := entity.get_node_or_null("Visual")
+	if visual == null:
+		return 0.0
+	var rig := visual.find_child("AuthoredRig", true, false) as Node3D
+	if rig == null:
+		return 0.0
+	return _world_height(rig)
 
 ## Mobile LOD visibility ranges for the three progressive silhouettes the
 ## exporter ships (near = _LOD0, mid = _LOD1, far = _LOD2). Near silhouettes

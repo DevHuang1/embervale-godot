@@ -48,10 +48,19 @@ var _boss_score_fading := false
 const SYNTH_SR := 44100
 var cue_config: AudioCueConfig = null
 var _cue_streams: Dictionary = {}   # cue name -> Array[AudioStreamWAV]
+## Synthesized once at startup on mobile. Anything in this list that is not
+## prewarmed is skipped instead of being rendered on the combat frame.
 const MOBILE_COMBAT_CUES: Array[String] = [
 	"skill_charge", "skill_whirl_spin", "skill_dash_zip", "skill_hurl",
 	"comet_fall", "heal_bloom_cue", "explosion", "slash_impact",
-	"elem_fire", "elem_frost", "elem_shock", "elem_nature"]
+	"impact_thud", "impact_slash", "impact_magic", "impact_plant",
+	"impact_stone", "impact_claw",
+	"elem_fire", "elem_frost", "elem_shock", "elem_nature",
+	"elem_shadow", "elem_water", "elem_arcane", "elem_thunder",
+	# Every enemy wind-up starts with the telegraph and every vanilla swing
+	# follows with the lunge; both must already exist when combat begins, or
+	# the first foe of a session renders its WAV on the gameplay frame.
+	"hushling_telegraph", "hushling_lunge"]
 
 const SETTINGS_PATH := "user://embervale_settings.cfg"
 
@@ -702,6 +711,12 @@ func play_enemy_telegraph() -> void:
 func play_enemy_special() -> void:
 	play_cue("spore_burst")
 
+## Generic enemy swing cue — the "vanilla" SFX profile's attack cue. The
+## lunge whoosh + thorn scratch already exists in the synth table; profiled
+## creatures route through play_profile_cue(profile, "attack") instead.
+func play_enemy_attack() -> void:
+	play_cue("hushling_lunge")
+
 ## Generic enemy impact hit — the "vanilla" SFX profile's hit cue for
 ## Hushlings and similar creatures. Slightly lower and shorter than the
 ## player's play_hit so hits from each side read distinctly.
@@ -716,6 +731,10 @@ const SFX_PROFILES := {
 	"hollow_resin": {"freq": 1.35, "decay": 0.70, "vol": 0.90},
 	"grave_moss": {"freq": 0.72, "decay": 1.60, "vol": 1.10},
 	"ember_glass": {"freq": 1.62, "decay": 0.55, "vol": 1.22},
+	# Spitter register: wet and hollow, lower than the vanilla creature. Its
+	# bespoke venom_lob/venom_hit stay, but the inherited telegraph/attack/hit
+	# cues must speak through a real profile now that spitters spawn map-wide.
+	"venom_spit": {"freq": 0.84, "decay": 1.25, "vol": 1.05},
 }
 
 ## kind ∈ {"telegraph", "stomp", "cast", "vocal"}; vanilla is a no-op so the
@@ -742,6 +761,11 @@ func play_profile_cue(preset: String, kind: String) -> void:
 		"bite":
 			play_chime(130.8 * f, 0.0, 0.14 * d, 0.055 * v)
 			play_chime(98.0 * f, 0.03, 0.18 * d, 0.045 * v)
+		"attack":
+			# Every profiled archetype's swing: a short body-hit thump under a
+			# brighter edge so the wind-up release is audible, not silent.
+			play_chime(104.0 * f, 0.0, 0.13 * d, 0.06 * v)
+			play_chime(156.0 * f, 0.03, 0.10 * d, 0.045 * v)
 		"hit":
 			play_chime(196.0 * f, 0.0, 0.10 * d, 0.06 * v)
 
@@ -825,7 +849,10 @@ func _render_fen_bed(b: PackedFloat32Array, duration: float) -> void:
 ## Renders each named cue into cached WAV variants (seeded per variant so
 ## the same name always yields the same set), then plays with config rules.
 
-func play_cue(cue_name: String) -> void:
+## `pitch_hint` lets a caller push a shared cue toward a family's register
+## (a stone hit brighter, a flesh hit duller) on top of the per-cue jitter, so
+## repeated strikes of the same family stop sounding identical.
+func play_cue(cue_name: String, pitch_hint: float = 1.0) -> void:
 	if _shutting_down or not is_inside_tree():
 		return
 	if _is_mobile_runtime() and _is_mobile_combat_cue(cue_name) \
@@ -848,8 +875,8 @@ func play_cue(cue_name: String) -> void:
 	add_child(player)
 	player.stream = stream
 	player.volume_db = float(cfg.get("volume_db", -8.0))
-	player.pitch_scale = randf_range(float(cfg.get("pitch_min", 0.95)),
-		float(cfg.get("pitch_max", 1.05)))
+	player.pitch_scale = clampf(randf_range(float(cfg.get("pitch_min", 0.95)),
+		float(cfg.get("pitch_max", 1.05))) * pitch_hint, 0.5, 2.0)
 	var bus := str(cfg.get("bus", "SFX"))
 	if AudioServer.get_bus_index(bus) >= 0:
 		player.bus = bus
@@ -1225,7 +1252,39 @@ func _render_cue(name_: String, variant: int) -> PackedFloat32Array:
 			_noise(b, rng, 0.02, 0.10, 0.36, 30.0, 0.8)  # raking scratch
 			_whoosh(b, rng, 0.0, 0.12, 0.4, 0.5, 0.7)
 			_sweep_tone(b, 0.04, 0.07, 180.0, 80.0, 0.26, 15.0)
-		# --- Relic element payloads ---
+		# --- Weapon-family strikes: a cut, a thud and an arcane release must
+		# --- never share one cue, or every weapon reads as the same hit.
+		"impact_slash":
+			b.resize(int(0.14 * SYNTH_SR))
+			_whoosh(b, rng, 0.0, 0.11, 0.55, 0.35, 0.95)          # air cut
+			_sweep_tone(b, 0.0, 0.06, 1180.0, 620.0, 0.30, 22.0)  # thin edge ring
+			_crackle(b, rng, 0.01, 0.06, 44.0, 0.16)
+		"impact_magic":
+			b.resize(int(0.34 * SYNTH_SR))
+			_sweep_tone(b, 0.0, 0.16, 320.0, 1560.0, 0.22, 7.0)   # rising release
+			_hum(b, 0.02, 0.28, 620.0, 940.0, 0.16, 3)
+			_crackle(b, rng, 0.06, 0.22, 26.0, 0.10)
+		# --- Relic element payloads
+		"elem_shadow":
+			b.resize(int(0.60 * SYNTH_SR))
+			_hum(b, 0.0, 0.50, 74.0, 52.0, 0.30, 2)               # hollow dread
+			_noise(b, rng, 0.04, 0.45, 0.24, 8.0, 0.14)           # whisper
+			_sweep_tone(b, 0.10, 0.22, 300.0, 90.0, 0.16, 7.0)
+		"elem_water":
+			b.resize(int(0.42 * SYNTH_SR))
+			_noise(b, rng, 0.0, 0.26, 0.34, 22.0, 0.30, 0.55)     # surge
+			_whoosh(b, rng, 0.02, 0.22, 0.30, 0.25, 0.85)
+			_sweep_tone(b, 0.10, 0.16, 520.0, 180.0, 0.20, 9.0)
+		"elem_arcane":
+			b.resize(int(0.44 * SYNTH_SR))
+			_sweep_tone(b, 0.0, 0.10, 880.0, 1320.0, 0.22, 12.0)
+			_sweep_tone(b, 0.07, 0.12, 1320.0, 1760.0, 0.18, 11.0)
+			_crackle(b, rng, 0.02, 0.30, 30.0, 0.10)
+		"elem_thunder":
+			b.resize(int(0.55 * SYNTH_SR))
+			_noise(b, rng, 0.0, 0.05, 0.62, 70.0, 0.92)           # crack
+			_sweep_tone(b, 0.0, 0.20, 240.0, 70.0, 0.34, 8.0)     # body
+			_noise(b, rng, 0.10, 0.40, 0.26, 9.0, 0.16)           # rolling rumble
 		"elem_fire":
 			b.resize(int(0.55 * SYNTH_SR))
 			_noise(b, rng, 0.0, 0.42, 0.32, 6.0, 0.30, 0.10)  # whoomp roar

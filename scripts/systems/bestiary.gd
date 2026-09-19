@@ -83,26 +83,40 @@ const WAVES := {
 
 # Archetype + visual variant definitions per realm × tier
 # Each entry: kind, display, hp, atk_bonus, speed, scale, tint, eye, volley
+## Elite variants carry `rig` (the authored creature profile the pocket elite
+## wears) and `rig_height` (the silhouette height that rig is normalised to), so
+## every realm fields its own elite species instead of a shared blob. Kinds stay
+## on the shared enemy scene catalog; the rig only changes the silhouette.
 const VARIANTS := {
+	"whispergrove": {
+		"normal": { "kind": "hushling",      "display": "Bramble Sprite",   "hp": 28,  "atk_bonus": 0, "speed": 1.00, "scale": 1.00, "tint": Color(0,0,0,0), "eye": Color(0,0,0,0) },
+		"hard":   { "kind": "charger",       "display": "Bramble Charger",  "hp": 44,  "atk_bonus": 2, "speed": 1.08, "scale": 1.08, "tint": Color(0.25,0.18,0.12,1), "eye": Color(0.95,0.35,0.12,1) },
+		"elite":  { "kind": "thorn_charger", "display": "Elder Thorn",      "hp": 64,  "atk_bonus": 4, "speed": 1.08, "scale": 1.10, "tint": Color(0.20,0.10,0.06,1), "eye": Color(1.00,0.30,0.10,1),
+			"rig": "enemy_thorn_charger", "rig_height": 1.25 },
+	},
 	"bramblewood": {
 		"normal": { "kind": "hushling",      "display": "Bramble Sprite",   "hp": 28,  "atk_bonus": 0, "speed": 1.00, "scale": 1.00, "tint": Color(0,0,0,0), "eye": Color(0,0,0,0) },
 		"hard":   { "kind": "charger",       "display": "Bramble Charger",  "hp": 44,  "atk_bonus": 2, "speed": 1.08, "scale": 1.08, "tint": Color(0.25,0.18,0.12,1), "eye": Color(0.95,0.35,0.12,1) },
-		"elite":  { "kind": "thorn_charger", "display": "Elder Thorn",      "hp": 68,  "atk_bonus": 4, "speed": 1.12, "scale": 1.18, "tint": Color(0.20,0.10,0.06,1), "eye": Color(1.00,0.22,0.06,1) },
+		"elite":  { "kind": "spore_weaver",  "display": "Briar Broodmother", "hp": 76,  "atk_bonus": 4, "speed": 1.06, "scale": 1.14, "tint": Color(0.16,0.22,0.10,1), "eye": Color(0.72,0.92,0.30,1),
+			"rig": "enemy_spore_weaver", "rig_height": 1.45 },
 	},
 	"mistfen": {
 		"normal": { "kind": "fenling",        "display": "Fen Sprite",       "hp": 32,  "atk_bonus": 0, "speed": 1.08, "scale": 0.92, "tint": Color(0.15,0.27,0.34,1), "eye": Color(0.28,0.82,0.94,1), "volley": true },
 		"hard":   { "kind": "mire_stalker",   "display": "Mire Stalker",     "hp": 50,  "atk_bonus": 2, "speed": 1.10, "scale": 1.00, "tint": Color(0.12,0.22,0.30,1), "eye": Color(0.20,0.75,0.90,1) },
-		"elite":  { "kind": "moonfen_fenling","display": "Moonfen Warden",   "hp": 78,  "atk_bonus": 4, "speed": 1.12, "scale": 1.10, "tint": Color(0.08,0.18,0.30,1), "eye": Color(0.32,0.90,1.00,1), "volley": true },
+		"elite":  { "kind": "mire_stalker",   "display": "Fen Devourer",     "hp": 80,  "atk_bonus": 4, "speed": 1.10, "scale": 1.12, "tint": Color(0.10,0.20,0.28,1), "eye": Color(0.20,0.80,0.95,1),
+			"rig": "enemy_mire_stalker", "rig_height": 1.40 },
 	},
 	"heartwood": {
 		"normal": { "kind": "ember_warden",   "display": "Ember Warden",     "hp": 38,  "atk_bonus": 2, "speed": 0.88, "scale": 1.08, "tint": Color(0.25,0.10,0.07,1), "eye": Color(1.00,0.28,0.06,1) },
 		"hard":   { "kind": "spore_weaver",   "display": "Spore Weaver",     "hp": 55,  "atk_bonus": 3, "speed": 0.95, "scale": 1.04, "tint": Color(0.22,0.30,0.14,1), "eye": Color(0.62,0.88,0.30,1) },
-		"elite":  { "kind": "relic_leech",    "display": "Ember Leech",      "hp": 88,  "atk_bonus": 5, "speed": 0.92, "scale": 1.14, "tint": Color(0.20,0.08,0.06,1), "eye": Color(1.00,0.18,0.06,1) },
+		"elite":  { "kind": "ember_warden",   "display": "Ash Swarmlord",    "hp": 88,  "atk_bonus": 5, "speed": 1.00, "scale": 1.10, "tint": Color(0.24,0.09,0.05,1), "eye": Color(1.00,0.32,0.06,1),
+			"rig": "enemy_ember_warden", "rig_height": 1.55 },
 	},
 	"moonfen": {
 		"normal": { "kind": "moonfen_fenling","display": "Moon Sprite",      "hp": 36,  "atk_bonus": 1, "speed": 1.05, "scale": 0.94, "tint": Color(0.18,0.20,0.38,1), "eye": Color(0.32,0.90,1.00,1), "volley": true },
 		"hard":   { "kind": "ambusher",       "display": "Moonfen Ambusher", "hp": 52,  "atk_bonus": 3, "speed": 1.12, "scale": 0.98, "tint": Color(0.14,0.16,0.32,1), "eye": Color(0.28,0.80,0.96,1) },
-		"elite":  { "kind": "relic_leech",    "display": "Moonfen Leech",    "hp": 82,  "atk_bonus": 4, "speed": 1.00, "scale": 1.08, "tint": Color(0.16,0.18,0.38,1), "eye": Color(0.44,0.76,1.00,1), "volley": true },
+		"elite":  { "kind": "relic_leech",    "display": "Lunar Coil",       "hp": 92,  "atk_bonus": 5, "speed": 1.04, "scale": 1.14, "tint": Color(0.14,0.16,0.34,1), "eye": Color(0.44,0.80,1.00,1), "volley": true,
+			"rig": "enemy_relic_leech", "rig_height": 1.50 },
 	},
 }
 
@@ -189,6 +203,18 @@ const BOSS_DEFS := {
 				"cooldown": 14.0, "desc": "Roots leap the distance and cage you where you stand."},
 		],
 		"sfx_presets": ["hollow_resin", "grave_moss", "ember_glass"],
+		"trophies": [
+			{"id": "hollow_root", "name": "Hollow Root",
+				"palette": [Color(0.16, 0.23, 0.13), Color(1.00, 0.42, 0.16), Color(0.55, 0.30, 0.16)]},
+			{"id": "dewglass", "name": "Dewglass",
+				"palette": [Color(0.22, 0.40, 0.28), Color(0.20, 1.00, 0.44), Color(0.82, 0.62, 0.22)]},
+			{"id": "moonmire", "name": "Moonmire",
+				"palette": [Color(0.10, 0.14, 0.26), Color(0.32, 0.90, 1.00), Color(0.28, 0.35, 0.60)]},
+			{"id": "emberheart", "name": "Emberheart", "unlock_boss": "whispergrove_root_harrow",
+				"palette": [Color(0.25, 0.10, 0.07), Color(1.00, 0.30, 0.08), Color(0.96, 0.72, 0.29)]},
+			{"id": "thornregent", "name": "Thorn Regent", "unlock_boss": "bramblewood_thorn_regent",
+				"palette": [Color(0.12, 0.24, 0.15), Color(0.90, 0.35, 0.12), Color(0.32, 1.00, 0.48)]},
+		],
 			"model_variants": ["boss_whispergrove_rootwarden", "boss_whispergrove_dewseer"],
 	},
 	# === Biome bosses (arena challenges) ===

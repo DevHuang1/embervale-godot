@@ -29,6 +29,7 @@ radius = 0.52
 
 [node name="MoonfenFenling" type="CharacterBody3D" groups=["enemy", "hushling"]]
 script = ExtResource("1_scr")
+authored_rig_height = 0.42
 
 [node name="Visual" type="Node3D" parent="."]
 
@@ -80,7 +81,7 @@ transform = Transform3D(1, 0, 0, 0, 0.5, 0.866, 0, -0.866, 0.5, 0.3, -0.2, 0.52)
 mesh = SubResource("CylinderMesh_tendril")
 material_override = ExtResource("2_mat")
 
-[node name="Animator" type="Node3D" parent="."]
+[node name="Animator" type="Node3D" parent="." node_paths=PackedStringArray("visual_root", "torso")]
 script = ExtResource("4_anim")
 mode = 1
 visual_root = NodePath("../Visual")

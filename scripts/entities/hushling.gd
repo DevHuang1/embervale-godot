@@ -22,28 +22,63 @@ enum Pattern { ORBIT, FEINT, LUNGE, WINDUP, RECOVER, BRAMBLE_BURST,
 
 @export var max_hp: int = 28
 @export var base_atk: int = 3
-@export var move_speed: float = 2.3
+## Baseline pacing is deliberately below the hero's 3.4 m/s stride so a fight
+## reads as a stalking duel, not a chase. Sensing is short enough that packs
+## stay local to their pocket until the player commits to the approach.
+@export var move_speed: float = 1.7
 @export var orbit_distance: float = 72.0 / 10.0  # 7.2 units (STANDOFF converted)
-@export var lunge_speed: float = 9.0
-@export var feint_speed: float = 5.5
-@export var orbit_speed: float = 2.0
-@export var recover_speed: float = 2.8
+@export var lunge_speed: float = 6.8
+@export var feint_speed: float = 4.1
+@export var orbit_speed: float = 1.5
+@export var recover_speed: float = 2.1
 @export var burst_cooldown: float = 4.0
 @export var burst_radius: float = 3.8
 @export var burst_damage: int = 6
 # Hard-tier flag: bursts become a tracking 3-spike thorn volley.
 @export var thorn_volley: bool = false
 @export var archetype: String = "hushling"
-@export var aggro_radius: float = 14.0
+@export var aggro_radius: float = 9.0
 @export var attack_radius: float = 3.2
-@export var pursuit_radius: float = 18.0
-@export var disengage_radius: float = 24.0
+@export var pursuit_radius: float = 12.0
+@export var disengage_radius: float = 16.0
 var _player_engaged := false
 var _aggro_check_timer := 0.0
+## Per-archetype sensing contract (sight cone, hearing, leash, wander) plus the
+## home anchor the leash measures against and the wander orbit circles. The
+## exported radii stay for legacy callers; `aggro_radius` mirrors the profile's
+## sight radius so nothing else has to know about MobSensing.
+var _sensing: Dictionary = {}
+var _home_position := Vector3.ZERO
+var _returning := false
+var _wander_target := Vector3.ZERO
+var _wander_timer := 0.0
+var _noise_position := Vector3.ZERO
+var _noise_radius := 0.0
+var _noise_age := 1000.0
+var _player_ref: Node3D = null
 ## Authored-model drop-in: world-unit height target + replacing the procedural
 ## silhouette with the mounted rig once the shared creature FBX ships.
 @export var authored_rig_height: float = 0.85
 @export var replace_procedural_on_mount := true
+## Optional authored-rig profile override. Realm elite pockets keep the elite
+## mechanics but wear a different creature rig, so the setter must run before
+## the node enters the tree (the mount happens in _ready).
+var rig_profile_override: String = ""
+## Authored-rig animation seam. When a Quaternius/KayKit rig is mounted, the
+## procedural silhouette is hidden, so gameplay state must drive the imported
+## AnimationPlayer or the creature slides around frozen. The bridge comes from
+## CharacterRigLoader via entity meta and is a silent no-op without a rig.
+var _anim_bridge: Node = null
+var _bridge_locomotion := ""
+var _bridge_last_state := -1
+var _bridge_last_swing := -1
+## Height the collision volumes were authored against. When an archetype's
+## mounted rig is scaled down to vermin size, its hit/body volumes follow so
+## the player hits what they see; the attack area keeps a floor so a small
+## creature's swing still connects at its untouched gameplay reach.
+const RIG_REFERENCE_HEIGHT := 0.85
+const HITBOX_SCALE_FLOOR := 0.45
+const ATTACK_AREA_SCALE_FLOOR := 0.80
 
 ## Reusable behavior profiles keep memory low while making enemy silhouettes and
 ## combat rhythms distinct across realms. Movement multipliers are intentionally
@@ -58,7 +93,7 @@ func configure_archetype(profile: String) -> void:
 		"charger":
 			move_speed *= 1.05
 			orbit_distance = 5.2
-			lunge_speed = 11.5
+			lunge_speed = 8.7
 			lunge_cooldown = 1.8
 			counter_range = 2.8
 			burst_damage += 2
@@ -66,15 +101,15 @@ func configure_archetype(profile: String) -> void:
 		"ambusher":
 			move_speed *= 1.10
 			orbit_distance = 4.6
-			feint_speed = 7.4
-			lunge_speed = 10.0
+			feint_speed = 5.5
+			lunge_speed = 7.5
 			lunge_cooldown = 1.6
 			counter_windup = 0.48
 			special_cooldown = 6.5
 		"thorn_charger":
 			move_speed *= 1.15
 			orbit_distance = 8.0
-			lunge_speed = 14.0
+			lunge_speed = 9.8
 			lunge_cooldown = 2.4
 			counter_range = 3.2
 			base_atk += 2
@@ -82,8 +117,8 @@ func configure_archetype(profile: String) -> void:
 		"mire_stalker":
 			move_speed *= 1.08
 			orbit_distance = 5.0
-			feint_speed = 8.0
-			lunge_speed = 11.0
+			feint_speed = 5.9
+			lunge_speed = 8.1
 			lunge_cooldown = 2.0
 			counter_windup = 0.4
 			special_cooldown = 9.0
@@ -111,8 +146,8 @@ func configure_archetype(profile: String) -> void:
 			# tighter orbit and spams its cold volley from cover.
 			move_speed *= 1.08
 			orbit_distance = 5.4
-			feint_speed = 7.6
-			lunge_speed = 10.6
+			feint_speed = 5.6
+			lunge_speed = 7.8
 			lunge_cooldown = 1.7
 			burst_damage += 1
 			burst_cooldown = 3.2
@@ -122,13 +157,14 @@ func configure_archetype(profile: String) -> void:
 			# Moonfen broodmother's dregs hit harder and strip the mire.
 			move_speed *= 1.05
 			orbit_distance = 5.6
-			feint_speed = 8.2
-			lunge_speed = 11.4
+			feint_speed = 6.1
+			lunge_speed = 8.4
 			lunge_cooldown = 1.6
 			burst_damage += 3
 			burst_cooldown = 2.8
 			counter_windup = 0.42
 			special_cooldown = 7.0
+	_apply_sensing_profile()
 
 # Telegraphed counter-strike: after being struck in melee range the sprite
 # winds up visibly before answering. Dodging through the strike is rewarded.
@@ -248,6 +284,8 @@ func _ready() -> void:
 	hitbox.area_entered.connect(_on_hitbox_entered)
 	attack_area.area_entered.connect(_on_attack_area_entered)
 	
+	_home_position = global_position
+	_apply_sensing_profile()
 	# Random initial orbit direction
 	orbit_direction = 1 if randi() % 2 == 0 else -1
 	bob_timer = randf() * TAU
@@ -261,7 +299,36 @@ func _ready() -> void:
 	var wired := CharacterRigLoader.try_if_wire(self, _rig_profile())
 	if wired:
 		_paint_authored_rig()
+		_anim_bridge = get_meta("anim_bridge", null) as Node
+		_apply_archetype_scale_to_collision()
 	_apply_enemy_surface_profile()
+
+## Shrinks the hit/body volumes to the measured mounted silhouette so vermin
+## are hit where they are drawn. The attack area only follows to a floor:
+## gameplay reach, damage, and timing stay untouched.
+func _apply_archetype_scale_to_collision() -> void:
+	var effective := CharacterRigLoader.mounted_height(self)
+	if effective <= 0.01:
+		effective = authored_rig_height
+	if effective <= 0.01:
+		return
+	var factor := clampf(effective / RIG_REFERENCE_HEIGHT,
+		HITBOX_SCALE_FLOOR, 1.0)
+	_scale_sphere_shape(hitbox.get_node_or_null("HitboxShape"), factor)
+	_scale_sphere_shape(get_node_or_null("CollisionShape"), factor)
+	_scale_sphere_shape(attack_area.get_node_or_null("AttackShape"),
+		maxf(factor, ATTACK_AREA_SCALE_FLOOR))
+
+func _scale_sphere_shape(node: Node, factor: float) -> void:
+	var shape_node := node as CollisionShape3D
+	if shape_node == null:
+		return
+	var sphere := shape_node.shape as SphereShape3D
+	if sphere == null:
+		return
+	var local := sphere.duplicate() as SphereShape3D
+	local.radius *= factor
+	shape_node.shape = local
 
 ## Realm identities share one mip-safe surface master but receive deliberate
 ## material palettes. This keeps enemies related while making their gameplay
@@ -317,8 +384,10 @@ func _paint_authored_rig() -> void:
 			mi.material_override = local
 
 ## Which authored rig this creature wears (Fenling overrides to "fenling").
+## A realm elite sets `rig_profile_override` before entering the tree so one
+## elite script can wear any of the shipped creature rigs.
 func _rig_profile() -> String:
-	return "hushling"
+	return rig_profile_override if not rig_profile_override.is_empty() else "hushling"
 
 func _build_hushling_silhouette() -> void:
 	# Base body scale varies by archetype — charger reads bigger, ambusher flatter
@@ -378,9 +447,43 @@ func _physics_process(delta: float) -> void:
 	_update_pattern(delta)
 	_update_movement(delta)
 	_update_visuals(delta)
+	_drive_authored_animation()
 	
 	move_and_slide()
 	_snap_to_ground(delta)
+
+## Maps gameplay state onto the mounted rig's clips. Called after movement so
+## the locomotion choice sees this frame's velocity. One-shots restart through
+## the animator's serials so repeated attacks replay from frame 0.
+func _drive_authored_animation() -> void:
+	if _anim_bridge == null or not is_instance_valid(_anim_bridge):
+		return
+	var state := animator.anim_state
+	if state == EntityAnimator.AnimState.ATTACK:
+		if animator.swing_serial != _bridge_last_swing:
+			_bridge_last_swing = animator.swing_serial
+			var cue := animator.authored_attack_cue
+			if cue.is_empty():
+				cue = "light_1"
+			_anim_bridge.call("play_cue", cue, 0.08, true)
+	elif state == EntityAnimator.AnimState.HIT:
+		if _bridge_last_state != state:
+			_anim_bridge.call("play_cue", "hit", 0.08, true)
+	elif state == EntityAnimator.AnimState.DEAD:
+		if _bridge_last_state != state:
+			_anim_bridge.call("play_cue", "death", 0.12)
+		_bridge_locomotion = ""
+	elif state == EntityAnimator.AnimState.MOVE:
+		_set_bridge_locomotion("walk")
+	else:
+		_set_bridge_locomotion("idle")
+	_bridge_last_state = state
+
+func _set_bridge_locomotion(cue: String) -> void:
+	if _bridge_locomotion == cue:
+		return
+	_bridge_locomotion = cue
+	_anim_bridge.call("play_cue", cue, 0.24)
 
 ## The rendered ground is heightmapped (TerrainRelief) while the collision
 ## floor stays flat, so follow the visible surface to stop the sprite
@@ -394,6 +497,8 @@ func _snap_to_ground(delta: float) -> void:
 	global_position.y = lerpf(global_position.y, ground, weight)
 
 func _update_timers(delta: float) -> void:
+	if _noise_age < 60.0:
+		_noise_age += delta
 	if pattern_timer > 0:
 		pattern_timer -= delta
 	if _stagger_cooldown > 0.0:
@@ -422,24 +527,133 @@ func _update_timers(delta: float) -> void:
 		velocity += knockback_velocity
 		knockback_velocity = knockback_velocity.lerp(Vector3.ZERO, pow(0.001, delta))
 
+## Reads the archetype's sensing contract once (and again if the archetype is
+## reconfigured). `aggro_radius` keeps its legacy meaning as the sight radius.
+func _apply_sensing_profile() -> void:
+	_sensing = MobSensing.profile_for(archetype)
+	aggro_radius = float(_sensing.get("sight_radius", aggro_radius))
+
+func _leash_radius() -> float:
+	return float(_sensing.get("leash_radius", disengage_radius + 2.0))
+
+func _forward() -> Vector3:
+	return Vector3(sin(rotation.y), 0.0, cos(rotation.y))
+
+func _face_direction(direction: Vector3, delta: float, rate := 4.0) -> void:
+	if direction.length_squared() < 0.0001:
+		return
+	rotation.y = lerp_angle(rotation.y, atan2(direction.x, direction.z), rate * delta)
+
+## Cached player lookup that also subscribes to the hero's noise signal, so a
+## swing or a roll reaches mobs the eyes cannot.
+func _player_node() -> Node3D:
+	if _player_ref != null and is_instance_valid(_player_ref):
+		return _player_ref
+	var player := get_tree().get_first_node_in_group("player") as Node3D
+	if player != null:
+		_player_ref = player
+		if player.has_signal("noise_emitted") \
+				and not player.noise_emitted.is_connected(_on_player_noise):
+			player.noise_emitted.connect(_on_player_noise)
+	return _player_ref
+
+func _on_player_noise(noise_position: Vector3, radius: float) -> void:
+	_noise_position = noise_position
+	_noise_radius = radius
+	_noise_age = 0.0
+
+## Sight is a cone plus occlusion; hearing is omnidirectional and outlives the
+## sound for `alert_linger` seconds. Peripheral range means a player standing
+## against the mob's flank is always noticed, cone or no cone.
+func _can_sense_player(player: Node3D) -> bool:
+	var profile := _sensing if not _sensing.is_empty() \
+		else MobSensing.profile_for(archetype)
+	if _noise_age <= float(profile.get("alert_linger", 3.0)) \
+			and MobSensing.hears(_noise_position, _noise_radius, global_position,
+				float(profile.get("hearing_radius", 0.0))):
+		return true
+	var offset := player.global_position - global_position
+	var distance := Vector3(offset.x, 0.0, offset.z).length()
+	if distance > float(profile.get("sight_radius", aggro_radius)):
+		return false
+	if distance > float(profile.get("peripheral_radius", 2.4)) \
+			and not MobSensing.in_sight_cone(_forward(), offset,
+				float(profile.get("sight_fov_degrees", 140.0))):
+		return false
+	return _has_player_line_of_sight(player)
+
+## Unengaged behaviour: walk home after a leash break, otherwise drift around
+## the home anchor in short low-speed bouts with idle pauses between.
+func _idle_movement(delta: float) -> void:
+	_wander_timer = maxf(_wander_timer - delta, 0.0)
+	if _returning:
+		var to_home := _home_position - global_position
+		to_home.y = 0.0
+		if to_home.length() <= 0.8:
+			_returning = false
+			_wander_target = Vector3.ZERO
+			_wander_timer = randf_range(0.4, 1.2)
+		else:
+			_move_toward_point(global_position + to_home.normalized() * 2.0,
+				move_speed * 0.85, delta)
+			return
+	var wander_radius := float(_sensing.get("wander_radius", 0.0))
+	if _wander_target != Vector3.ZERO:
+		var to_target := _wander_target - global_position
+		to_target.y = 0.0
+		if to_target.length() <= 0.6 or _wander_timer <= 0.0:
+			_wander_target = Vector3.ZERO
+			_wander_timer = randf_range(1.0, float(_sensing.get("wander_interval", 4.0)))
+		else:
+			_move_toward_point(_wander_target, move_speed * 0.45, delta)
+			return
+	_decelerate(delta)
+	if _wander_timer <= 0.0 and wander_radius > 0.0:
+		var bearing := randf() * TAU
+		var reach := sqrt(randf()) * wander_radius
+		_wander_target = _home_position + Vector3(cos(bearing) * reach, 0.0,
+			sin(bearing) * reach)
+		_wander_timer = float(_sensing.get("wander_interval", 4.0)) * 1.6
+
+func _move_toward_point(point: Vector3, speed: float, delta: float) -> void:
+	var direction := point - global_position
+	direction.y = 0.0
+	if direction.length_squared() < 0.0001:
+		_decelerate(delta)
+		return
+	direction = direction.normalized()
+	velocity.x = move_toward(velocity.x, direction.x * speed, move_speed * delta * 3.0)
+	velocity.z = move_toward(velocity.z, direction.z * speed, move_speed * delta * 3.0)
+	_face_direction(direction, delta)
+
+func _decelerate(delta: float) -> void:
+	velocity.x = move_toward(velocity.x, 0.0, move_speed * delta * 4.0)
+	velocity.z = move_toward(velocity.z, 0.0, move_speed * delta * 4.0)
+
 func _update_pattern(delta: float) -> void:
-	var player = get_tree().get_first_node_in_group("player")
-	if not player:
+	var player := _player_node()
+	if player == null:
 		return
 	var distance := global_position.distance_to(player.global_position)
 	if not _player_engaged:
 		_aggro_check_timer = maxf(_aggro_check_timer - delta, 0.0)
 		if _aggro_check_timer <= 0.0:
 			_aggro_check_timer = 0.15
-			_player_engaged = distance <= aggro_radius and _has_player_line_of_sight(player)
-	if _player_engaged and distance > disengage_radius:
+			_player_engaged = _can_sense_player(player)
+	if _player_engaged and (distance > disengage_radius
+			or global_position.distance_to(_home_position) > _leash_radius()):
 		_player_engaged = false
+		_returning = true
 		current_pattern = Pattern.ORBIT
 		pattern_timer = 0.4
 	if not _player_engaged:
-		velocity.x = move_toward(velocity.x, 0.0, move_speed * delta * 4.0)
-		velocity.z = move_toward(velocity.z, 0.0, move_speed * delta * 4.0)
+		if _returning:
+			_wander_target = Vector3.ZERO
+		_idle_movement(delta)
 		return
+	_returning = false
+	_wander_target = Vector3.ZERO
+	_face_direction(player.global_position - global_position, delta)
 	
 	if stun_timer > 0:
 		current_pattern = Pattern.RECOVER
@@ -814,11 +1028,12 @@ func _finish_thorn_rush() -> void:
 		var p3d := player as Node3D
 		var dist := global_position.distance_to(p3d.global_position)
 		if dist <= 4.5:
+			# notify_enemy_strike resolves damage, dodge and i-frames in one
+			# place. The old follow-up take_damage() dealt the same amount a
+			# second time and could not be dodged, so a perfect roll still ate
+			# the full rush.
 			if p3d.has_method("notify_enemy_strike"):
 				p3d.notify_enemy_strike(self, base_atk + 3, "charge_rush")
-			if p3d.has_method("take_damage"):
-				var knockback := global_position.direction_to(p3d.global_position)
-				p3d.take_damage(base_atk + 3, knockback)
 			if p3d.has_method("add_slow"):
 				p3d.add_slow(0.30, 1.6)
 			CombatFx.spawn_burst(self, p3d.global_position + Vector3(0, 0.4, 0),
@@ -839,10 +1054,12 @@ func _special_shadow_strike() -> void:
 		target_pos += back_dir * 1.8
 		target_pos.y = global_position.y
 		global_position = target_pos
+		# notify_enemy_strike owns the damage, dodge and i-frame resolution, and
+		# the hero's take_damage() is a 2-argument call. The old direct
+		# take_damage(base_atk + 4, dir, true) both duplicated the strike and
+		# raised an engine script error every time the ambusher teleported in.
 		if p3d.has_method("notify_enemy_strike"):
 			p3d.notify_enemy_strike(self, base_atk + 4, "teleport_strike")
-		if p3d.has_method("take_damage"):
-			p3d.take_damage(base_atk + 4, target_pos.direction_to(p3d.global_position), true)
 		if p3d.has_method("apply_elemental_status"):
 			p3d.apply_elemental_status("shadow", 1)
 		CombatFx.spawn_burst(self, global_position + Vector3(0, 0.2, 0),
@@ -877,11 +1094,10 @@ func _finish_bramble_charge() -> void:
 		var p3d := player as Node3D
 		var dist := global_position.distance_to(p3d.global_position)
 		if dist <= 5.5:
+			# Single dodge-aware resolution; the removed direct take_damage()
+			# duplicated the strike and bypassed the dodge roll.
 			if p3d.has_method("notify_enemy_strike"):
 				p3d.notify_enemy_strike(self, base_atk + 2, "charge_rush")
-			if p3d.has_method("take_damage"):
-				p3d.take_damage(base_atk + 2,
-					global_position.direction_to(p3d.global_position))
 			CombatFx.spawn_burst(self, p3d.global_position + Vector3(0, 0.4, 0),
 				Color(0.85, 0.32, 0.08, 0.9), 14, 4.8, 0.4, 0.15)
 	pattern_timer = 0
@@ -1466,6 +1682,9 @@ func die() -> void:
 	# Death: the husk becomes a physical tumble corpse right away — the
 	# killing shove sends it bouncing while the kill flow completes.
 	animator.anim_state = EntityAnimator.AnimState.DEAD
+	if _anim_bridge != null and is_instance_valid(_anim_bridge):
+		# Physics stops on death, so the per-frame driver never sees DEAD.
+		_anim_bridge.call("play_cue", "death", 0.12)
 	_launch_death_corpse()
 	var tween = create_tween()
 	tween.tween_interval(0.72)

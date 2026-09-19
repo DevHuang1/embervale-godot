@@ -12,3 +12,4 @@ silhouette_kind = "shield"
 profile_sfx = "ember_glass"
 max_hp = 54
 base_atk = 6
+authored_rig_height = 0.40
