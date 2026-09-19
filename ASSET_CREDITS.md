@@ -2,7 +2,8 @@
 
 The following third-party assets are included in the project under the licenses
 shown below. The original license/readme files are kept beside each imported
-asset set under `assets/models/`.
+asset set under `assets/models/`, and each Poly Haven texture set carries its
+own `SOURCE.txt` under `assets/textures/cc0/`.
 
 | Pack | Imported content | License | Local record | Source |
 |---|---|---|---|---|
@@ -12,10 +13,21 @@ asset set under `assets/models/`.
 | Kenney Tower Defense Kit | crystal, rocks, tree detail | CC0 1.0 | `assets/models/kenney_tower_defense/Models/License.txt` | [kenney.nl/assets/tower-defense-kit](https://kenney.nl/assets/tower-defense-kit) |
 | Kenney Mini Dungeon | human/orc characters, dungeon props | CC0 1.0 | `assets/models/kenney_mini_dungeon/Models/License.txt` | [kenney.nl/assets/mini-dungeon](https://kenney.nl/assets/mini-dungeon) |
 | Kenney Foliage Sprites | grass, flowers, foliage billboards, field/garden detail | CC0 1.0 | `assets/ambient/kenney_foliage_sprites/License.txt` | [kenney.nl/assets/foliage-sprites](https://kenney.nl/assets/foliage-sprites) / [OpenGameArt mirror](https://opengameart.org/content/foliage-sprites) |
+| Kenney Castle Kit | castle exterior modules: walls, towers, roofs, gate, stairs, flags | CC0 1.0 | `assets/models/kenney_castle/License.txt` | [kenney.nl/assets/castle-kit](https://kenney.nl/assets/castle-kit) |
+| Kenney Fantasy Town Kit | town/roof/wall modules reserved for realm dressing | CC0 1.0 | `assets/models/kenney_fantasy_town/License.txt` | [kenney.nl/assets/fantasy-town-kit](https://kenney.nl/assets/fantasy-town-kit) |
+| KayKit Dungeon Remastered | enterable-structure interiors: floors, walls, doorways, stairs, props | CC0 1.0 | `assets/models/kaykit_dungeon/LICENSE.txt` | [kaylousberg.com](https://kaylousberg.com/) |
+| Quaternius Animated Monsters | structure bosses (skeleton warden, matron slime, sealed dragon, bat) | CC0 1.0 | `assets/models/quaternius_monsters/License.txt` | [quaternius.com](https://quaternius.com/) / [patreon.com/quaternius](https://www.patreon.com/quaternius) |
+| Poly Haven CC0 Surfaces (cobblestone_floor_05, wood_floor_worn, grass_ground, rock_face, thatch_roof_angled) | structure interiors and procedural exteriors: stone, wood, grass, rock, thatch | CC0 1.0 | `assets/textures/cc0/<set>/SOURCE.txt` | [polyhaven.com/a/cobblestone_floor_05](https://polyhaven.com/a/cobblestone_floor_05), [wood_floor_worn](https://polyhaven.com/a/wood_floor_worn), [grass_ground](https://polyhaven.com/a/grass_ground), [rock_face](https://polyhaven.com/a/rock_face), [thatch_roof_angled](https://polyhaven.com/a/thatch_roof_angled) |
 | Quaternius Medieval Weapons | hammer and dagger runtime hand-weapon fallbacks | CC0 1.0 | `assets/models/weapons/quaternius/LICENSES.md` | [quaternius.com/packs/medievalweapons.html](https://quaternius.com/packs/medievalweapons.html) |
 | Quaternius Animated Animals | frog, rat, snake, spider, and wasp realm enemies | CC0 1.0 | `assets/models/enemies/quaternius/LICENSES.md` | [quaternius.com](https://quaternius.com/) |
-| Embervale Generated Terrain Surfaces | moss and wet mud albedo textures | Generated in-session with OpenAI image generation; no third-party source license | `assets/textures/stylized/moss/albedo.png`, `assets/textures/stylized/mud/albedo.png` | Generated asset provenance recorded in this file |
-| Embervale Generated Terrain Surfaces V2 | grass, sand, moss, and mud albedo textures | Generated in-session with OpenAI image generation; no third-party source license | `assets/textures/stylized/grass_v2/albedo.png`, `assets/textures/stylized/sand_v2/albedo.png`, `assets/textures/stylized/moss_v2/albedo.png`, `assets/textures/stylized/mud_v2/albedo.png` | Clean project-owned runtime set; prompts and provenance recorded in the terrain README |
+| Embervale Generated Terrain Surfaces | moss, wet mud, grass, and sand surface sets (albedo + normal + roughness) | Generated in-session with OpenAI image generation; no third-party source license | `assets/textures/stylized/{moss,mud,grass,sand}/` | Consolidated 2026-09-18: the `*_v2` shadow copies were removed and every realm terrain material binds the canonical stylized folders |
+
+The KayKit Dungeon, Kenney Castle Kit, Kenney Fantasy Town Kit, Quaternius
+Animated Monsters and the five Poly Haven surface sets were added to the
+repository on 2026-09-18. Each downloaded set keeps its upstream license file
+(or per-set `SOURCE.txt`) next to the assets, and
+`tests/structure_interior_validation.tscn` verifies that every mapped kit piece
+and surface family resolves at build time.
 
 ## Shipping checklist
 

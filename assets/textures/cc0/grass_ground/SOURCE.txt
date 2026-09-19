@@ -1,0 +1,6 @@
+grass_ground — Poly Haven
+
+Source: https://polyhaven.com/a/grass_ground
+Downloaded: 2026-09-18 (1K JPG: albedo, normal GL, roughness)
+License: CC0 1.0 Universal (public domain dedication)
+License URL: https://creativecommons.org/publicdomain/zero/1.0/
