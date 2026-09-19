@@ -4,23 +4,25 @@
 **Package:** `com.devhuang1.embervale` · **App label:** Embervale
 **versionCode:** `7` · **versionName:** `Beta 7`
 
-**Artifact:** `exports/beta7/Embervale-Beta7-arm64-v8a.apk` (182.5 MB / 191,357,124 bytes)
+**Artifact:** `exports/beta7/Embervale-Beta7-arm64-v8a.apk` (182.5 MB / 191,356,205 bytes)
 **Checksums:** `exports/beta7/SHA256SUMS.txt`
-(SHA-256: `771f3d97f3d99d9d11a651c7e85838f1a9c1427391d3b96fb5f8db1c0c8136ca`)
+(SHA-256: `4b6bb1f9ba3e2ed4196c15897aabb3ac43bd8c87aa38f2964189930b3e15fc73`)
 
 > Signed with Godot's bundled development certificate — the **same certificate as
 > Beta 1–6**, so this installs straight over any earlier beta and keeps existing
 > saves. Fine for sideloaded testing/distribution via GitHub Releases; **not** for
 > Play Store submission.
 >
-> **This build carries a RevenueCat Test Store public key** so the shop's **BUY**
-> row works without a Play account and purchases are **simulated** — for demo and
-> QA only. The key ships **sealed** (`native_api_key_sealed`, AES-256-CBC under a
-> marker), so a literal copy-paste out of the APK does not hand out a working key.
-> Sealing is obfuscation, not confidentiality: the passphrase is compiled into the
-> same client. No secret (`sk_...`) is present in any APK. Run
-> `tools/write_store_defaults.gd -- --clear` before a build that must carry no
-> store configuration at all.
+> **This build carries no store configuration and no provider key**, so the app
+> launches everywhere. A `test_...` key in a release build makes the RevenueCat
+> SDK show *"Wrong API key"* and close the app (the first Beta 7 upload did
+> exactly that); a `goog_...` key can only complete purchases for installs that
+> came from Google Play, which a sideloaded APK is not. Play-less purchasing is
+> the web-funnel path, which needs the backend proxy rather than a client key.
+> The shop therefore shows no in-app BUY row here; RESTORE and the rest of the
+> game are unaffected, and no secret (`sk_...`) is present in any APK. Keyed
+> builds are local QA artifacts: `tools/write_store_defaults.gd` writes them and
+> `--clear` removes them before a public export.
 
 ## App identity
 
@@ -53,11 +55,16 @@
 
 **Store**
 
-- The shipped public SDK key is now **sealed in the build resource**
-  (`tools/write_store_defaults.gd` seals by default, `--no-seal` opts out), the
-  store resolves it before the usual validation, and an unrecoverable blob fails
-  closed instead of leaving a stale key configured. `--from-resource` recovers
-  values from a previous resource when rotating a key.
+- A shipped public SDK key is now **sealed in the build resource** when one is
+  written (`tools/write_store_defaults.gd` seals by default, `--no-seal` opts
+  out), the store resolves it before the usual validation, and an unrecoverable
+  blob fails closed instead of leaving a stale key configured.
+  `--from-resource` recovers values from a previous resource when rotating a
+  key. **The public Beta 7 artifact ships with no store configuration at all**
+  (written with `--clear`, verified absent from the APK): keyed builds are local
+  device-QA artifacts, because a release build with a `test_...` key is closed
+  by the RevenueCat SDK, and only Play-installed builds can complete a `goog_...`
+  purchase.
 - The store security contract and the native-bridge suite cover the seal:
   round-trip, tamper refusal, plaintext fallback for dev fixtures, and the
   fail-closed shipped path.
@@ -76,9 +83,11 @@
 2. If asked, allow "Install unknown apps" for the browser/files app you used.
 3. Install → the launcher shows the **Embervale** flame icon → launch **Embervale**.
 
-Store test: open the Glintmonger's Case (HUD **GLINT**) → **BUY** a pack →
-complete the Test Store sheet → the marks arrive → **RESTORE** again to see the
-idempotency line.
+Store: this public artifact has no store authority configured, so the
+Glintmonger's Case (HUD **GLINT**) shows no in-app BUY row. Purchases on a
+Play-less distribution use the web-funnel path (RevenueCat funnel + Stripe
+sandbox + the `backend/` proxy) in a private QA build; the funnel URL is never
+published, because anyone holding a sandbox link can "buy" with a test card.
 
 ## Verify
 
