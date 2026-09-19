@@ -55,6 +55,9 @@ func _run() -> void:
 	## 3. Stream center movement spawns and despawns chunks.
 	failures += await _check_movement("whispergrove")
 
+	## 3b. Streamed flavor props (ruins, ponds) conform to the relief surface.
+	failures += await _check_flavor_conformity("whispergrove")
+
 	## 4. Other inherited realm scenes use the same procedural owner.
 	for realm in ["mistfen", "heartwood"]:
 		failures += await _check_active_realm(realm)
@@ -236,10 +239,133 @@ func _check_movement(realm: String) -> int:
 		f += 1
 		print("FAIL: stream did not despawn on relocation (%d -> %d)" \
 			% [moved_count, count_after_move])
+	f += _check_tree_silhouette(streamer)
 	scene.queue_free()
 	await process_frame
 	return f
 
+## Streamed trees must be base-anchored (instance transform is ground contact)
+## and carry visible limbs; the old centered trunk buried half the tree and a
+## bare pole under a dome gave the far canopy no structure.
+func _check_tree_silhouette(streamer: Node) -> int:
+	var mesh := streamer.get("_tree_mesh") as ArrayMesh
+	if mesh == null or mesh.get_surface_count() != 2:
+		print("FAIL: streamed tree mesh lost its trunk/canopy surfaces")
+		return 1
+	var surface := mesh.surface_get_arrays(0)
+	var vertices: PackedVector3Array = surface[Mesh.ARRAY_VERTEX]
+	var min_y := INF
+	var max_y := -INF
+	var half_x := 0.0
+	for vertex in vertices:
+		min_y = minf(min_y, vertex.y)
+		max_y = maxf(max_y, vertex.y)
+		half_x = maxf(half_x, absf(vertex.x))
+	var f := 0
+	if min_y < -0.05 or min_y > 0.05:
+		f += 1
+		print("FAIL: streamed tree trunk is not base-anchored (min y %.2f)" % min_y)
+	if half_x < 0.45:
+		f += 1
+		print("FAIL: streamed tree trunk has no limb spread (half width %.2f)" % half_x)
+	if max_y < 3.0:
+		f += 1
+		print("FAIL: streamed tree trunk does not reach its canopy (max y %.2f)" % max_y)
+	if f == 0:
+		print("PASS: streamed trees are base-anchored and branched")
+	return f
+
+
+## Streamed ruins and ponds must sit on the sampled relief, not at y=0.
+func _check_flavor_conformity(realm: String) -> int:
+	var f := 0
+	var scene := await _boot_grove(realm)
+	var streamer := scene.find_child("WorldStreamer", true, false)
+	if streamer == null or not streamer.call("is_active"):
+		f += 1
+		print("FAIL: flavor conformity needs an active streamer")
+		scene.queue_free()
+		await process_frame
+		return f
+	var chunk := Node3D.new()
+	chunk.name = "FlavorProbeChunk"
+	var min_world := Vector3(640.0, 0.0, 384.0)
+	chunk.position = min_world
+	streamer.add_child(chunk)
+	var surf := func(x: float, z: float) -> float:
+		return float(streamer.call("_surface_height", Vector2(x, z)))
+	var pond_rng := RandomNumberGenerator.new()
+	pond_rng.seed = 4242
+	streamer.call("_build_pond", chunk, min_world, pond_rng)
+	var ruin_rng := RandomNumberGenerator.new()
+	ruin_rng.seed = 1717
+	streamer.call("_build_ruins", chunk, min_world, ruin_rng)
+	for group in chunk.get_children():
+		if group.name == "StreamPond":
+			for child in group.get_children():
+				if child is MeshInstance3D and child.name == "WaterBody":
+					f += _check_water_conforms(child as MeshInstance3D, min_world, surf)
+				elif child is MeshInstance3D:
+					f += _check_prop_conforms(child as MeshInstance3D, min_world, surf, 0.10)
+		elif group.name == "StreamRuins":
+			for child in group.get_children():
+				if child is MeshInstance3D and child.name == "RuinWall":
+					var wall := child as MeshInstance3D
+					var height := (wall.mesh as BoxMesh).size.y if wall.mesh is BoxMesh else 0.0
+					var base := wall.position.y - height * 0.5
+					var ground := float(surf.call(min_world.x + wall.position.x,
+						min_world.z + wall.position.z))
+					if absf(base - ground) > 0.05:
+						f += 1
+						print("FAIL: StreamRuin wall base %.3f vs ground %.3f" \
+							% [base, ground])
+				elif child is MeshInstance3D and child.name == "Bone":
+					var bone := child as MeshInstance3D
+					var ground := float(surf.call(min_world.x + bone.position.x,
+						min_world.z + bone.position.z))
+					if absf((bone.position.y - 0.05) - ground) > 0.02:
+						f += 1
+						print("FAIL: StreamRuin bone floats at %.3f vs ground %.3f" \
+							% [bone.position.y - 0.05, ground])
+	chunk.queue_free()
+	scene.queue_free()
+	await process_frame
+	if f == 0:
+		print("PASS: streamed flavor conforms to the relief surface")
+	return f
+
+## Pond water is a flat plane: it must sit just above the lowest footprint
+## corner so a rolling swell never pierces the middle of the pool.
+func _check_water_conforms(water: MeshInstance3D, min_world: Vector3,
+		surf: Callable) -> int:
+	var quad := water.mesh as QuadMesh
+	if quad == null:
+		print("FAIL: pond water is not a QuadMesh")
+		return 1
+	var half_x := quad.size.x * 0.5
+	var half_z := quad.size.y * 0.5
+	var lowest := INF
+	for x_sign in [-1.0, 1.0]:
+		for z_sign in [-1.0, 1.0]:
+			var corner := water.transform * Vector3(half_x * x_sign, half_z * z_sign, 0.0)
+			lowest = minf(lowest, float(surf.call(
+				min_world.x + corner.x, min_world.z + corner.z)))
+	if absf(water.transform.origin.y - (lowest + 0.05)) > 0.01:
+		print("FAIL: pond water %.3f vs lowest bank %.3f" \
+			% [water.transform.origin.y, lowest + 0.05])
+		return 1
+	return 0
+
+func _check_prop_conforms(prop: MeshInstance3D, min_world: Vector3,
+		surf: Callable, sink: float) -> int:
+	var ground := float(surf.call(min_world.x + prop.position.x,
+		min_world.z + prop.position.z))
+	var expected := ground + sink * prop.scale.x
+	if absf(prop.position.y - expected) > 0.02:
+		print("FAIL: streamed prop %s sits at %.3f, expected %.3f" \
+			% [prop.name, prop.position.y, expected])
+		return 1
+	return 0
 
 func _check_active_realm(realm: String) -> int:
 	var f := 0

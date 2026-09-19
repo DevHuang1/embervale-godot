@@ -21,7 +21,9 @@ const PROFILES := {
 		{"id": "whisper_hidden_cache", "pos": Vector3(20, 0.48, -4), "label": "HIDDEN ROOT CACHE", "rarity": 3, "type": "instant"},
 		{"id": "whisper_farwatch_cache", "pos": Vector3(46, 0.48, -40), "label": "FARWATCH CACHE", "rarity": 3, "type": "instant"},
 	],
-		"enemies": ["hushling", "spitter", "elite_hushling"],
+		# Teaching realm keeps one gentle blob, then widens to the spitter and
+		# the burrow spider so the early route is not one silhouette.
+		"enemies": ["hushling", "spitter", "spore_weaver"],
 		"resources": [
 			{"id": "moss_fiber", "pos": Vector3(-8, 0, -8), "yield": 3},
 			{"id": "bramble_wood", "pos": Vector3(5, 0, -16), "yield": 2},
@@ -83,7 +85,7 @@ const PROFILES := {
 				"encounter": {"tier": "elite", "enemy_kind": "thorn_charger", "count": 4},
 				"reward_marker": "beacon_breach_clear",
 				"approach_label": "Thorns close around a broken beacon ring.",
-				"reveal_label": "An Elder Thorn guards the passage.",
+				"reveal_label": "A Briar Broodmother nests over the passage.",
 				"reward_label": "BEACON BREACH CLEARED", "exit_label": "The root court is ahead."},
 			{"id": "rootbound_court", "position": Vector3(172, 0, -208),
 				"role": "boss", "boss_id": "rootbound_warden",
@@ -104,7 +106,8 @@ const PROFILES := {
 			{"id": "bramble_elite_cache", "pos": Vector3(-17, 0.48, -14), "label": "WIDOW'S HOARD", "rarity": 3, "type": "boss_gated", "boss_key": "biome_bramblewood_briar_widow"},
 			{"id": "bramble_deepwood_cache", "pos": Vector3(-54, 0.48, -76), "label": "DEEPWOOD CACHE", "rarity": 3, "type": "instant"},
 		],
-		"enemies": ["elite_hushling", "hushling", "spitter"],
+		# Ambush-and-thorn realm: rats rush the trail, frogs stalk the shade.
+		"enemies": ["thorn_charger", "hushling", "spitter", "mire_stalker"],
 		"resources": [
 			{"id": "bramble_wood", "pos": Vector3(10, 0, -8), "yield": 3},
 			{"id": "beast_hide", "pos": Vector3(3, 0, -23), "yield": 2},
@@ -147,7 +150,8 @@ const PROFILES := {
 			{"id": "mistfen_maw_cache", "pos": Vector3(15, 0.48, -15), "label": "FOGMAW'S TITHE", "rarity": 3, "type": "boss_gated", "boss_key": "biome_mistfen_fogmaw"},
 			{"id": "mistfen_deepfen_cache", "pos": Vector3(-52, 0.48, -66), "label": "DEEP-FEN RELIQUARY", "rarity": 4, "type": "instant"},
 		],
-		"enemies": ["spitter", "hushling", "elite_hushling"],
+		# Fog realm: frogs control the reeds, spiders and spitters punish range.
+		"enemies": ["mire_stalker", "spitter", "spore_weaver"],
 		"resources": [
 			{"id": "fen_reed", "pos": Vector3(-10, 0, -6), "yield": 3},
 			{"id": "spore_dust", "pos": Vector3(-6, 0, -23), "yield": 3},
@@ -194,7 +198,8 @@ const PROFILES := {
 			{"id": "heartwood_ember_cache", "pos": Vector3(22, 0.48, -17), "label": "CINDERHART RELIQUARY", "rarity": 4, "type": "boss_gated", "boss_key": "biome_heartwood_cinderhart"},
 			{"id": "heartwood_rise_cache", "pos": Vector3(104, 0.48, -64), "label": "ASHEN RISE CACHE", "rarity": 4, "type": "instant"},
 		],
-		"enemies": ["elite_hushling", "spitter", "elite_hushling"],
+		# Heat realm: wasps swarm, rats harry the vents, snakes hold the vaults.
+		"enemies": ["ember_warden", "thorn_charger", "relic_leech"],
 		"resources": [
 			{"id": "emberstone", "pos": Vector3(4, 0, -11), "yield": 3},
 			{"id": "iron_shard", "pos": Vector3(-4, 0, -18), "yield": 3},
@@ -241,7 +246,8 @@ const PROFILES := {
 			{"id": "moonfen_lunar_cache", "pos": Vector3(-18, 0.48, -5), "label": "LUNAR RELIQUARY", "rarity": 4, "type": "boss_gated", "boss_key": "biome_moonfen_tide_oracle"},
 			{"id": "moonfen_deepdrift_cache", "pos": Vector3(-24, 0.48, 2), "label": "DEEP-DRIFT CACHE", "rarity": 4, "type": "instant"},
 		],
-		"enemies": ["moonfen_fenling", "spitter", "elite_hushling"],
+		# Drift realm: fenlings on the wing, frogs on the shoals, leeches below.
+		"enemies": ["moonfen_fenling", "relic_leech", "mire_stalker"],
 		"resources": [
 			{"id": "moonmoss", "pos": Vector3(12, 0, 1), "yield": 3},
 			{"id": "crystal_fragment", "pos": Vector3(7, 0, -19), "yield": 2},

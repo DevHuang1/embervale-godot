@@ -226,6 +226,29 @@ func _run() -> void:
 					failures += 1
 					print("FAIL: %s boss anchor lacks static grass clearance: %s" \
 						% [realm, boss_anchor])
+		# Static-dressing realms own their tree batches; streamed realms get
+		# trees from the chunk streamer instead. Trunks must be base-anchored
+		# (the old centered cylinder buried half of every tree) and carry limbs.
+		if not stream_realm and dressing != null:
+			var trunk_boxes: Array[AABB] = []
+			var widest_trunk := 0.0
+			for child in dressing.get_children():
+				if not (child is MultiMeshInstance3D):
+					continue
+				var mmi := child as MultiMeshInstance3D
+				if mmi.multimesh == null:
+					continue
+				var box: AABB = mmi.multimesh.mesh.get_aabb()
+				if box.size.y > 2.0 and absf(box.position.y) < 0.05:
+					trunk_boxes.append(box)
+					widest_trunk = maxf(widest_trunk, box.size.x)
+			if trunk_boxes.is_empty():
+				failures += 1
+				print("FAIL: %s static dressing has no base-anchored tree trunks" % realm)
+			elif widest_trunk < 0.9:
+				failures += 1
+				print("FAIL: %s static tree trunks have no limb spread (%.2f m wide)" \
+					% [realm, widest_trunk])
 		if stream_realm:
 			var streamer_for_clearance := scene.find_child("WorldStreamer", true, false)
 			if streamer_for_clearance != null and streamer_for_clearance.has_method("_clearance_blocks"):

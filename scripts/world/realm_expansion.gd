@@ -20,11 +20,39 @@ signal gate_closed
 signal altar_placed(altar: Node3D)
 signal dungeon_state_changed(interior_active: bool)
 signal dungeon_completed(dungeon_id: String)
+## Emitted when any enterable structure is entered or left, so the HUD can name
+## the place the player is standing in rather than a single hard-coded dungeon.
+signal structure_state_changed(structure_id: String, interior_active: bool)
+signal structure_completed(structure_id: String)
+
+const STRUCTURE_CATALOG := preload("res://scripts/world/structure_catalog.gd")
+const ENTERABLE_STRUCTURE := preload("res://scripts/world/enterable_structure.gd")
+const STRUCTURE_INTERIOR := preload("res://scripts/world/structure_interior.gd")
 
 var _world : Node3D = null
 var in_dungeon := false
 var _dungeon_root: Node3D = null
 var _surface_return_position := Vector3.ZERO
+## Exteriors standing on the current realm surface, keyed by structure id.
+var _structures: Dictionary = {}
+## The structure the player is inside, empty when on the surface.
+var active_structure_id := ""
+## Realm environment parked while the player is inside a structure, so the
+## interior's own lighting profile is what the player sees.
+var _environment_node: WorldEnvironment = null
+var _saved_environment: Environment = null
+var _environment_parked := false
+## Surface collision parked while the player is inside a structure. The realm's
+## ground is a full-map collision box whose top sits at y=0; hiding the mesh
+## leaves it solid, so without this the hero walks on that plane through lower
+## rooms and stair flights instead of climbing them. The camera's spring arm
+## also keeps colliding with surface geometry. Keyed by body -> Vector2i(layer,
+## mask) so the exact original values are restored on exit.
+var _parked_collision: Dictionary = {}
+## Dynamic surface bodies are frozen while parked: with the ground parked they
+## would otherwise fall through the world and their AI would keep hunting a
+## hero it cannot reach. Keyed by body -> Vector2i(process_mode, frozen).
+var _parked_process: Dictionary = {}
 
 const DUNGEON_POSITION := Vector3(80.0, 0.3, 6.0)
 const DUNGEON_MODULES: Dictionary = {
@@ -41,17 +69,126 @@ func setup(world_manager: Node3D) -> void:
 	_world = world_manager
 	_connect_signals()
 	_sync_gates()
+	_place_structures()
 
-func toggle_dungeon() -> void:
+## Builds the exteriors for whichever realm is current. Structures are placed on
+## the realm surface, each with full collision and its own door, so the map has
+## places to walk into rather than only scenery to walk past.
+func _place_structures(realm_id: String = "") -> void:
+	if _world == null or not is_instance_valid(_world):
+		return
+	for structure in _structures.values():
+		if is_instance_valid(structure):
+			# Detach before freeing: queue_free is deferred, so a same-frame
+			# rebuild would otherwise collide on the node name and leave the
+			# replacement auto-renamed (Structure_x2), which breaks lookups.
+			_world.remove_child(structure)
+			structure.queue_free()
+	_structures.clear()
+	# Sweep untracked leftovers too: a node removed or freed outside this
+	# system keeps holding its canonical name until the frame ends, and a
+	# rebuild inside that window would be renamed on add. The sweep is not
+	# realm-scoped because every placement rebuilds the whole surface set.
+	for child in _world.get_children():
+		if child is Node3D and str(child.name).begins_with("Structure_"):
+			_world.remove_child(child)
+			child.queue_free()
+	var target_realm := realm_id
+	if target_realm.is_empty():
+		var gs := get_node_or_null("/root/GameState")
+		target_realm = str(gs.get("current_realm") if gs != null else "")
+	for entry in STRUCTURE_CATALOG.for_realm(target_realm):
+		# The Embervault keeps its authored castle landmark and interior.
+		if str(entry.get("builder", "generated")) == "authored":
+			continue
+		var id := str(entry.get("id", ""))
+		var structure := ENTERABLE_STRUCTURE.new()
+		# Name before add: the node is born canonical, and a forced readable
+		# name turns any missed collision into a findable Structure_x2 rather
+		# than an anonymous @EnterableStructure@2.
+		structure.name = "Structure_%s" % id
+		var approach: Vector3 = entry.get("approach", Vector3.ZERO)
+		var ground := 0.0
+		var terrain := _terrain_node()
+		if terrain != null and terrain.has_method("sample_surface_height"):
+			ground = float(terrain.call("sample_surface_height", approach))
+		_world.add_child(structure, true)
+		structure.setup(self, entry, ground)
+		_structures[id] = structure
+
+func _terrain_node() -> Node:
+	if _world == null:
+		return null
+	for candidate in ["Terrain", "Ground", "TerrainRelief"]:
+		var node := _world.get_node_or_null(candidate)
+		if node != null:
+			return node
+	return null
+
+## Enterable-structure entry point. `toggle_dungeon` remains the Embervault's
+## public contract; every other structure routes through here.
+func toggle_structure(structure_id: String) -> void:
 	if _world == null:
 		return
 	var hero := _world.get_node_or_null("Hero") as Node3D
 	if hero == null:
 		return
-	if in_dungeon:
-		_exit_dungeon(hero)
-	else:
+	if not active_structure_id.is_empty():
+		_exit_structure(hero)
+		return
+	_enter_structure(hero, structure_id)
+
+func _enter_structure(hero: Node3D, structure_id: String) -> void:
+	if not active_structure_id.is_empty():
+		return
+	if structure_id == "embervault" or str(STRUCTURE_CATALOG.get_structure(structure_id)
+			.get("builder", "")) == "authored":
+		active_structure_id = structure_id
 		_enter_dungeon(hero)
+		structure_state_changed.emit(structure_id, true)
+		return
+	var entry := STRUCTURE_CATALOG.get_structure(structure_id)
+	if entry.is_empty():
+		return
+	_surface_return_position = hero.global_position
+	var interior := STRUCTURE_INTERIOR.new()
+	interior.setup(self, entry)
+	interior.completed.connect(_on_structure_completed)
+	add_child(interior)
+	var spawn: Vector3 = interior.build()
+	# Interiors are built at their own origin, so the player is moved into it
+	# rather than the interior being moved under the realm's terrain.
+	_dungeon_root = interior
+	_set_surface_world_visible(false)
+	hero.global_position = spawn
+	active_structure_id = structure_id
+	in_dungeon = true
+	structure_state_changed.emit(structure_id, true)
+	dungeon_state_changed.emit(true)
+
+func _exit_structure(hero: Node3D) -> void:
+	if active_structure_id.is_empty():
+		return
+	var structure_id := active_structure_id
+	active_structure_id = ""
+	if structure_id == "embervault":
+		_exit_dungeon(hero)
+		structure_state_changed.emit(structure_id, false)
+		return
+	_set_surface_world_visible(true)
+	hero.global_position = _surface_return_position
+	in_dungeon = false
+	_free_interior()
+	structure_state_changed.emit(structure_id, false)
+	dungeon_state_changed.emit(false)
+
+func _on_structure_completed(structure_id: String) -> void:
+	structure_completed.emit(structure_id)
+	dungeon_completed.emit(structure_id)
+
+func toggle_dungeon() -> void:
+	# The Embervault's original contract, now one structure among several.
+	toggle_structure("embervault")
 
 func _enter_dungeon(hero: Node3D) -> void:
 	if in_dungeon:
@@ -69,10 +206,20 @@ func _exit_dungeon(hero: Node3D) -> void:
 	_set_surface_world_visible(true)
 	hero.global_position = _surface_return_position
 	in_dungeon = false
-	if is_instance_valid(_dungeon_root):
-		_dungeon_root.queue_free()
-	_dungeon_root = null
+	_free_interior()
 	dungeon_state_changed.emit(false)
+
+## Detaches the active interior before freeing it: a same-frame re-entry would
+## otherwise collide on Interior_<id> and leave the replacement auto-renamed.
+func _free_interior() -> void:
+	if not is_instance_valid(_dungeon_root):
+		_dungeon_root = null
+		return
+	var interior := _dungeon_root
+	_dungeon_root = null
+	if interior.get_parent() == self:
+		remove_child(interior)
+	interior.queue_free()
 
 func _set_surface_world_visible(visible: bool) -> void:
 	if _world == null:
@@ -82,7 +229,81 @@ func _set_surface_world_visible(visible: bool) -> void:
 			continue
 		if child is CanvasLayer:
 			continue
-		child.visible = visible
+		# WorldEnvironment is a plain Node with no `visible`, so hiding the
+		# surface used to throw here. Its sky and fog would also wash out the
+		# interior's own lighting, so the environment is parked while inside and
+		# restored on the way out.
+		if child is WorldEnvironment:
+			var env_node := child as WorldEnvironment
+			if not visible:
+				if not _environment_parked:
+					_environment_node = env_node
+					_saved_environment = env_node.environment
+					_environment_parked = true
+				env_node.environment = null
+			elif _environment_node == env_node and _environment_parked:
+				env_node.environment = _saved_environment
+				_environment_parked = false
+			continue
+		if child is Node3D:
+			child.visible = visible
+	# Surface physics travels with surface visibility: an interior must be the
+	# only thing the hero, enemies and the camera can touch while inside.
+	_park_surface_collision(not visible)
+
+## Disables (or restores) collision on every surface body, recursively, except
+## the hero and camera rig. Only world geometry and trigger areas park:
+## dynamic bodies (enemies, physics props) keep their own collision so they do
+## not fall through the world while the player is inside, and their attack/hit
+## areas park with the rest, so a hidden fight cannot reach the interior.
+func _park_surface_collision(disable: bool) -> void:
+	if _world == null:
+		return
+	for child in _world.get_children():
+		if child == self or child.name == "Hero" or child.name == "CameraRig":
+			continue
+		if child is CanvasLayer:
+			continue
+		_park_collision_tree(child, disable)
+	for body in _parked_collision.keys():
+		if not is_instance_valid(body):
+			_parked_collision.erase(body)
+	for body in _parked_process.keys():
+		if not is_instance_valid(body):
+			_parked_process.erase(body)
+
+func _park_collision_tree(node: Node, disable: bool) -> void:
+	var body := node as CollisionObject3D
+	if body != null:
+		# World geometry and triggers park their collision; dynamic bodies keep
+		# theirs but stop simulating so they neither fall nor chase.
+		if body is StaticBody3D or body is Area3D:
+			if disable:
+				if not _parked_collision.has(body):
+					_parked_collision[body] = Vector2i(body.collision_layer, body.collision_mask)
+				body.collision_layer = 0
+				body.collision_mask = 0
+			elif _parked_collision.has(body):
+				var saved: Vector2i = _parked_collision[body]
+				body.collision_layer = saved.x
+				body.collision_mask = saved.y
+				_parked_collision.erase(body)
+		elif body is CharacterBody3D or body is RigidBody3D:
+			if disable:
+				if not _parked_process.has(body):
+					var frozen := 1 if body is RigidBody3D and (body as RigidBody3D).freeze else 0
+					_parked_process[body] = Vector2i(body.process_mode, frozen)
+					body.process_mode = Node.PROCESS_MODE_DISABLED
+					if body is RigidBody3D:
+						(body as RigidBody3D).freeze = true
+			elif _parked_process.has(body):
+				var saved: Vector2i = _parked_process[body]
+				body.process_mode = saved.x as Node.ProcessMode
+				if body is RigidBody3D:
+					(body as RigidBody3D).freeze = saved.y != 0
+				_parked_process.erase(body)
+	for child in node.get_children():
+		_park_collision_tree(child, disable)
 
 func _build_dungeon_interior() -> void:
 	if is_instance_valid(_dungeon_root):
@@ -138,6 +359,9 @@ func _add_dungeon_module(module_id: String, location: Vector3, scale: Vector3,
 func _add_dungeon_collision() -> void:
 	var body := StaticBody3D.new()
 	body.name = "InteriorCollision"
+	# Player + environment layers so the third-person spring arm collides with
+	# the authored interior the same way it does with generated structures.
+	body.collision_layer = (1 << 0) | (1 << 5)
 	_dungeon_root.add_child(body)
 	var floor_shape := CollisionShape3D.new()
 	var floor_box := BoxShape3D.new()
@@ -319,8 +543,10 @@ func _on_victory() -> void:
 func _on_realm_changed(_realm_id: String) -> void:
 	# Realm-to-realm travel is owned by the biome manager's built travel gates,
 	# which already expose the hub as a destination in every realm. Only the
-	# grove's stage-gated hub portal needs re-syncing when the realm changes.
+	# grove's stage-gated hub portal needs re-syncing when the realm changes,
+	# and the structures standing on the new realm's surface are rebuilt.
 	_sync_gates()
+	_place_structures(_realm_id)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Practice altar

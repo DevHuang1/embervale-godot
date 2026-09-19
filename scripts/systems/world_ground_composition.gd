@@ -35,6 +35,23 @@ func setup(new_realm_id: String, new_seed: int, new_radius: float) -> void:
 static func pond_centers(for_realm: String) -> Array:
 	return (PONDS.get(for_realm, []) as Array).duplicate()
 
+## Pond geometry shared by the terrain basin carve and the water/shore
+## presentation, so the flat water disc always sits inside its depression.
+## `radius` is the plan-view basin extent; `depth` is how far the floor drops
+## below the untouched ground; `scale` sizes the water ellipse as before.
+static func pond_specs(for_realm: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var centers: Array = PONDS.get(for_realm, [])
+	for i in centers.size():
+		var scale := 2.6 + float(i % 2) * 1.1
+		result.append({
+			"center": centers[i] as Vector2,
+			"scale": scale,
+			"radius": scale * 1.30,
+			"depth": 0.34 + float(i % 2) * 0.08,
+		})
+	return result
+
 func _ground(point: Vector2) -> float:
 	if terrain != null and terrain.has_method("height_at"):
 		return float(terrain.call("height_at", point.x, point.y))
@@ -89,8 +106,8 @@ func _patch_type_order() -> Array[String]:
 		_: return ["dirt", "sand", "dirt", "mud"]
 
 func _build_ponds_and_shores() -> void:
-	var centers := pond_centers(realm_id)
-	if centers.is_empty():
+	var specs := pond_specs(realm_id)
+	if specs.is_empty():
 		return
 	var water_mesh := CylinderMesh.new()
 	water_mesh.top_radius = 1.0
@@ -104,11 +121,12 @@ func _build_ponds_and_shores() -> void:
 	shore_mesh.ring_segments = 5
 	var waters: Array[Transform3D] = []
 	var shores: Array[Transform3D] = []
-	for i in centers.size():
-		var point := centers[i] as Vector2
+	for i in specs.size():
+		var spec := specs[i]
+		var point := spec.get("center", Vector2.ZERO) as Vector2
 		if point.length() > radius * 0.94 or not _gameplay_clear(point, 0.5):
 			continue
-		var scale := 2.6 + float(i % 2) * 1.1
+		var scale := float(spec.get("scale", 2.6))
 		var y := _ground(point)
 		var basis := Basis(Vector3.UP, float(i) * 0.83).scaled(Vector3(scale, 1.0, scale * 0.72))
 		waters.append(Transform3D(basis, Vector3(point.x, y + 0.055, point.y)))

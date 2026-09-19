@@ -2,6 +2,7 @@ extends Node3D
 class_name TerrainRelief
 
 const LAYOUT := preload("res://scripts/world/realm_layout_data.gd")
+const GROUND_COMPOSITION := preload("res://scripts/systems/world_ground_composition.gd")
 
 ## === Terrain Relief ===
 ## Runtime heightmapped ground: replaces the flat PlaneMesh with a
@@ -49,6 +50,9 @@ var _flatten_points: Array[Vector2] = [
 	Vector2(19.0, -16.0),   # Embervault cave entrance (ridge foot)
 ]
 var _boss_anchor_points: Array[Vector2] = []
+## Pond basins carved into the heightfield; specs are shared with the water
+## presentation so the flat disc always sits inside a real depression.
+var _pond_basins: Array[Dictionary] = []
 
 ## Per-realm ground palettes for terrain_ground.gdshader. Every explorable
 ## realm gets a distinct underfoot read: grass/dirt/stone families plus a
@@ -127,6 +131,13 @@ const REALM_TERRAIN := {
 
 @onready var terrain_mesh: MeshInstance3D = $TerrainMesh
 
+## One vertex grid shared by the visual mesh and the collision surface, so the
+## ground the character walks on is exactly the ground the player sees. A
+## coarser collision grid chorded through hill crests and let the character
+## walk up to two metres inside the visible slope.
+var _grid_verts := PackedVector3Array()
+var _grid_indices := PackedInt32Array()
+
 ## POM tiers: LOW off, MEDIUM single-step offset, HIGH short 4-step march.
 const POM_BY_LEVEL := [0, 1, 2]
 const DESKTOP_TERRAIN_SHADER := "res://assets/shaders/terrain_ground.gdshader"
@@ -134,9 +145,9 @@ const MOBILE_TERRAIN_SHADER := "res://assets/shaders/terrain_ground_mobile.gdsha
 ## Static references guarantee these low-cost Android albedo resources remain
 ## in the PCK even though the full desktop layer set is selected dynamically.
 const MOBILE_TERRAIN_TEXTURES := {
-	"grass": preload("res://assets/textures/stylized/grass_v2/albedo.png"),
+	"grass": preload("res://assets/textures/stylized/grass/albedo.png"),
 	"dirt": preload("res://assets/textures/stylized/dirt/albedo.png"),
-	"sand": preload("res://assets/textures/stylized/sand_v2/albedo.png"),
+	"sand": preload("res://assets/textures/stylized/sand/albedo.png"),
 	"rock": preload("res://assets/textures/stylized/rock/albedo.png"),
 }
 
@@ -144,6 +155,8 @@ func _ready() -> void:
 	add_to_group("terrain_relief")
 	_register_layout_boss_anchors()
 	_register_layout_content_anchors()
+	_register_pond_basins()
+	_build_grid()
 	terrain_mesh.mesh = _build_mesh()
 	terrain_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	var ground := _load_realm_material()
@@ -220,6 +233,9 @@ func _apply_palette(ground: ShaderMaterial) -> void:
 	ground.set_shader_parameter("moss_strength", maxf(float(pal.get("moss_strength", 0.0)), 0.42))
 
 func _bind_ground_texture_layers(ground: ShaderMaterial) -> void:
+	# One canonical stylized set per family serves every tier and realm; the
+	# former `*_v2` shadow folders are gone, so albedo, normal and roughness
+	# always come from the same directory and never double-load a texture.
 	var mobile := _is_mobile_runtime()
 	var layers := {
 		"grass": "grass",
@@ -229,9 +245,7 @@ func _bind_ground_texture_layers(ground: ShaderMaterial) -> void:
 	}
 	for layer_value in layers:
 		var layer := str(layer_value)
-		var layer_name := str(layers[layer_value])
-		var v2_root := "res://assets/textures/stylized/%s_v2" % layer_name
-		var root := v2_root if ResourceLoader.exists("%s/albedo.png" % v2_root) else "res://assets/textures/stylized/%s" % layer_name
+		var root := "res://assets/textures/stylized/%s" % str(layers[layer_value])
 		var albedo := _mobile_texture(layer) if mobile \
 			else _load_texture(root, "albedo")
 		if albedo != null:
@@ -247,9 +261,7 @@ func _bind_ground_texture_layers(ground: ShaderMaterial) -> void:
 	if mobile:
 		return
 	for layer_name in ["moss", "mud"]:
-		var root := "res://assets/textures/stylized/%s_v2" % layer_name
-		if not ResourceLoader.exists("%s/albedo.png" % root):
-			root = "res://assets/textures/stylized/%s" % layer_name
+		var root := "res://assets/textures/stylized/%s" % layer_name
 		var albedo := _load_texture(root, "albedo")
 		var normal := _load_texture(root, "normal")
 		var roughness := _load_texture(root, "roughness")
@@ -303,7 +315,30 @@ func _register_layout_content_anchors() -> void:
 			continue
 		_flatten_points.append(anchor)
 
-func height_at(x: float, z: float) -> float:
+func _register_pond_basins() -> void:
+	_pond_basins.clear()
+	for spec in GROUND_COMPOSITION.pond_specs(_realm_id()):
+		if not spec is Dictionary:
+			continue
+		var basin := (spec as Dictionary).duplicate()
+		# Floor sits below the lowest bank sample, so the flat water disc is
+		# contained on every side even when the pond lands on a swell.
+		basin["floor"] = _lowest_bank(basin) - float(basin.get("depth", 0.32))
+		_pond_basins.append(basin)
+
+## Lowest of the base terrain sampled around a basin's rim (no basin applied).
+func _lowest_bank(basin: Dictionary) -> float:
+	var center: Vector2 = basin.get("center", Vector2.ZERO)
+	var br := float(basin.get("radius", 3.0))
+	var lowest := INF
+	for step in 12:
+		var ang := TAU * float(step) / 12.0
+		lowest = minf(lowest, _base_height(
+			center.x + cos(ang) * br * 1.35,
+			center.y + sin(ang) * br * 1.35))
+	return lowest if is_finite(lowest) else 0.0
+
+func _base_height(x: float, z: float) -> float:
 	var p := Vector2(x, z)
 	var r := p.length()
 
@@ -330,6 +365,25 @@ func height_at(x: float, z: float) -> float:
 	h *= _flatten_mask(p)
 
 	return clampf(h, -1.2, 8.0)
+
+func height_at(x: float, z: float) -> float:
+	var h := _base_height(x, z)
+	# Authored pond basins: blend to a flat floor that sits below the lowest
+	# bank, so the water disc rests in a real depression on every side.
+	if not _pond_basins.is_empty():
+		var p := Vector2(x, z)
+		for basin in _pond_basins:
+			var center: Vector2 = basin.get("center", Vector2.ZERO)
+			var br := float(basin.get("radius", 3.0))
+			var d := p.distance_to(center)
+			if d >= br:
+				continue
+			var floor_y := float(basin.get("floor", h))
+			if h <= floor_y:
+				continue
+			var weight := 1.0 - smoothstep(br * 0.45, br, d)
+			h -= (h - floor_y) * weight
+	return h
 
 func get_surface_profile(world_position: Vector3) -> Dictionary:
 	var p := Vector2(world_position.x, world_position.z)
@@ -430,12 +484,34 @@ func prop_anchor_points() -> Array[Vector2]:
 			result.append(anchor)
 	return result
 
+## Fills the shared heightfield grid in the same winding the visual mesh uses.
+func _build_grid() -> void:
+	var n := clampi(subdivisions, 32, 254)
+	var step := HALF_EXTENT * 2.0 / float(n)
+	_grid_verts.resize((n + 1) * (n + 1))
+	for j in n + 1:
+		for i in n + 1:
+			var x := -HALF_EXTENT + i * step
+			var z := -HALF_EXTENT + j * step
+			_grid_verts[j * (n + 1) + i] = Vector3(x, height_at(x, z), z)
+
+	_grid_indices.resize(n * n * 6)
+	var k := 0
+	for j in n:
+		for i in n:
+			var a := j * (n + 1) + i
+			var b := a + 1
+			var c := (j + 1) * (n + 1) + i + 1
+			var d := (j + 1) * (n + 1) + i
+			_grid_indices[k] = a; _grid_indices[k + 1] = c; _grid_indices[k + 2] = b
+			_grid_indices[k + 3] = a; _grid_indices[k + 4] = d; _grid_indices[k + 5] = c
+			k += 6
+
 func _build_mesh() -> ArrayMesh:
 	var n := clampi(subdivisions, 32, 254)
 	var step := HALF_EXTENT * 2.0 / float(n)
-	var verts := PackedVector3Array()
+	var verts := _grid_verts
 	var normals := PackedVector3Array()
-	verts.resize((n + 1) * (n + 1))
 	normals.resize((n + 1) * (n + 1))
 
 	var e := step * 0.5
@@ -444,23 +520,11 @@ func _build_mesh() -> ArrayMesh:
 			var x := -HALF_EXTENT + i * step
 			var z := -HALF_EXTENT + j * step
 			var idx := j * (n + 1) + i
-			verts[idx] = Vector3(x, height_at(x, z), z)
 			var dhx := (height_at(x + e, z) - height_at(x - e, z)) / step
 			var dhz := (height_at(x, z + e) - height_at(x, z - e)) / step
 			normals[idx] = Vector3(-dhx, 1.0, -dhz).normalized()
 
-	var inds := PackedInt32Array()
-	inds.resize(n * n * 6)
-	var k := 0
-	for j in n:
-		for i in n:
-			var a := j * (n + 1) + i
-			var b := a + 1
-			var c := (j + 1) * (n + 1) + i + 1
-			var d := (j + 1) * (n + 1) + i
-			inds[k] = a; inds[k + 1] = c; inds[k + 2] = b
-			inds[k + 3] = a; inds[k + 4] = d; inds[k + 5] = c
-			k += 6
+	var inds := _grid_indices
 
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
@@ -473,10 +537,10 @@ func _build_mesh() -> ArrayMesh:
 	am.custom_aabb = AABB(Vector3(-302.0, -5.0, -302.0), Vector3(620.0, 20.0, 620.0))
 	return am
 
-## Builds a coarse concave trimesh from the heightfield so the hero and
-## enemies actually walk up and down the hills (relief mesh alone is
-## visual-only). The flat editor plane is removed so it can't shadow
-## the relief in dips. Resolution is half the visual mesh for mobile.
+## Builds the concave trimesh from the same vertex grid as the visual mesh so
+## the hero and enemies walk exactly on the visible hill surface (relief mesh
+## alone is visual-only). The flat editor plane is removed so it can't shadow
+## the relief in dips.
 func _build_heightfield_collision() -> void:
 	var body := terrain_mesh.get_parent() as StaticBody3D
 	if body == null or not is_inside_tree():
@@ -486,25 +550,10 @@ func _build_heightfield_collision() -> void:
 		if child is CollisionShape3D:
 			child.queue_free()
 
-	# Collision does not need visual-grid density on this flat terrain.
-	const GRID := 64
-	var cell := (HALF_EXTENT * 2.0) / float(GRID)
 	var faces := PackedVector3Array()
-	faces.resize(GRID * GRID * 6)
-	var k := 0
-	for j in GRID:
-		for i in GRID:
-			var x0 := -HALF_EXTENT + i * cell
-			var z0 := -HALF_EXTENT + j * cell
-			var x1 := x0 + cell
-			var z1 := z0 + cell
-			var a := Vector3(x0, height_at(x0, z0), z0)
-			var b := Vector3(x1, height_at(x1, z0), z0)
-			var c := Vector3(x1, height_at(x1, z1), z1)
-			var d := Vector3(x0, height_at(x0, z1), z1)
-			faces[k] = a; faces[k + 1] = c; faces[k + 2] = b
-			faces[k + 3] = a; faces[k + 4] = d; faces[k + 5] = c
-			k += 6
+	faces.resize(_grid_indices.size())
+	for index in _grid_indices.size():
+		faces[index] = _grid_verts[_grid_indices[index]]
 	var shape := ConcavePolygonShape3D.new()
 	shape.set_faces(faces)
 	shape.backface_collision = true

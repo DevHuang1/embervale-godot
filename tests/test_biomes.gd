@@ -95,13 +95,13 @@ func _run() -> void:
 			failures += 1
 			print("FAIL: gate count wrong in ", id, " -> ", gates, "/", expected_gates)
 
-		var has_arena := scene.has_node("ArenaStone")
+		var has_arena := scene.has_node("BossCompound")
 		if id == "bramblewood" \
 				and scene.find_child("RootboundCourtArena", true, false) != null:
 			has_arena = true
 		if not has_arena:
 			failures += 1
-			print("FAIL: arena stone missing in ", id)
+			print("FAIL: boss compound missing in ", id)
 
 		# --- Authored structures populate the realm map ---
 		var visual_realm: String = str(id)
@@ -143,6 +143,22 @@ func _run() -> void:
 			if in_pocket < 1:
 				failures += 1
 				print("FAIL: %s pocket %s produced no enemies" % [visual_realm, pocket_id])
+			# The filled pocket must actually field a roster kind, not only the
+			# tier's signature archetype.
+			var roster_scenes := {}
+			for roster_entry in profile.get("enemies", []):
+				roster_scenes[EnemyVisualRegistry.scene_for(str(roster_entry))] = true
+			var used_roster_kind := false
+			for enemy in get_nodes_in_group("enemy"):
+				if enemy is Node3D \
+						and str(enemy.get_meta("spawn_pocket_id", "")) == pocket_id \
+						and roster_scenes.has(enemy.scene_file_path):
+					used_roster_kind = true
+					break
+			if not used_roster_kind:
+				failures += 1
+				print("FAIL: %s pocket %s fielded no roster kind" \
+					% [visual_realm, pocket_id])
 			var cap_regex := RegEx.new()
 			cap_regex.compile("const POCKET_GLOBAL_CAP := (\\d+)")
 			var cap_match := cap_regex.search(FileAccess.get_file_as_string(
@@ -154,6 +170,70 @@ func _run() -> void:
 					failures += 1
 					print("FAIL: %s exceeded the realm hostile ceiling (%d > %d)" \
 						% [visual_realm, total_hostiles, live_cap])
+
+			# --- Map-wide roster spread: every authored mob kind is reachable ---
+			var roster: Array = profile.get("enemies", [])
+			if roster.is_empty():
+				failures += 1
+				print("FAIL: %s authors no enemy roster" % visual_realm)
+			else:
+				for roster_id in roster:
+					var roster_scene := EnemyVisualRegistry.scene_for(str(roster_id))
+					if not ResourceLoader.exists(roster_scene):
+						failures += 1
+						print("FAIL: %s roster kind %s has no scene" \
+							% [visual_realm, roster_id])
+				if scene.has_method("_next_pocket_kind"):
+					var seen := {}
+					for _pick in maxi(roster.size() * 2, 8):
+						seen[str(scene.call("_next_pocket_kind", "hard"))] = true
+					for roster_id in roster:
+						if not seen.has(str(roster_id)):
+							failures += 1
+							print("FAIL: %s pocket spread never fields %s" \
+								% [visual_realm, roster_id])
+				else:
+					failures += 1
+					print("FAIL: %s has no pocket spread picker" % visual_realm)
+				# The pipeline must spawn a roster kind as its own scene, not a
+				# recolored fallback.
+				var probe_kind := str(roster[0])
+				var probe := scene.call("_spawn_tiered_enemy",
+					hero.global_position + Vector3(0.0, 0.0, 7.0),
+					"normal", probe_kind) as Node3D
+				if probe == null:
+					failures += 1
+					print("FAIL: %s cannot spawn roster kind %s" \
+						% [visual_realm, probe_kind])
+				else:
+					var expected_probe := EnemyVisualRegistry.scene_for(probe_kind)
+					if probe.scene_file_path != expected_probe:
+						failures += 1
+						print("FAIL: %s roster kind %s spawned %s" \
+							% [visual_realm, probe_kind, probe.scene_file_path])
+					probe.queue_free()
+
+		# --- Realm elite pockets wear the realm's own creature rig ---
+		var elite_variant: Dictionary = Bestiary.variant_for(visual_realm, "elite")
+		var elite_rig := str(elite_variant.get("rig", ""))
+		if elite_rig.is_empty() or float(elite_variant.get("rig_height", 0.0)) <= 0.0:
+			failures += 1
+			print("FAIL: %s elite declares no creature rig" % visual_realm)
+		elif scene.has_method("_spawn_tiered_enemy"):
+			var elite_member := scene.call("_spawn_tiered_enemy",
+				hero.global_position + Vector3(0.0, 0.0, 9.0), "elite") as Node3D
+			if elite_member == null:
+				failures += 1
+				print("FAIL: %s could not spawn an elite pocket member" % visual_realm)
+			else:
+				if str(elite_member.get("rig_profile_override")) != elite_rig:
+					failures += 1
+					print("FAIL: %s elite wears %s instead of %s" \
+						% [visual_realm, str(elite_member.get("rig_profile_override")), elite_rig])
+				if CharacterRigLoader.mounted_height(elite_member) <= 0.2:
+					failures += 1
+					print("FAIL: %s elite mounted no authored rig" % visual_realm)
+				elite_member.queue_free()
 
 		# --- Authored resources become real, persisted gathering nodes ---
 		var resource_specs: Array = profile.get("resources", [])

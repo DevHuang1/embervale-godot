@@ -7,6 +7,7 @@ const ROOT_HARROW_BOSS_KEY := "boss_whispergrove_root_harrow"
 const BOSS_DIRECTOR_SCRIPT := preload("res://scripts/systems/boss_encounter_director.gd")
 const TRAINING_TARGET_SCENE: PackedScene = preload("res://scenes/entities/combat_training_target.tscn")
 const PROFILE_TELEMETRY := preload("res://scripts/systems/android_profile_telemetry.gd")
+const ENEMY_VISUALS := preload("res://scripts/systems/enemy_visual_registry.gd")
 ## Contextual-button reach for walk-over loot. The drop itself still auto-
 ## collects under LootDrop.COLLECT_RADIUS; this only lets the on-screen
 ## button claim one the hero stopped just short of.
@@ -407,19 +408,27 @@ func _spawn_pack_enemy(origin: Vector3, realm_id: String, hard: bool,
 	var v := Bestiary.variant_for(realm_id, "hard" if hard else "normal")
 	if v.is_empty():
 		return
-	# Ranged "spitter" kin and "fenling" mire sprites get their own rigged
-	# scenes; everything else is the classic hushling (recolored per realm
-	# by CharacterModelData).
+	# Every Bestiary kind resolves through the shared enemy scene catalog, so
+	# packs and pockets anywhere in the realm field the rigged creatures too.
 	var kind := str(v.get("kind", "hushling"))
+	# An elite wave wears its realm's elite creature rig and behavior, not the
+	# tier kind, so the same realm elite reads the same everywhere it appears.
+	var elite_v := Bestiary.variant_for(realm_id, "elite") if elite else {}
+	if elite and not elite_v.is_empty():
+		kind = str(elite_v.get("kind", kind))
 	var scene_path := "res://scenes/entities/elite_hushling.tscn" \
-		if elite else ("res://scenes/entities/spitter.tscn" \
-		if kind == "spitter" else ("res://scenes/entities/moonfen_fenling.tscn" \
-		if kind in ["fenling", "moonfen_fenling"] else ("res://scenes/entities/relic_leech.tscn" \
-		if kind == "relic_leech" else "res://scenes/entities/hushling.tscn")))
+		if elite else ENEMY_VISUALS.scene_for(kind)
 	var scene: PackedScene = load(scene_path)
 	if scene == null:
 		return
 	var enemy: Node3D = scene.instantiate()
+	if enemy == null:
+		return
+	if elite and elite_v.has("rig"):
+		if "rig_profile_override" in enemy:
+			enemy.set("rig_profile_override", str(elite_v.get("rig", "")))
+		if "authored_rig_height" in enemy:
+			enemy.set("authored_rig_height", float(elite_v.get("rig_height", 0.0)))
 	add_child(enemy)
 	enemy.global_position = _pack_spot(origin, idx, total)
 	var md := CharacterModelData.new()
@@ -510,7 +519,9 @@ func _soften_particle_sprites() -> void:
 ## Cached scene references can be freed before this manager is: a defeated
 ## hushling frees itself, and a realm teardown runs ahead of the persistent
 ## GameState signals. Every cached node is checked before it is written to.
-static func is_live(node: Object) -> bool:
+static func is_live(node: Variant) -> bool:
+	# Untyped on purpose: a typed member that holds a freed node cannot even be
+	# bound to an `Object` parameter, which would raise instead of answering.
 	return node != null and is_instance_valid(node)
 
 func _update_grove_for_stage() -> void:

@@ -440,6 +440,72 @@ func _run_expedition(grove: Node) -> void:
 		_assert_true(int(_gs.hp) > 0 and _gs.combat_state != _gs.CombatState.DEFEATED,
 			"route does not end with the hero defeated (hp=%d)" % int(_gs.hp))
 
+	# --- Structure interior: the real hero must climb the north stair ---
+	# Regression: the realm's flat ground collision used to stay solid behind
+	# the hidden surface, so the hero walked on that plane through stair rooms
+	# and never climbed. This walks the real movement code from the entry hall,
+	# up the flight, and onto the upper floor.
+	_mark("structure_stair_climb")
+	var expansion := world.get_node_or_null("RealmExpansion")
+	if expansion == null or not is_instance_valid(hero):
+		_failures.append("RealmExpansion or Hero missing for the structure stair check")
+	else:
+		var terrain := world.get_node_or_null("Terrain") as StaticBody3D
+		var surface_layer := terrain.collision_layer if terrain != null else 0
+		_gs.set("current_realm", "bramblewood")
+		expansion.call("_place_structures", "bramblewood")
+		expansion.call("toggle_structure", "bramble_keep")
+		await _frames(8)
+		if terrain != null:
+			_assert_true(terrain.collision_layer == 0,
+				"surface collision parks while the hero is inside a structure")
+		# Indoors the orbit pitch flattens: the outdoor -35 deg put the camera
+		# above the roofline looking down at floor and roof tops.
+		var rig := world.get_node_or_null("CameraRig")
+		if rig != null and str(rig.get("view_mode")) == "third_person":
+			var pitch := float(rig.get("target_angle_v"))
+			_assert_true(pitch >= float(rig.get("indoor_pitch_min")) - 0.001
+					and pitch <= float(rig.get("indoor_pitch_max")) + 0.001,
+				"indoor camera pitch flattens inside a structure (%.2f rad)" % pitch)
+		var interior := expansion.get("_dungeon_root") as Node3D
+		_assert_true(interior != null, "structure interior builds on entry")
+		if interior != null:
+			var body := interior.get_node_or_null("InteriorCollision") as StaticBody3D
+			_assert_true(body != null and (body.collision_layer & 32) != 0,
+				"interior geometry carries the camera collision layer")
+			# Clear the encounter so this traversal cannot be staggered or
+			# defeated mid-climb; combat is covered by the earlier route beats.
+			for enemy in get_nodes_in_group("enemy"):
+				if enemy is Node3D and is_instance_valid(enemy):
+					enemy.queue_free()
+			await _frames(2)
+			await _walk_hero_to(hero, Vector3(0.0, 0.0, -8.0), 400)
+			await _walk_hero_to(hero, Vector3(0.0, 0.0, -18.0), 600)
+			_assert_true(hero.global_position.y >= 3.0,
+				"real hero climbs the structure stair (y=%.2f)" % hero.global_position.y)
+			# With the pitch flat, the spring arm clamps under the room's own
+			# roof: the camera must never climb above the roofline, where all
+			# it could see was the top of the ceiling.
+			var cam := world.get_node_or_null("CameraRig/SpringArm/Camera3D") as Camera3D
+			var cam_y := cam.global_position.y if cam != null else -999.0
+			_assert_true(cam != null and cam_y < hero.global_position.y + 3.9,
+				"indoor camera stays under the room roof (cam y=%.2f)" % cam_y)
+		expansion.call("toggle_structure", "bramble_keep")
+		await _frames(8)
+		if terrain != null:
+			_assert_true(terrain.collision_layer == surface_layer,
+				"surface collision restores after leaving the structure")
+
+## Drives the hero's own tap-to-move path toward a horizontal target until it
+## arrives or the frame budget runs out.
+func _walk_hero_to(hero: Node3D, target: Vector3, max_frames: int) -> void:
+	hero.set("has_move_target", true)
+	hero.set("target_position", target)
+	for _frame in max_frames:
+		await physics_frame
+		if not bool(hero.get("has_move_target")):
+			return
+
 func _verify_reload() -> void:
 	var fingerprint := {
 		"stage": int(_gs.current_stage),

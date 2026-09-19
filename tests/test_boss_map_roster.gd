@@ -71,7 +71,7 @@ func _init() -> void:
 		failures += 1
 	var manager_source := FileAccess.get_file_as_string("res://scripts/systems/biome_manager.gd")
 	for required_hook in ["_engage_side_boss", "_process_side_bosses", "_reset_biome_boss",
-			"entry_position_for"]:
+			"_arena_compound", "_build_arena"]:
 		if not manager_source.contains(required_hook):
 			push_error("BiomeManager missing roster hook %s" % required_hook)
 			failures += 1

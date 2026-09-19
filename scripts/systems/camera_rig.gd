@@ -55,6 +55,13 @@ const KILLCAM_LEASE := "camera_killcam"
 @export var boss_min_distance: float = 12.0
 @export var boss_max_distance: float = 22.0
 @export var boss_fov: float = 46.0
+## Indoor orbit band. A structure room is a few metres tall, so the outdoor
+## third-person pitch (-35 deg) puts the camera above the roofline looking down
+## at floor and roof tops. Indoors the same distance is kept and the pitch
+## flattens, which frames the room and the fight ahead; the spring arm's own
+## collision against the walls keeps the camera inside the building.
+@export var indoor_pitch_min: float = -0.26
+@export var indoor_pitch_max: float = -0.05
 @export var mode_lerp_speed: float = 3.0
 # First-person free-look: turn the view left/right to look around on any
 # device (mouse motion on desktop, a one-finger drag elsewhere). The orbit
@@ -100,6 +107,10 @@ var _cine_anchor := Vector3.ZERO
 var _restore_distance: float = 17.5
 var _boss_combat := false
 var _ts_guard: Node = null
+## The realm expansion owns whether the player is inside a structure; the rig
+## only reads it, so there is a single owner of the indoor state.
+var _expansion: Node = null
+var _indoor := false
 
 func _ready() -> void:
 	# Hit-stop recovery is wall-clock driven. This node must continue polling
@@ -111,6 +122,7 @@ func _ready() -> void:
 	target = get_parent().get_node_or_null("Hero")
 	if not target:
 		push_error("CameraRig: No Hero found!")
+	_expansion = get_parent().get_node_or_null("RealmExpansion")
 	
 	# Initialize spring arm
 	spring_arm.spring_length = distance
@@ -187,6 +199,7 @@ func _update_camera_position(delta: float) -> void:
 			var floor_y := float(terrain.call("sample_surface_height", global_position))
 			global_position.y = maxf(global_position.y, floor_y + 0.65)
 	
+	_refresh_indoor_pitch()
 	# Smooth lerp distance, pitch, and FOV toward mode targets
 	var lerp_rate := mode_lerp_speed * delta
 	distance = lerpf(distance, _target_distance, lerp_rate)
@@ -658,10 +671,27 @@ func get_first_person_look_settings() -> Dictionary:
 
 ## Pitch clamp for the current view: orbit modes use the whole [-1.35,-0.18]
 ## arc, while first person keeps the head near level so fights stay readable.
+## Indoors the orbit band flattens so the camera cannot climb over the roofline.
 func _clamp_pitch(v: float) -> float:
 	if view_mode == VIEW_FIRST_PERSON:
 		return clampf(v, first_person_pitch_min, first_person_pitch_max)
+	if _indoor:
+		return clampf(v, indoor_pitch_min, indoor_pitch_max)
 	return clampf(v, -1.35, -0.18)
+
+## Flattens the third-person pitch while the player is inside a structure so
+## the camera looks along the room instead of down at floors and roof tops.
+func _refresh_indoor_pitch() -> void:
+	# The realm expansion is created at runtime, so it is resolved on first use
+	# rather than cached in _ready.
+	if _expansion == null or not is_instance_valid(_expansion):
+		_expansion = get_parent().get_node_or_null("RealmExpansion")
+	_indoor = _expansion != null and is_instance_valid(_expansion) \
+		and bool(_expansion.get("in_dungeon"))
+	if not _indoor or view_mode == VIEW_FIRST_PERSON:
+		return
+	_target_angle_v = clampf(_target_angle_v, indoor_pitch_min, indoor_pitch_max)
+	target_angle_v = clampf(target_angle_v, indoor_pitch_min, indoor_pitch_max)
 
 func zoom(delta: float) -> void:
 	set_distance(distance - delta)

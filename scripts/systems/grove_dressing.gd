@@ -425,10 +425,86 @@ func _batch(mesh: Mesh, material: Material, transforms: Array[Transform3D],
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mmi)
 
+## === Prop collision ===
+## Props inside the playable ring are solid, so the player cannot walk through a
+## trunk or a boulder. One StaticBody3D per family carrying many shapes keeps the
+## physics broadphase cheap; the radius and the per-family cap bound the cost on
+## Android, and the nearest instances are kept first so the cap always protects
+## what can actually be reached. Each shape is derived from its instance's world
+## AABB, so it is correct for any mesh regardless of where its origin sits.
+const PROP_COLLISION_RADIUS := 120.0
+const PROP_COLLISION_CAP := 240
+
+func _add_prop_collision(mesh: Mesh, transforms: Array[Transform3D], family: String,
+		radius_scale: float = 0.80, min_radius: float = 0.16) -> void:
+	if mesh == null or transforms.is_empty():
+		return
+	var local := mesh.get_aabb()
+	var near: Array[Transform3D] = []
+	for t in transforms:
+		if Vector2(t.origin.x, t.origin.z).length() <= PROP_COLLISION_RADIUS:
+			near.append(t)
+	if near.is_empty():
+		return
+	near.sort_custom(func(a: Transform3D, b: Transform3D) -> bool:
+		return Vector2(a.origin.x, a.origin.z).length_squared() \
+			< Vector2(b.origin.x, b.origin.z).length_squared())
+	var body := StaticBody3D.new()
+	body.name = "%sCollision" % family
+	var added := 0
+	for t in near:
+		if added >= PROP_COLLISION_CAP:
+			break
+		var world := t * local
+		var size := world.size
+		var radius := maxf(size.x, size.z) * 0.5 * radius_scale
+		if radius < min_radius:
+			continue
+		var shape := CylinderShape3D.new()
+		shape.radius = radius
+		shape.height = maxf(size.y, 0.5)
+		var cs := CollisionShape3D.new()
+		cs.shape = shape
+		cs.position = world.get_center()
+		body.add_child(cs)
+		added += 1
+	if added > 0:
+		add_child(body)
+
 func _rand_pos_in(radius: float) -> Vector2:
 	var ang := rng.randf() * TAU
 	var r := sqrt(rng.randf()) * radius
 	return Vector2(cos(ang) * r, sin(ang) * r)
+
+## Base-anchored trunk with four low-poly limbs, shared by the border treeline
+## and the interior groves so both read as one species. The visual mesh starts
+## at y=0 because the instance transform is the ground contact (the old
+## centered cylinder buried half of every tree); the collider keeps the plain
+## base-anchored trunk so collision radius stays the authored one.
+func _tree_trunk_meshes(trunk: CylinderMesh) -> Dictionary:
+	var visual := SurfaceTool.new()
+	visual.begin(Mesh.PRIMITIVE_TRIANGLES)
+	visual.append_from(trunk, 0,
+		Transform3D(Basis(), Vector3(0, trunk.height * 0.5, 0)))
+	var limb := CylinderMesh.new()
+	limb.top_radius = 0.04
+	limb.bottom_radius = 0.11
+	limb.height = maxf(trunk.height * 0.5, 1.0)
+	limb.radial_segments = 5
+	limb.rings = 1
+	for limb_index in 4:
+		var azimuth := TAU * float(limb_index) / 4.0 + 0.4 * float(limb_index % 2)
+		var tilt := deg_to_rad(54.0 + 7.0 * float(limb_index % 2))
+		var limb_basis := Basis(Vector3.UP, azimuth) * Basis(Vector3.RIGHT, tilt)
+		var attach := Vector3(0.0,
+			trunk.height * (0.36 + 0.12 * float(limb_index)), 0.0)
+		visual.append_from(limb, 0, Transform3D(limb_basis,
+			attach + limb_basis * Vector3(0, limb.height * 0.5, 0)))
+	var collider := SurfaceTool.new()
+	collider.begin(Mesh.PRIMITIVE_TRIANGLES)
+	collider.append_from(trunk, 0,
+		Transform3D(Basis(), Vector3(0, trunk.height * 0.5, 0)))
+	return {"visual": visual.commit(), "collider": collider.commit()}
 
 func _build_trees() -> void:
 	var trunk := CylinderMesh.new()
@@ -454,6 +530,7 @@ func _build_trees() -> void:
 
 	var trunks: Array[Transform3D] = []
 	var canopies: Array[Transform3D] = []
+	var meshes := _tree_trunk_meshes(trunk)
 
 	# Dense border treeline ringing the realm
 	for i in tree_count:
@@ -467,8 +544,9 @@ func _build_trees() -> void:
 		trunks.append(Transform3D(b, Vector3(pos.x, ground_y, pos.z)))
 		canopies.append(Transform3D(b, Vector3(pos.x, ground_y + 3.05 * s, pos.z)))
 
-	_batch(trunk, bark, trunks, true, 310.0)
+	_batch(meshes["visual"], bark, trunks, true, 310.0)
 	_batch(canopy, canopy_mat, canopies, true, 310.0)
+	_add_prop_collision(meshes["collider"], trunks, "Trees")
 
 ## Small interior groves so the open plain isn't empty between landmarks
 func _build_grove_clusters() -> void:
@@ -492,6 +570,7 @@ func _build_grove_clusters() -> void:
 	})
 	var trunks: Array[Transform3D] = []
 	var canopies: Array[Transform3D] = []
+	var meshes := _tree_trunk_meshes(trunk)
 	for c in grove_cluster_count:
 		var center := _rand_pos_in(scatter_radius * 0.72)
 		# Keep clusters clear of spawn/quest core
@@ -505,8 +584,9 @@ func _build_grove_clusters() -> void:
 			var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s, s))
 			trunks.append(Transform3D(b, Vector3(p.x, gy, p.y)))
 			canopies.append(Transform3D(b, Vector3(p.x, gy + 2.5 * s, p.y)))
-	_batch(trunk, bark, trunks, true, 310.0)
+	_batch(meshes["visual"], bark, trunks, true, 310.0)
 	_batch(canopy, canopy_mat, canopies, true, 310.0)
+	_add_prop_collision(meshes["collider"], trunks, "GroveTrees")
 
 func _build_rocks() -> void:
 	var rock := SphereMesh.new()
@@ -531,6 +611,7 @@ func _build_rocks() -> void:
 		transforms.append(Transform3D(b, pos))
 
 	_batch(rock, rock_mat, transforms, true, 310.0)
+	_add_prop_collision(rock, transforms, "Rocks")
 
 ## Low leafy bushes for mid-distance texture
 func _build_bushes() -> void:
@@ -554,6 +635,7 @@ func _build_bushes() -> void:
 		transforms.append(Transform3D(b,
 			Vector3(p.x, _ground_height(p.x, p.y) + 0.08, p.y)))
 	_batch(bush, mat, transforms, true, 310.0)
+	_add_prop_collision(bush, transforms, "Bushes", 0.70)
 
 ## Tiny ground stones — cheap detail that sells scale
 func _build_pebbles() -> void:
@@ -815,6 +897,7 @@ func _build_mushrooms() -> void:
 					Vector3(p.x, ground_y + 0.26 * s, p.z)))
 
 	_batch(stem, _mat(Color(0.32, 0.30, 0.26)), stems, false)
+	_add_prop_collision(stem, stems, "Mushrooms", 0.80, 0.10)
 	_batch(cap, _mat(mushroom_cap_color, Color(0.45, 0.85, 0.50), 1.1), caps, false)
 
 ## Ancient ruin circle: broken columns of a forgotten rite-ground (NE reach)
@@ -854,6 +937,7 @@ func _build_ruins() -> void:
 		else:
 			standing.append(Transform3D(b, Vector3(p.x, gy, p.y)))
 	_batch(column, marble, standing, true, 310.0)
+	_add_prop_collision(column, standing, "RuinColumns")
 	_batch(broken, marble, fallen, true, 310.0)
 
 	# Let the terrain carry the ruin floor.  A grid of BoxMesh slabs here read
@@ -940,6 +1024,7 @@ func _build_torches() -> void:
 		flicker.base_energy = 1.5
 		light.add_child(flicker)
 	_batch(post, wood, posts, true, 310.0)
+	_add_prop_collision(post, posts, "TorchPosts", 0.80, 0.10)
 	_batch(bowl, flame_mat, bowls, false, 310.0)
 
 ## Tiny helper node so torch flames breathe without per-frame GD cost
@@ -1003,6 +1088,7 @@ func _build_thorn_arches() -> void:
 			thorns.append(Transform3D(thorn_basis,
 				Vector3(s.x, gy + 2.65, s.y) + gate_basis * Vector3(local_x, 0, 0)))
 	_batch(post, briar, posts, true, 310.0, "RootedThornGatePosts")
+	_add_prop_collision(post, posts, "ThornGatePosts", 0.90, 0.12)
 	_batch(branch, briar, branches, true, 310.0, "RootedThornGateBeams")
 	_batch(thorn, briar, thorns, true, 310.0, "RootedThornGateSpikes")
 
@@ -1064,6 +1150,7 @@ func _build_drowned_stones() -> void:
 		transforms.append(Transform3D(b,
 			Vector3(p.x, gy - 0.18 * s, p.y)))
 	_batch(stone, wet, transforms, true, 310.0)
+	_add_prop_collision(stone, transforms, "DrownedStones")
 
 ## HEARTWOOD: charred spires with ember seams and a slow drifting mote field.
 func _build_charred_spires() -> void:
@@ -1106,6 +1193,7 @@ func _build_charred_spires() -> void:
 		if i % 3 == 0 and tall_spots.size() < 5:
 			tall_spots.append(Vector3(p.x, gy + 2.6 * s, p.y))
 	_batch(spire, charred, trunks, true, 310.0)
+	_add_prop_collision(spire, trunks, "CharredSpires")
 	_batch(seam, ember, seams, false, 310.0)
 
 	for spot in tall_spots:
@@ -1188,5 +1276,6 @@ func _build_glowcaps() -> void:
 				Vector3(p.x, gy + 0.46 * s, p.y)))
 
 	_batch(stem, _mat(Color(0.58, 0.56, 0.66)), stems, false)
+	_add_prop_collision(stem, stems, "Glowcaps", 0.80, 0.10)
 	_batch(cap, _mat(Color(0.20, 0.42, 0.55), Color(0.45, 0.85, 1.0), 1.7),
 		caps, false)

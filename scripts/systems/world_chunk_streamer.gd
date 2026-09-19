@@ -735,12 +735,33 @@ func _build_shared_resources() -> void:
 	canopy.is_hemisphere = true
 
 	_tree_mesh = ArrayMesh.new()
+	# Base-anchored trunk with four low-poly limbs: the instance transform is
+	# the ground contact, so the trunk starts at y=0 (the old centered cylinder
+	# buried half the tree) and the limbs give the far silhouette real structure
+	# instead of a bare pole under a dome.
 	var trunk_surface := SurfaceTool.new()
-	trunk_surface.create_from(trunk_cyl, 0)
+	trunk_surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	trunk_surface.append_from(trunk_cyl, 0,
+		Transform3D(Basis(), Vector3(0, trunk_cyl.height * 0.5, 0)))
+	var limb := CylinderMesh.new()
+	limb.top_radius = 0.035
+	limb.bottom_radius = 0.10
+	limb.height = 1.5
+	limb.radial_segments = 5
+	limb.rings = 1
+	for limb_index in 4:
+		var azimuth := TAU * float(limb_index) / 4.0 + 0.35 * float(limb_index % 2)
+		var tilt := deg_to_rad(52.0 + 6.0 * float(limb_index % 2))
+		var limb_basis := Basis(Vector3.UP, azimuth) * Basis(Vector3.RIGHT, tilt)
+		var attach := Vector3(0.0, 1.45 + 0.38 * float(limb_index), 0.0)
+		trunk_surface.append_from(limb, 0, Transform3D(limb_basis,
+			attach + limb_basis * Vector3(0, limb.height * 0.5, 0)))
 	trunk_surface.commit(_tree_mesh)
 	_tree_mesh.surface_set_material(0, _tree_trunk_material)
 	var canopy_surface := SurfaceTool.new()
-	canopy_surface.create_from(canopy, 0)
+	canopy_surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	canopy_surface.append_from(canopy, 0,
+		Transform3D(Basis(), Vector3(0, 3.0, 0)))
 	canopy_surface.commit(_tree_mesh)
 	_tree_mesh.surface_set_material(1, _tree_canopy_material)
 
@@ -1263,6 +1284,9 @@ func _build_ruins(chunk: Node3D, min_world: Vector3, rng: RandomNumberGenerator)
 	group.name = "StreamRuins"
 	chunk.add_child(group)
 	var anchor := Vector3(rng.randf_range(6.0, 54.0), 0.0, rng.randf_range(6.0, 54.0))
+	# Streamed relief is heightmapped; a y=0 anchor buried or floated the ruins
+	# depending on the local swell, so every piece derives from the surface.
+	anchor.y = _surface_height(Vector2(min_world.x + anchor.x, min_world.z + anchor.z))
 	var wall_count := rng.randi_range(2, 3)
 	for i in wall_count:
 		var wall := MeshInstance3D.new()
@@ -1327,9 +1351,21 @@ func _build_pond(chunk: Node3D, min_world: Vector3, rng: RandomNumberGenerator) 
 	water.mesh = water_mesh
 	water.material_override = water_mat
 	water.name = "WaterBody"
+	# Sit the plane just above the lowest footprint corner so a rolling swell
+	# never pokes through the middle of the pool.
+	var half_x := half
+	var half_z := half * 0.7
+	var base := _surface_height(Vector2(min_world.x + center.x - half_x,
+		min_world.z + center.z - half_z))
+	base = minf(base, _surface_height(Vector2(min_world.x + center.x + half_x,
+		min_world.z + center.z - half_z)))
+	base = minf(base, _surface_height(Vector2(min_world.x + center.x - half_x,
+		min_world.z + center.z + half_z)))
+	base = minf(base, _surface_height(Vector2(min_world.x + center.x + half_x,
+		min_world.z + center.z + half_z)))
 	water.transform = Transform3D(
 		Basis(Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 1, 0)),
-		center + Vector3(0.0, 0.06, 0.0))
+		Vector3(center.x, base + 0.05, center.z))
 	group.add_child(water)
 	for s in rng.randi_range(6, 10):
 		var stone := MeshInstance3D.new()
@@ -1343,8 +1379,11 @@ func _build_pond(chunk: Node3D, min_world: Vector3, rng: RandomNumberGenerator) 
 		var ang := rng.randf() * TAU
 		var dist := half + rng.randf_range(-0.3, 0.9)
 		var stone_pos := Vector2(center.x + cos(ang) * dist, center.z + sin(ang) * dist)
-		stone.position = Vector3(stone_pos.x, 0.1, stone_pos.y)
-		stone.scale = Vector3.ONE * rng.randf_range(0.5, 1.2)
+		var stone_scale := rng.randf_range(0.5, 1.2)
+		var stone_world := Vector2(min_world.x + stone_pos.x, min_world.z + stone_pos.y)
+		stone.position = Vector3(stone_pos.x,
+			_surface_height(stone_world) + 0.10 * stone_scale, stone_pos.y)
+		stone.scale = Vector3.ONE * stone_scale
 		group.add_child(stone)
 
 ## ---- Public contract for tests ----

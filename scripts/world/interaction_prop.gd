@@ -28,6 +28,15 @@ func interact() -> void:
             handler.toggle_dungeon()
         "dungeon_exit":
             handler.toggle_dungeon()
+        # A door or an exit on any catalogued structure: the prop carries the
+        # structure id, so one interaction path serves every castle, house and
+        # pyramid instead of one hard-coded dungeon.
+        "structure":
+            if handler.has_method("toggle_structure"):
+                handler.toggle_structure(prop_id)
+        "structure_exit":
+            if handler.has_method("toggle_structure"):
+                handler.toggle_structure(prop_id)
 
 func mark_opened() -> void:
     opened = true

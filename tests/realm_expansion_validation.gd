@@ -96,14 +96,36 @@ func _run_validation() -> void:
     expansion.open_chest(chest, "mountain_cache")
     _assert_true(GameState.gold == collected_gold, "opened chest cannot spawn a second reward")
 
+    # Surface collision must park while inside: the realm's flat ground box is
+    # still solid behind the hidden terrain, and leaving it active lets the
+    # hero walk on that plane through lower rooms and stair flights.
+    var surface_ground := StaticBody3D.new()
+    surface_ground.name = "Terrain"
+    var ground_shape := CollisionShape3D.new()
+    var ground_box := BoxShape3D.new()
+    ground_box.size = Vector3(624, 1, 624)
+    ground_shape.shape = ground_box
+    surface_ground.add_child(ground_shape)
+    surface_ground.collision_layer = 32
+    surface_ground.collision_mask = 0
+    owner.add_child(surface_ground)
+
     var surface := hero.global_position
     expansion.toggle_dungeon()
     await get_tree().process_frame
     _assert_true(expansion.in_dungeon, "cave entrance enters the Embervault")
     _assert_true(hero.global_position.distance_to(Vector3(80, 0.3, 6.0)) < 0.1, "dungeon teleports hero to interior")
+    _assert_true(surface_ground.collision_layer == 0,
+        "surface collision parks while the hero is inside")
+    var dungeon_body := owner.get_node_or_null(
+        "RealmExpansion/EmbervaultInterior/InteriorCollision") as StaticBody3D
+    _assert_true(dungeon_body != null and (dungeon_body.collision_layer & 32) != 0,
+        "Embervault interior carries the camera collision layer")
     expansion.toggle_dungeon()
     _assert_true(not expansion.in_dungeon, "dungeon exit returns to surface")
     _assert_true(hero.global_position.distance_to(surface) < 0.1, "dungeon exit restores surface position")
+    _assert_true(surface_ground.collision_layer == 32,
+        "surface collision restores after leaving the Embervault")
 
     expansion.queue_free()
     owner.queue_free()

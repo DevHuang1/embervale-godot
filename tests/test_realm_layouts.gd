@@ -34,6 +34,22 @@ func _initialize() -> void:
 			if not ResourceLoader.exists(path):
 				failures += 1
 				print("FAIL: %s enemy scene missing: %s" % [realm, path])
+		# Realm elites carry their own creature rig so elite pockets read as a
+		# species, not the shared blob. Both fields must resolve for every realm.
+		var elite: Dictionary = Bestiary.variant_for(realm, "elite")
+		var elite_rig := str(elite.get("rig", ""))
+		# Read the static table directly: _any_model() consults the live
+		# SceneTree, which does not exist yet during _initialize().
+		var elite_path := str(CharacterRigLoader.EXTERNAL_MODEL_PATHS.get(elite_rig, ""))
+		if elite_path.is_empty() or not ResourceLoader.exists(elite_path, "PackedScene"):
+			failures += 1
+			print("FAIL: %s elite rig does not resolve: %s" % [realm, elite_rig])
+		if float(elite.get("rig_height", 0.0)) <= 0.0:
+			failures += 1
+			print("FAIL: %s elite rig_height is not positive" % realm)
+		if str(elite.get("kind", "")).is_empty() or int(elite.get("hp", 0)) <= 0:
+			failures += 1
+			print("FAIL: %s elite lost its kind/health" % realm)
 		for resource_value in resources:
 			var resource := resource_value as Dictionary
 			if not GameState.MATERIAL_DEFS.has(str(resource.get("id", ""))):
