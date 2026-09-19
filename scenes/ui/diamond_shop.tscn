@@ -12,66 +12,73 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 color = Color(0.002, 0.005, 0.010, 0.90)
 
-[node name="Center" type="CenterContainer" parent="Root"]
+[node name="Panel" type="PanelContainer" parent="Root"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 60.0
+offset_right = -40.0
+offset_bottom = -60.0
+grow_horizontal = 2
+grow_vertical = 2
 
-[node name="Panel" type="PanelContainer" parent="Root/Center"]
-custom_minimum_size = Vector2(660, 500)
-
-[node name="VBox" type="VBoxContainer" parent="Root/Center/Panel"]
+[node name="VBox" type="VBoxContainer" parent="Root/Panel"]
 theme_override_constants/separation = 12
 
-[node name="Header" type="HBoxContainer" parent="Root/Center/Panel/VBox"]
+[node name="Header" type="HBoxContainer" parent="Root/Panel/VBox"]
 layout_mode = 2
 
-[node name="Title" type="Label" parent="Root/Center/Panel/VBox/Header"]
+[node name="Title" type="Label" parent="Root/Panel/VBox/Header"]
 layout_mode = 2
 theme_type_variation = &"MenuTitle"
+theme_override_font_sizes/font_size = 30
 text = "THE GLINTMONGER'S CASE"
 size_flags_horizontal = 3
+clip_text = true
+text_overrun_behavior = 3
 theme_override_colors/font_color = Color(0.62, 0.85, 1, 1)
 
-[node name="DiamondsLabel" type="Label" parent="Root/Center/Panel/VBox/Header"]
+[node name="DiamondsLabel" type="Label" parent="Root/Panel/VBox/Header"]
 layout_mode = 2
 theme_type_variation = &"RowLabel"
 text = "DIAMONDS  0"
 
-[node name="Note" type="Label" parent="Root/Center/Panel/VBox"]
+[node name="Note" type="Label" parent="Root/Panel/VBox"]
 layout_mode = 2
 theme_type_variation = &"Subtitle"
 text = "Looks and voice only — never power. Scan packs stay unavailable until store setup is approved."
 horizontal_alignment = 1
+autowrap_mode = 2
 
-[node name="Scroll" type="ScrollContainer" parent="Root/Center/Panel/VBox"]
+[node name="Scroll" type="ScrollContainer" parent="Root/Panel/VBox"]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="ItemsVBox" type="VBoxContainer" parent="Root/Center/Panel/VBox/Scroll"]
+[node name="ItemsVBox" type="VBoxContainer" parent="Root/Panel/VBox/Scroll"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 10
 
-[node name="Message" type="Label" parent="Root/Center/Panel/VBox"]
+[node name="Message" type="Label" parent="Root/Panel/VBox"]
 layout_mode = 2
 theme_type_variation = &"Body"
 text = ""
 autowrap_mode = 2
 horizontal_alignment = 1
 
-[node name="Footer" type="HBoxContainer" parent="Root/Center/Panel/VBox"]
+[node name="Footer" type="HBoxContainer" parent="Root/Panel/VBox"]
 layout_mode = 2
 alignment = 1
 theme_override_constants/separation = 18
 
-[node name="UnequipAll" type="Button" parent="Root/Center/Panel/VBox/Footer"]
+[node name="UnequipAll" type="Button" parent="Root/Panel/VBox/Footer"]
 custom_minimum_size = Vector2(190, 50)
 layout_mode = 2
 text = "BACK TO VANILLA"
 
-[node name="Close" type="Button" parent="Root/Center/Panel/VBox/Footer"]
+[node name="Close" type="Button" parent="Root/Panel/VBox/Footer"]
 custom_minimum_size = Vector2(140, 50)
 layout_mode = 2
 text = "CLOSE"

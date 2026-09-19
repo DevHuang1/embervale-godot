@@ -17,6 +17,8 @@ const API_CLIENT := preload("res://scripts/systems/revenuecat_api_client.gd")
 
 const PLUGIN_NAME := "RevenueCatBridge"
 const SIGNAL_ACTIVE_ENTITLEMENTS := "active_entitlements"
+const SIGNAL_NON_SUBSCRIPTION_TRANSACTIONS := "non_subscription_transactions"
+const SIGNAL_PURCHASE_RESULT := "purchase_result"
 const SIGNAL_ERROR := "customer_info_error"
 
 ## The plugin's own await budget; StoreManager adds no second timeout.
@@ -38,6 +40,10 @@ func _init(singleton_override: Object = null) -> void:
 	if _singleton == null:
 		return
 	_singleton.connect(SIGNAL_ACTIVE_ENTITLEMENTS, _on_active_entitlements)
+	if _singleton.has_signal(SIGNAL_NON_SUBSCRIPTION_TRANSACTIONS):
+		_singleton.connect(SIGNAL_NON_SUBSCRIPTION_TRANSACTIONS, _on_non_subscription_transactions)
+	if _singleton.has_signal(SIGNAL_PURCHASE_RESULT):
+		_singleton.connect(SIGNAL_PURCHASE_RESULT, _on_purchase_result)
 	_singleton.connect(SIGNAL_ERROR, _on_error)
 
 func is_available() -> bool:
@@ -91,6 +97,59 @@ func fetch_active_entitlements() -> Dictionary:
 		return _failure(_error_status, _error)
 	return API_CLIENT.parse_active_entitlements(200, _payload)
 
+## Reads the customer's consumable transactions. Repeatable packs are keyed by
+## these transaction ids, because their entitlement stays active forever after
+## the first purchase. Calls are sequential: the read shares one pending slot.
+func fetch_non_subscription_transactions() -> Dictionary:
+	if _singleton == null:
+		return _transactions_failure("unavailable", "native_bridge_unavailable")
+	if not _singleton.has_method("getNonSubscriptionTransactions"):
+		return _transactions_failure("unsupported", "transactions_unsupported")
+	_pending = true
+	_payload = ""
+	_error = ""
+	_error_status = ""
+	_singleton.getNonSubscriptionTransactions()
+	await _wait_for_response()
+	if _pending:
+		_pending = false
+		return _transactions_failure("timeout", "native_timeout")
+	if not _error.is_empty():
+		return _transactions_failure(_error_status, _error)
+	return API_CLIENT.parse_non_subscription_transactions(200, _payload)
+
+## Starts a purchase for one product and awaits its outcome. Under a Test Store
+## key the SDK shows its simulated sheet, so the whole buy -> claim loop works
+## with no store account and no payment provider; under a real store key the
+## same call opens the store's own sheet. The result reports status only: what
+## was bought is re-read from the provider and claimed by the caller, so a
+## returned status can never grant by itself.
+func purchase(product_id: String) -> Dictionary:
+	var wanted := product_id.strip_edges()
+	if _singleton == null:
+		return _purchase_failure("unavailable", "native_bridge_unavailable", wanted)
+	if not _singleton.has_method("purchase"):
+		return _purchase_failure("unsupported", "purchase_unsupported", wanted)
+	if wanted.is_empty():
+		return _purchase_failure("invalid_product", "invalid_product", wanted)
+	_pending = true
+	_payload = ""
+	_error = ""
+	_error_status = ""
+	_singleton.purchase(wanted)
+	await _wait_for_response()
+	if _pending:
+		_pending = false
+		return _purchase_failure("timeout", "native_timeout", wanted)
+	if not _error.is_empty():
+		return _purchase_failure(_error_status, _error, wanted)
+	var result := API_CLIENT.parse_purchase_result(200, _payload)
+	if str(result.get("status", "")) == "error":
+		# Reuse the read vocabulary so the store UI reports offline, unconfigured
+		# and unauthorized purchases the same way it reports failed reads.
+		result["status"] = _status_for_code(str(result.get("error", "")))
+	return result
+
 func _wait_for_response() -> void:
 	var deadline := Time.get_ticks_msec() + int(REQUEST_TIMEOUT_SECONDS * 1000.0)
 	while _pending and Time.get_ticks_msec() < deadline:
@@ -100,6 +159,14 @@ func _wait_for_response() -> void:
 		await loop.process_frame
 
 func _on_active_entitlements(payload: String) -> void:
+	_payload = payload
+	_pending = false
+
+func _on_non_subscription_transactions(payload: String) -> void:
+	_payload = payload
+	_pending = false
+
+func _on_purchase_result(payload: String) -> void:
 	_payload = payload
 	_pending = false
 
@@ -124,3 +191,10 @@ func _status_for_code(code: String) -> String:
 
 func _failure(status: String, error: String) -> Dictionary:
 	return {"ok": false, "status": status, "error": error, "active": [] as Array[Dictionary]}
+
+func _purchase_failure(status: String, error: String, product_id: String) -> Dictionary:
+	return {"ok": false, "status": status, "error": error, "product_id": product_id}
+
+func _transactions_failure(status: String, error: String) -> Dictionary:
+	return {"ok": false, "status": status, "error": error,
+		"transactions": [] as Array[Dictionary]}

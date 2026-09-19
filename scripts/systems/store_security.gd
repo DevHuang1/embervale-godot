@@ -207,9 +207,41 @@ static func validate_provider_row(row: Dictionary) -> String:
 	var tier := WebStoreCatalog.tier_for_entitlement(entitlement_id)
 	if tier.is_empty():
 		return "uncatalogued_entitlement"
+	if str(tier.get("claim_grain", "")) == WebStoreCatalog.GRAIN_TRANSACTION:
+		# A repeatable consumable keeps its entitlement active forever, so an
+		# entitlement-keyed row would grant the first purchase twice and refuse
+		# every later one. Those rows are claimed from their transactions.
+		return "not_an_entitlement_pack"
 	var expiry := int(row.get("provider_expires_at", -2))
 	if str(row.get("provider_record_id", "")) \
 			!= WebStoreCatalog.record_id_for(entitlement_id, expiry):
+		return "record_id_mismatch"
+	if str(row.get("currency", "")) != "diamonds":
+		return "currency_mismatch"
+	if int(row.get("price", 0)) != int(tier.get("diamonds", 0)) \
+			or int(row.get("price", 0)) <= 0:
+		return "amount_mismatch"
+	if str(row.get("id", "")) != str(tier.get("id", "")):
+		return "tier_id_mismatch"
+	return ""
+
+## Validates a ledger row granted from a repeatable consumable. The transaction
+## id is the idempotency key, so a row whose record id does not match the
+## catalog's derivation is refused exactly like a forged entitlement row.
+static func validate_provider_transaction_row(row: Dictionary) -> String:
+	if str(row.get("provider", "")) != "revenuecat":
+		return "unknown_provider"
+	var product_id := str(row.get("provider_product", "")).strip_edges()
+	var tier := WebStoreCatalog.tier_for_product(product_id)
+	if tier.is_empty():
+		return "uncatalogued_product"
+	if str(tier.get("claim_grain", "")) != WebStoreCatalog.GRAIN_TRANSACTION:
+		return "not_a_consumable"
+	var transaction_id := str(row.get("provider_transaction", "")).strip_edges()
+	if transaction_id.is_empty():
+		return "missing_transaction"
+	if str(row.get("provider_record_id", "")) \
+			!= WebStoreCatalog.record_id_for_transaction(product_id, transaction_id):
 		return "record_id_mismatch"
 	if str(row.get("currency", "")) != "diamonds":
 		return "currency_mismatch"

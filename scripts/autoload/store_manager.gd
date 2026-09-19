@@ -30,9 +30,22 @@ const MAX_CLAIMS_PER_REFRESH := 8
 ## A single pack can never be worth more than this, whatever a body claims.
 const MAX_GRANT_DIAMONDS_PER_CLAIM := 10_000
 const CONFIG_PATH := "user://store.cfg"
-## Overridable so headless suites can exercise loading without touching the
-## developer's real store configuration.
+## Build-time defaults for targets with no environment (Android): the same
+## non-secret values as a `res://` RESOURCE compiled into the build. A plain
+## `.cfg` would not ship (the exporter only packs resources), which is why this
+## is a `StoreDefaults` resource and not another config file. It is gitignored so
+## a sandbox funnel URL never reaches the repository, it is read before the
+## device file so a debug device can still override it, and it carries no
+## identity at all: every install mints its own customer id.
+const DEFAULT_CONFIG_PATH := "res://store_defaults.tres"
+## Both paths are overridable so headless suites can exercise loading without
+## touching the developer's real store configuration.
 var config_path := CONFIG_PATH
+var default_config_path := DEFAULT_CONFIG_PATH
+## Editor and CI runs use the environment instead of the shipped file, so a
+## developer's local defaults can never change editor or test behavior. An
+## exported build is exactly the case that needs the file.
+var load_build_defaults := not OS.has_feature("editor")
 
 const ENV_PROJECT_ID := "EMBERVALE_REVENUECAT_PROJECT_ID"
 const ENV_DIRECT_SECRET := "EMBERVALE_REVENUECAT_SECRET"
@@ -224,30 +237,92 @@ func reload_from_environment() -> void:
 	availability_changed.emit(is_available())
 
 func load_config() -> void:
+	# Precedence is build defaults (res://) -> device file (user://) -> process
+	# environment (applied by reload_from_environment later). Each later source
+	# overrides per field; an empty field never clears an earlier source, while
+	# a present-but-invalid one fails closed and clears the field it attacked.
+	if load_build_defaults:
+		_apply_shipped_defaults(default_config_path)
+	_apply_config_file(config_path, true)
+	# Leave a consistent authority after loading: boot continues with the
+	# environment overlay, but a direct caller (tests, tools) must not observe
+	# configured fields next to a stale `none` authority.
+	_authority = _resolve_authority()
+
+## Re-validates the shipped resource over the current values, with the same
+## fail-closed rules as a stored file: a malformed or hostile value clears the
+## field it attacked instead of half-configuring the store.
+func _apply_shipped_defaults(path: String) -> void:
+	if not ResourceLoader.exists(path):
+		return
+	var defaults := ResourceLoader.load(path) as StoreDefaults
+	if defaults == null:
+		push_warning("StoreManager: ignored the shipped defaults because it is not a StoreDefaults resource.")
+		return
+	_apply_project(defaults.project_id)
+	_apply_funnel(defaults.funnel_url)
+	_apply_backend(defaults.backend_url)
+	_apply_native_key(defaults.native_api_key)
+
+func _apply_project(project_id: String) -> void:
+	var project := project_id.strip_edges()
+	if not project.is_empty():
+		_project_id = project
+
+func _apply_funnel(funnel_url: String) -> void:
+	var funnel := funnel_url.strip_edges()
+	if funnel.is_empty():
+		return
+	_funnel_url = funnel if StoreSecurity.validate_url(
+		funnel, StoreSecurity.ALLOWED_FUNNEL_HOSTS).is_empty() else ""
+	if _funnel_url.is_empty():
+		push_warning("StoreManager: ignored a shipped funnel URL that is not an allowed hosted link.")
+
+func _apply_backend(backend_url: String) -> void:
+	var backend := backend_url.strip_edges()
+	if backend.is_empty():
+		return
+	_backend_url = backend if StoreSecurity.validate_backend_url(backend).is_empty() else ""
+	if _backend_url.is_empty():
+		push_warning("StoreManager: ignored a shipped backend URL that is not a safe HTTPS endpoint.")
+
+func _apply_native_key(native_api_key: String) -> void:
+	var native_key := native_api_key.strip_edges()
+	if native_key.is_empty():
+		return
+	_native_api_key = native_key if StoreSecurity.validate_public_sdk_key(native_key).is_empty() else ""
+	if _native_api_key.is_empty():
+		push_warning("StoreManager: ignored a shipped key that is not a plausible public SDK key.")
+
+## Re-validates one store config file over the current values. A tampered,
+## hand-edited, or malformed value is dropped rather than trusted, so a bad key
+## or a hostile host can never half-configure the store.
+func _apply_config_file(path: String, allow_identity: bool) -> void:
 	var cfg := ConfigFile.new()
-	if cfg.load(config_path) != OK:
+	if cfg.load(path) != OK:
 		return
 	_project_id = str(cfg.get_value("store", "project_id", _project_id)).strip_edges()
-	_customer_id = str(cfg.get_value("store", "customer_id", _customer_id)).strip_edges()
-	# A stored configuration is re-validated on load: a tampered or hand-edited
-	# file must fail closed exactly like a rejected configure() call, and a
-	# rejected value is dropped rather than trusted. No value is ever echoed.
+	if allow_identity:
+		var identity := str(cfg.get_value("store", "customer_id", _customer_id)).strip_edges()
+		if not identity.is_empty():
+			_customer_id = identity
 	var funnel := str(cfg.get_value("store", "funnel_url", "")).strip_edges()
-	_funnel_url = funnel if funnel.is_empty() \
-		or StoreSecurity.validate_url(funnel, StoreSecurity.ALLOWED_FUNNEL_HOSTS).is_empty() else ""
-	if not funnel.is_empty() and _funnel_url.is_empty():
-		push_warning("StoreManager: ignored a stored funnel URL that is not an allowed hosted link.")
+	if not funnel.is_empty():
+		_funnel_url = funnel if StoreSecurity.validate_url(
+			funnel, StoreSecurity.ALLOWED_FUNNEL_HOSTS).is_empty() else ""
+		if _funnel_url.is_empty():
+			push_warning("StoreManager: ignored a stored funnel URL that is not an allowed hosted link.")
 	var backend := str(cfg.get_value("store", "backend_url", "")).strip_edges()
-	_backend_url = backend if backend.is_empty() \
-		or StoreSecurity.validate_backend_url(backend).is_empty() else ""
-	if not backend.is_empty() and _backend_url.is_empty():
-		push_warning("StoreManager: ignored a stored backend URL that is not a safe HTTPS endpoint.")
-	# The public SDK key is designed to ship, so it may live in this file.
+	if not backend.is_empty():
+		_backend_url = backend if StoreSecurity.validate_backend_url(backend).is_empty() else ""
+		if _backend_url.is_empty():
+			push_warning("StoreManager: ignored a stored backend URL that is not a safe HTTPS endpoint.")
+	# The public SDK key is designed to ship, so it may live in either file.
 	var native_key := str(cfg.get_value("store", "native_api_key", "")).strip_edges()
-	_native_api_key = native_key if native_key.is_empty() \
-		or StoreSecurity.validate_public_sdk_key(native_key).is_empty() else ""
-	if not native_key.is_empty() and _native_api_key.is_empty():
-		push_warning("StoreManager: ignored a stored key that is not a plausible public SDK key.")
+	if not native_key.is_empty():
+		_native_api_key = native_key if StoreSecurity.validate_public_sdk_key(native_key).is_empty() else ""
+		if _native_api_key.is_empty():
+			push_warning("StoreManager: ignored a stored key that is not a plausible public SDK key.")
 
 func save_config() -> void:
 	var cfg := ConfigFile.new()
@@ -257,6 +332,12 @@ func save_config() -> void:
 	cfg.set_value("store", "customer_id", _customer_id)
 	cfg.set_value("store", "native_api_key", _native_api_key)
 	cfg.save(config_path)
+
+## True when this build has a hosted funnel at all. An SDK-only build has no
+## funnel, so the UI drops the browser row instead of offering a button that can
+## only fail.
+func has_hosted_checkout() -> bool:
+	return not _funnel_url.is_empty()
 
 ## The hosted checkout URL for this customer. Exposed so the release audit and
 ## device QA can verify the App User ID hand-off without opening a browser.
@@ -281,22 +362,73 @@ func request_refresh() -> void:
 
 ## Confirms entitlements with the authority, then claims any ungranted pack.
 ## Returns `{ok, status, error, active, granted, skipped, diamonds}`.
-func refresh_and_claim() -> Dictionary:
-	return await _refresh_flow()
+## `force` skips the refresh throttle: a purchase that just completed must be
+## claimable immediately, even if the shop refreshed seconds earlier.
+func refresh_and_claim(force: bool = false) -> Dictionary:
+	return await _refresh_flow(force)
 
-func _refresh_flow() -> Dictionary:
+## Starts a purchase through the native SDK and claims whatever it delivered.
+## The Test Store answers this with its simulated sheet, so the whole
+## buy -> provider read -> exactly-once claim loop can be demonstrated and
+## tested with no store account and no payment provider. Returns
+## `{ok, status, error, product_id, granted, diamonds}`.
+func buy(product_id: String) -> Dictionary:
+	var wanted := product_id.strip_edges()
+	var result := {"ok": false, "purchased": false, "status": "unavailable",
+		"error": "unavailable", "product_id": wanted, "granted": 0, "diamonds": 0}
+	if wanted.is_empty():
+		result["status"] = "invalid_product"
+		result["error"] = "invalid_product"
+		return result
+	if _authority != Authority.NATIVE or native_bridge == null \
+			or not native_bridge.is_available():
+		return result
+	var purchase: Dictionary = await native_bridge.purchase(wanted)
+	result["status"] = str(purchase.get("status", "error"))
+	result["error"] = str(purchase.get("error", "purchase_failed"))
+	if not bool(purchase.get("ok", false)):
+		return result
+	result["purchased"] = true
+	# The purchase's own return value never grants: the claim re-reads provider
+	# state, so only a purchase the provider reports is delivered.
+	var claimed: Dictionary = await refresh_and_claim(true)
+	result["granted"] = int(claimed.get("granted", 0))
+	result["diamonds"] = int(claimed.get("diamonds", 0))
+	result["ok"] = bool(claimed.get("ok", false))
+	if not result["ok"]:
+		# The purchase stands even when the follow-up read failed; the status
+		# explains why delivery is still pending.
+		result["status"] = str(claimed.get("status", "claim_failed"))
+		result["error"] = str(claimed.get("error", "claim_failed"))
+	return result
+
+func _refresh_flow(force: bool = false) -> Dictionary:
 	var result := {"ok": false, "status": "unconfigured", "error": "unconfigured",
 		"active": 0, "granted": 0, "skipped": 0, "diamonds": 0}
 	if not is_available():
 		_finish(result)
 		return result
 	if _in_flight:
-		result["status"] = "busy"
-		result["error"] = "busy"
-		_finish(result)
-		return result
+		if not force:
+			result["status"] = "busy"
+			result["error"] = "busy"
+			_finish(result)
+			return result
+		# A completed purchase must not be dropped because a periodic refresh
+		# happened to be running: wait for it, then re-read.
+		var wait_until := Time.get_ticks_msec() + int(REFRESH_TIMEOUT_SECONDS * 1000.0)
+		while _in_flight and Time.get_ticks_msec() < wait_until:
+			var loop := Engine.get_main_loop() as SceneTree
+			if loop == null:
+				break
+			await loop.process_frame
+		if _in_flight:
+			result["status"] = "busy"
+			result["error"] = "busy"
+			_finish(result)
+			return result
 	var now := Time.get_ticks_msec()
-	if now - _last_refresh_ms < int(MIN_REFRESH_INTERVAL_SECONDS * 1000.0):
+	if not force and now - _last_refresh_ms < int(MIN_REFRESH_INTERVAL_SECONDS * 1000.0):
 		result["status"] = "rate_limited"
 		result["error"] = "rate_limited"
 		_finish(result)
@@ -316,6 +448,15 @@ func _refresh_flow() -> Dictionary:
 		result["granted"] = int(claimed.get("granted", 0))
 		result["skipped"] = int(claimed.get("skipped", 0))
 		result["diamonds"] = int(claimed.get("diamonds", 0))
+		var txn_transport := await _fetch_non_subscription_transactions()
+		if bool(txn_transport.get("ok", false)):
+			var transactions: Array[Dictionary] = txn_transport.get(
+				"transactions", [] as Array[Dictionary])
+			result["transactions"] = transactions.size()
+			var txn_claimed := claim_transactions(transactions)
+			result["granted"] = int(result["granted"]) + int(txn_claimed.get("granted", 0))
+			result["skipped"] = int(result["skipped"]) + int(txn_claimed.get("skipped", 0))
+			result["diamonds"] = int(result["diamonds"]) + int(txn_claimed.get("diamonds", 0))
 		result["ok"] = true
 	_in_flight = false
 	_finish(result)
@@ -333,6 +474,12 @@ func claim(active: Array[Dictionary]) -> Dictionary:
 		var tier := WebStoreCatalog.tier_for_entitlement(entitlement_id)
 		if tier.is_empty():
 			skipped += 1
+			continue
+		if str(tier.get("claim_grain", "")) == WebStoreCatalog.GRAIN_TRANSACTION:
+			# A repeatable consumable's entitlement never lapses, so an active
+			# entitlement is not a purchase event. Those packs are claimed from
+			# the transaction list; claiming here would double-grant the first
+			# purchase and refuse every later one.
 			continue
 		var expiry := int(entry.get("expires_at_ms", RevenueCatApiClient.LIFETIME_EXPIRY_MS))
 		# The tier's own claim grain decides the key, so a later body carrying a
@@ -366,6 +513,65 @@ func claim(active: Array[Dictionary]) -> Dictionary:
 		_purchase_sync.provider_purchase_finished()
 		purchase_claimed.emit(granted, diamonds)
 	return {"granted": granted, "skipped": skipped, "diamonds": diamonds}
+
+## Records every ungranted consumable transaction through the gameplay ledger.
+## Each transaction grants once, so buying the same pack again delivers again
+## while re-reading the same transaction never does.
+func claim_transactions(transactions: Array[Dictionary]) -> Dictionary:
+	var grants: Array[Dictionary] = []
+	var skipped := 0
+	for entry in transactions:
+		if grants.size() >= MAX_CLAIMS_PER_REFRESH:
+			break
+		var product_id := str(entry.get("product_id", "")).strip_edges()
+		var transaction_id := str(entry.get("transaction_id", "")).strip_edges()
+		var tier := WebStoreCatalog.tier_for_product(product_id)
+		if tier.is_empty() or transaction_id.is_empty() \
+				or str(tier.get("claim_grain", "")) != WebStoreCatalog.GRAIN_TRANSACTION:
+			skipped += 1
+			continue
+		var record_id := WebStoreCatalog.claim_record_id_for_transaction(tier, transaction_id)
+		var game_state := _game_state()
+		if game_state != null and game_state.is_provider_claim_recorded(record_id):
+			skipped += 1
+			continue
+		var grant_diamonds := int(tier.get("diamonds", 0))
+		if grant_diamonds <= 0 or grant_diamonds > MAX_GRANT_DIAMONDS_PER_CLAIM:
+			skipped += 1
+			continue
+		grants.append({
+			"id": str(tier.get("id", "")),
+			"kind": "provider_embermarks",
+			"diamonds": grant_diamonds,
+			"provider": "revenuecat",
+			"provider_record_id": record_id,
+			"provider_transaction": transaction_id,
+			"provider_product": product_id,
+		})
+	var granted := 0
+	var diamonds := 0
+	var game_state := _game_state()
+	if not grants.is_empty() and game_state != null:
+		var outcome: Dictionary = game_state.grant_provider_entitlements(grants)
+		granted = int(outcome.get("granted", 0))
+		diamonds = int(outcome.get("diamonds", 0))
+	if granted > 0:
+		_purchase_sync.provider_purchase_finished()
+		purchase_claimed.emit(granted, diamonds)
+	return {"granted": granted, "skipped": skipped, "diamonds": diamonds}
+
+## Consumable transactions exist only where the authority can see the store
+## purchase list. The reference backend speaks entitlements only, so it reports
+## `unsupported` rather than pretending the customer has no purchases.
+func _fetch_non_subscription_transactions() -> Dictionary:
+	if _authority == Authority.NATIVE:
+		if native_bridge == null or not native_bridge.is_available():
+			return {"ok": false, "status": "unavailable",
+				"error": "native_bridge_unavailable",
+				"transactions": [] as Array[Dictionary]}
+		return await native_bridge.fetch_non_subscription_transactions()
+	return {"ok": false, "status": "unsupported",
+		"error": "transactions_unsupported", "transactions": [] as Array[Dictionary]}
 
 func _fetch_active_entitlements() -> Dictionary:
 	if _authority == Authority.BACKEND:

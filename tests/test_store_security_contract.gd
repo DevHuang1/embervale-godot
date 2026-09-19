@@ -35,6 +35,7 @@ func _run() -> void:
 	_test_engine_redirects_disabled()
 	_test_no_secret_in_repository()
 	_test_no_secret_in_log_calls()
+	_test_build_defaults_stay_out_of_the_repository()
 
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCRATCH_SAVE))
 	if not _failures.is_empty():
@@ -154,13 +155,20 @@ func _test_redaction() -> void:
 		"redaction must not reveal a leading run of the credential")
 
 func _test_claim_grain() -> void:
-	var one_time: Dictionary = CATALOG.tier_for_entitlement("embermarks_cache")
-	_check(str(one_time.get("claim_grain", "")) == CATALOG.GRAIN_ONE_TIME,
-		"a pack tier must declare the one-time claim grain")
-	var key_a := CATALOG.claim_record_id(one_time, -1)
-	var key_b := CATALOG.claim_record_id(one_time, 4_000_000_000_000)
-	_check(key_a == key_b,
-		"a one-time pack must keep one claim key across different expiries")
+	var pack: Dictionary = CATALOG.tier_for_entitlement("embermarks_cache")
+	_check(str(pack.get("claim_grain", "")) == CATALOG.GRAIN_TRANSACTION,
+		"a repeatable pack must declare the transaction claim grain")
+	_check(CATALOG.claim_record_id(pack, -1).is_empty(),
+		"a consumable must have no entitlement claim key at all")
+	var key_a := CATALOG.record_id_for_transaction("embermarks_cache", "txn_a")
+	var key_b := CATALOG.record_id_for_transaction("embermarks_cache", "txn_b")
+	_check(key_a != key_b, "each transaction must key its own grant")
+	_check(key_a == CATALOG.record_id_for_transaction("embermarks_cache", "txn_a"),
+		"a transaction key must be stable across reads")
+	var one_time := {"entitlement_id": "one_shot", "claim_grain": CATALOG.GRAIN_ONE_TIME}
+	_check(CATALOG.claim_record_id(one_time, -1)
+			== CATALOG.claim_record_id(one_time, 4_000_000_000_000),
+		"a one-time tier must keep one claim key across different expiries")
 	var expiring := {"entitlement_id": "sub_tier", "claim_grain": CATALOG.GRAIN_EXPIRING}
 	_check(CATALOG.claim_record_id(expiring, 1) != CATALOG.claim_record_id(expiring, 2),
 		"an expiring tier must key on the expiry so a renewal grants once per period")
@@ -168,29 +176,44 @@ func _test_claim_grain() -> void:
 	_check(errors.is_empty(), "the catalog must validate: %s" % "; ".join(errors))
 
 func _test_provider_row_validation() -> void:
-	var tier: Dictionary = CATALOG.tier_for_entitlement("embermarks_pouch")
-	var row := _canonical_row(tier, -1)
-	_check(SECURITY.validate_provider_row(row).is_empty(), "a canonical provider row must validate")
+	var tier: Dictionary = CATALOG.tier_for_product("embermarks_pouch")
+	var row := _canonical_transaction_row(tier, "txn_row")
+	_check(SECURITY.validate_provider_transaction_row(row).is_empty(),
+		"a canonical transaction row must validate")
 	var wrong_amount := row.duplicate(true)
 	wrong_amount["price"] = int(tier.get("diamonds", 0)) + 10_000
-	_check(SECURITY.validate_provider_row(wrong_amount) == "amount_mismatch",
+	_check(SECURITY.validate_provider_transaction_row(wrong_amount) == "amount_mismatch",
 		"an inflated amount must be rejected")
 	var forged_id := row.duplicate(true)
-	forged_id["provider_record_id"] = "revenuecat:embermarks_pouch:forged"
-	_check(SECURITY.validate_provider_row(forged_id) == "record_id_mismatch",
-		"a fabricated record id must be rejected")
+	forged_id["provider_record_id"] = "revenuecat:embermarks_pouch:txn:forged"
+	_check(SECURITY.validate_provider_transaction_row(forged_id) == "record_id_mismatch",
+		"a fabricated transaction record id must be rejected")
+	var missing_txn := row.duplicate(true)
+	missing_txn["provider_transaction"] = ""
+	_check(SECURITY.validate_provider_transaction_row(missing_txn) == "missing_transaction",
+		"a transaction row without a transaction id must be rejected")
 	var wrong_provider := row.duplicate(true)
 	wrong_provider["provider"] = "other_provider"
-	_check(SECURITY.validate_provider_row(wrong_provider) == "unknown_provider",
+	_check(SECURITY.validate_provider_transaction_row(wrong_provider) == "unknown_provider",
 		"an unknown provider must be rejected")
 	var uncatalogued := row.duplicate(true)
-	uncatalogued["provider_entitlement"] = "unlisted_pack"
-	_check(SECURITY.validate_provider_row(uncatalogued) == "uncatalogued_entitlement",
-		"an uncatalogued entitlement must be rejected")
+	uncatalogued["provider_product"] = "unlisted_pack"
+	_check(SECURITY.validate_provider_transaction_row(uncatalogued) == "uncatalogued_product",
+		"an uncatalogued product must be rejected")
 	var wrong_currency := row.duplicate(true)
 	wrong_currency["currency"] = "gold"
-	_check(SECURITY.validate_provider_row(wrong_currency) == "currency_mismatch",
+	_check(SECURITY.validate_provider_transaction_row(wrong_currency) == "currency_mismatch",
 		"a non-diamond payout must be rejected")
+	# The same pack cannot be claimed through its (permanently active) entitlement.
+	var entitlement_row := {
+		"id": str(tier.get("id", "")), "kind": "provider_embermarks",
+		"price": int(tier.get("diamonds", 0)), "currency": "diamonds",
+		"provider": "revenuecat",
+		"provider_record_id": "revenuecat:embermarks_pouch:one_time",
+		"provider_entitlement": "embermarks_pouch", "provider_expires_at": -1,
+	}
+	_check(SECURITY.validate_provider_row(entitlement_row) == "not_an_entitlement_pack",
+		"an entitlement-keyed row for a consumable must be refused")
 
 func _test_header_injection() -> void:
 	var headers := PackedStringArray(["Accept: application/json"])
@@ -237,15 +260,15 @@ func _test_ledger_tamper_rejected_on_load() -> void:
 		if str(entry.get("id", "")) == str(tier.get("id", "")):
 			_check(not entry.has("provider_record_id"),
 				"an inconsistent provider row must lose its provider fields on load")
-	# A real claim for the same tier must still be granted after the forgery.
+	# A real purchase of the same tier must still be granted after the forgery.
 	var store := get_root().get_node_or_null("StoreManager") as StoreManager
 	if store == null:
 		_failures.append("StoreManager autoload is missing")
 		return
-	var claimed: Dictionary = store.claim([
-		{"entitlement_id": "embermarks_cache", "expires_at_ms": -1}])
+	var claimed: Dictionary = store.claim_transactions([
+		{"transaction_id": "txn_after_forgery", "product_id": "embermarks_cache"}])
 	_check(int(claimed.get("granted", 0)) == 1,
-		"a forged row must not block a legitimate claim")
+		"a forged row must not block a legitimate purchase")
 
 func _test_export_carries_no_secret() -> void:
 	var gs := _game_state()
@@ -276,6 +299,21 @@ func _test_no_secret_in_repository() -> void:
 	_check(leaks.is_empty(),
 		"no tracked source or document may contain a secret-shaped value: %s" % ", ".join(leaks))
 
+## The shipped defaults may carry a sandbox funnel URL, which must never be
+## committable, and the loader must read the same file the ignore rule covers.
+func _test_build_defaults_stay_out_of_the_repository() -> void:
+	var ignore := FileAccess.get_file_as_string("res://.gitignore")
+	_check(ignore.contains("store_defaults.tres"),
+		"the build defaults resource must be gitignored (store_defaults.tres)")
+	var source := FileAccess.get_file_as_string("res://scripts/autoload/store_manager.gd")
+	_check(source.contains("res://store_defaults.tres"),
+		"the shipped defaults path must match the gitignored resource name")
+	_check(source.contains("ResourceLoader.exists"),
+		"the shipped defaults must load as a resource (a .cfg would not be exported)")
+	var defaults := StoreDefaults.new()
+	_check(not ("customer_id" in defaults),
+		"the shipped defaults resource must have no identity field")
+
 func _test_no_secret_in_log_calls() -> void:
 	for path in ["res://scripts/autoload/store_manager.gd",
 			"res://scripts/systems/revenuecat_api_client.gd",
@@ -296,7 +334,7 @@ func _scan_directory(path: String, leaks: Array[String]) -> void:
 		return
 	for file_name in dir.get_files():
 		var extension := file_name.get_extension().to_lower()
-		if extension not in ["gd", "md", "cfg", "json", "tscn", "gdshader"]:
+		if extension not in ["gd", "md", "cfg", "tres", "json", "tscn", "gdshader"]:
 			continue
 		var full_path := "%s%s" % [path, file_name]
 		var text := FileAccess.get_file_as_string(full_path)
@@ -306,6 +344,19 @@ func _scan_directory(path: String, leaks: Array[String]) -> void:
 		if str(sub).begins_with(".") or str(sub) == "addons":
 			continue
 		_scan_directory("%s%s/" % [path, sub], leaks)
+
+func _canonical_transaction_row(tier: Dictionary, transaction_id: String) -> Dictionary:
+	var product_id := str(tier.get("product_id", tier.get("entitlement_id", "")))
+	return {
+		"id": str(tier.get("id", "")),
+		"kind": "provider_embermarks",
+		"price": int(tier.get("diamonds", 0)),
+		"currency": "diamonds",
+		"provider": "revenuecat",
+		"provider_record_id": CATALOG.record_id_for_transaction(product_id, transaction_id),
+		"provider_transaction": transaction_id,
+		"provider_product": product_id,
+	}
 
 func _canonical_row(tier: Dictionary, expires_at_ms: int) -> Dictionary:
 	var entitlement_id := str(tier.get("entitlement_id", ""))

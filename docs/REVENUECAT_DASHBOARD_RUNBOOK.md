@@ -3,6 +3,9 @@
 Everything the code expects, in the order the dashboard wants it. Follow Path A
 unless you already have products in Stripe.
 
+> No Stripe? Use the Android SDK path in `REVENUECAT_ANDROID_SDK.md`; the steps
+> below are for the hosted web funnel.
+
 Target: **3 one-time products → 3 entitlements → 1 offering → 1 purchase link.**
 Roughly 20–30 minutes. Free (RevenueCat's free tier covers this; Stripe charges
 nothing until money actually moves).
@@ -61,6 +64,54 @@ Same shape, different order: create products and prices in **Stripe** → in
 RevenueCat create a *Stripe* web config → *Product catalog → Products* →
 select the Stripe config → **Import** → pick products and prices → then steps
 5–9 above (entitlements, attach, offering, purchase link).
+
+## Where each value goes
+
+| Value | Desktop / editor QA | Exported Android build |
+|---|---|---|
+| project id (`proj...`) | `EMBERVALE_REVENUECAT_PROJECT_ID` | written into `res://store_defaults.tres` |
+| funnel base URL | `EMBERVALE_STORE_FUNNEL_URL` | written into `res://store_defaults.tres` |
+| public SDK key (`goog_...`) | `EMBERVALE_REVENUECAT_PUBLIC_KEY` | written into `res://store_defaults.tres` |
+| secret key (`sk_...`) | `EMBERVALE_REVENUECAT_SECRET` (never shipped) | — not allowed |
+| App User ID (`ev_...`) | `user://store.cfg` (auto-minted) | `user://store.cfg` (auto-minted) |
+
+For a device build, write the shipped defaults **before exporting** (gitignored,
+ignored by editor/CI runs, and a **resource** because the exporter does not pack
+plain files):
+
+```sh
+EMBERVALE_REVENUECAT_PROJECT_ID="projXXXXXXXX" \
+EMBERVALE_STORE_FUNNEL_URL="https://signup.cat/<link_id>" \
+EMBERVALE_REVENUECAT_PUBLIC_KEY="goog_XXXXXXXX" \
+godot --headless --path . --script tools/write_store_defaults.gd
+# -> STORE DEFAULTS WRITTEN   (remove again with: -- --clear)
+```
+
+## On-device check (native reader)
+
+The native authority only resolves where the Android plugin exists, so verify it
+on a device:
+
+1. Write `store_defaults.tres` (above) with the public SDK key. The
+   `RevenueCatBridge` plugin is already enabled in `project.godot`, and the
+   Android preset carries `gradle_build/min_sdk="24"` and
+   `permissions/internet=true`.
+2. For a QA build only, point the run main scene at
+   `res://tests/android_native_store_check.tscn` (*Project Settings →
+   Application → Run → Main Scene*, or a QA export preset). Never put that in a
+   release preset.
+3. Install and read the verdict:
+
+```sh
+adb install -r <qa-build>.apk
+adb shell monkey -p com.devhuang1.embervale -c android.intent.category.LAUNCHER 1
+adb logcat -d | grep QA_NATIVE
+```
+
+Expected: `QA_NATIVE authority=native available=true`, then either
+`QA_NATIVE RESULT OK` after a refresh line, or `FAIL <stage>`
+(`store_unavailable`, `refresh`, …). Start with a RevenueCat **Test Store key**:
+the SDK then simulates purchases without any Play Console product.
 
 ## Verify
 

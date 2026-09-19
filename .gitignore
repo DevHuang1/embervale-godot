@@ -41,6 +41,9 @@ user_*.cfg
 .env.local
 *.key
 store.local.cfg
+# Shipped store defaults resource (may carry a sandbox funnel URL/key; never
+# committed). Written by tools/write_store_defaults.gd before an export.
+store_defaults.tres
 
 # Hackathon plan (keep untracked)
 # Stray local junk (crash dump + downloaded reference image)
@@ -74,3 +77,7 @@ addons/godot_mcp/cache/
 
 # Gradle local cache (android-plugin builds regenerate it)
 android-plugin/.gradle/
+
+# Scratch probes from local debugging sessions
+tests/_tmp_*.gd
+tests/_tmp_*.gd.uid

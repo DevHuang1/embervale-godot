@@ -32,6 +32,12 @@ func _run() -> void:
 	var funnel_url := OS.get_environment("EMBERVALE_STORE_FUNNEL_URL").strip_edges()
 
 	print("=== Embervale x RevenueCat setup check ===")
+	# With no environment at all, validate the shipped device defaults instead:
+	# an APK gets its non-secret config from res://store_defaults.cfg, and that
+	# file can be checked offline before a build (see the dashboard runbook).
+	if project_id.is_empty() and secret.is_empty() and customer_id.is_empty():
+		if _check_shipped_defaults():
+			return
 	_check_inputs(project_id, secret, customer_id, funnel_url)
 	if not _failures.is_empty():
 		_report()
@@ -46,6 +52,57 @@ func _run() -> void:
 		print("  0 active entitlements. The customer exists but owns nothing yet — " +
 			"complete a sandbox purchase or grant a promotional entitlement.")
 	_report()
+
+## Offline check of the resource an exported Android build actually reads.
+## Shapes only: no secret is needed, nothing is written, and network is not
+## touched. Returns false when the file does not exist, so the environment
+## check runs.
+func _check_shipped_defaults() -> bool:
+	const PATH := "res://store_defaults.tres"
+	if not ResourceLoader.exists(PATH):
+		return false
+	var defaults := load(PATH) as StoreDefaults
+	if defaults == null:
+		_failures.append("Shipped defaults are not a StoreDefaults resource.")
+		_report()
+		return true
+	print("  device defaults: %s" % PATH)
+	var project_id := defaults.project_id.strip_edges()
+	var funnel_url := defaults.funnel_url.strip_edges()
+	var native_key := defaults.native_api_key.strip_edges()
+	print("  project  : %s" % ("set" if not project_id.is_empty() else "absent"))
+	print("  checkout : %s" % ("set" if not funnel_url.is_empty() else "absent"))
+	print("  identity : device-minted (never shipped)")
+	if not project_id.is_empty():
+		var problem := SECURITY.validate_project_id(project_id)
+		if not problem.is_empty():
+			_failures.append("Shipped project_id is rejected (%s)." % problem)
+	# SDK-only builds are valid: the native reader needs no funnel and no
+	# project id. A funnel is optional and only checked when present.
+	if not funnel_url.is_empty():
+		var problem := SECURITY.validate_url(funnel_url, SECURITY.ALLOWED_FUNNEL_HOSTS)
+		if not problem.is_empty():
+			_failures.append("Shipped funnel_url is rejected (%s)." % problem)
+	if not native_key.is_empty():
+		var problem := SECURITY.validate_public_sdk_key(native_key)
+		if not problem.is_empty():
+			_failures.append("Shipped native_api_key is rejected (%s)." % problem)
+	if funnel_url.is_empty() and native_key.is_empty():
+		_failures.append("Shipped defaults carry neither a native_api_key nor a funnel_url; "
+			+ "the build cannot reach RevenueCat.")
+	if "customer_id" in defaults:
+		_failures.append("Shipped defaults must not carry a customer_id; the device mints its own.")
+	for leak in SECURITY.find_secret_leaks(FileAccess.get_file_as_string(PATH)):
+		_failures.append("Shipped defaults contain a secret-shaped value (%s)." % leak)
+	if _failures.is_empty():
+		print("SHIPPED DEFAULTS VALID")
+		quit(0)
+		return true
+	for failure in _failures:
+		print("FAIL: %s" % failure)
+	print("SHIPPED DEFAULTS INVALID (%d)" % _failures.size())
+	quit(1)
+	return true
 
 func _check_inputs(project_id: String, secret: String, customer_id: String,
 		funnel_url: String) -> void:

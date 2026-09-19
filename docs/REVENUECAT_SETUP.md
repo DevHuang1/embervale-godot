@@ -7,13 +7,22 @@ customer owns and records any new pack in the gameplay ledger.
 This document is the operator's guide: dashboard setup, device configuration,
 the demo script, and the limits a reviewer should know about.
 
+> Selling through the native Android SDK (Google Play) instead of the hosted
+> funnel? Use `REVENUECAT_ANDROID_SDK.md` — this document covers the web path.
+
 ## Why web first
 
-There is no official RevenueCat SDK for Godot. A native bridge would mean a
-custom Android plugin wrapping `purchases-android` plus a Play Console test
-track. The web path needs none of that, satisfies the same requirement
-("the RevenueCat SDK powers at least one purchase"), and is fully testable
-headlessly. Native IAP remains a later, additive step behind the same seam.
+The web funnel is the shipping default and the demo path: it needs no store
+account, no native SDK, and no Play Console track, and it satisfies the
+mandatory requirement ("the RevenueCat SDK powers at least one purchase") while
+staying fully testable headlessly.
+
+A native Android bridge now exists behind the same seam as an additive step
+(`addons/revenuecat_bridge/` + `android-plugin/revenuecat_bridge/`): it
+configures the SDK with the **public** key, reads entitlements and consumable
+transactions, and can start a store purchase. It carries no secret, and the
+claim path it feeds is the same one the web funnel uses. Native store products
+(Play Console) are still an operator step; the web funnel is what ships.
 
 ## Architecture
 
@@ -26,10 +35,15 @@ StoreManager (autoload)  --------------------------------> gameplay ledger
     v
 EntitlementAuthority  (one of:)
     * BACKEND  -> BackendApiClient -> your server -> RevenueCat REST v2   [shipping]
+    * NATIVE   -> RevenueCatBridge (Android AAR, public SDK key)          [device]
     * DIRECT   -> RevenueCat REST v2 with a local secret key              [editor/debug only]
     v
 RevenueCatApiClient (pure request + response shaping, no HTTP, no credentials)
 ```
+
+`res://store_defaults.tres` (gitignored, shipped in the build, written by
+`tools/write_store_defaults.gd`) supplies the non-secret values on targets that
+have no environment, i.e. Android.
 
 Key properties:
 
@@ -126,10 +140,36 @@ environment only.
 | `EMBERVALE_REVENUECAT_SECRET` | `sk_...` — **editor/debug only**, local QA |
 
 **Environment variables exist on desktop and in the editor only.** Android does
-not pass them to the app, so the direct authority cannot be used on a device —
-by design. On-device and shipping runs use the backend authority, which holds no
-secret on the phone. Demo the purchase from a desktop/editor build, or stand up
-the proxy before demoing on Android.
+not pass them to the app, so an exported build reads the non-secret values from
+a shipped `res://store_defaults.tres` instead, written in one command:
+
+```sh
+EMBERVALE_REVENUECAT_PROJECT_ID="projXXXXXXXX" \
+EMBERVALE_STORE_FUNNEL_URL="https://signup.cat/<link_id>" \
+EMBERVALE_REVENUECAT_PUBLIC_KEY="goog_XXXXXXXX" \
+godot --headless --path . --script tools/write_store_defaults.gd
+```
+
+It is a **resource** on purpose: the exporter only packs resources, so a plain
+`.cfg` in the project root would silently not exist inside the APK.
+
+- **Precedence** is build defaults -> device file (`user://store.cfg`) ->
+  environment. Each later source overrides per field; an empty field never
+  clears an earlier source, while a malformed or hostile value fails closed and
+  clears the field it attacked.
+- **Identity never ships.** A `customer_id` in the defaults file is ignored —
+  every install mints its own `ev_...` id into `user://store.cfg`, so two
+  installs can never share one purchase history.
+- **Editor and CI ignore the file.** It is only read in an exported build, so a
+  developer's local defaults can never change editor or test behavior.
+- The file is **gitignored** (`store_defaults.tres`): a sandbox funnel URL must
+  never be committed, and `tests/test_store_security_contract.gd` fails the
+  build if the ignore rule is removed. The secret scanner also refuses a
+  `sk_...` value if one is ever pasted into it.
+
+With no store config the game plays exactly as before; the direct authority is
+editor/debug-only by design, and a device build uses the native reader, the
+backend proxy, or nothing at all.
 
 Direct-authority desktop QA (debug build):
 
@@ -207,8 +247,9 @@ save/load round trip that proves a claimed pack is not re-granted.
 - **Restore on a new device needs the account.** The device identity lives in
   `user://store.cfg`; without a login the same customer id is not recovered.
   Set an account so `AccountSession` supplies the id, or use Redemption Links.
-- **Native IAP is not wired.** StoreKit/Play Billing still go through a custom
-  Android plugin. Next Gen does not require a store release; the *Best Game* and
-  Grand Prize categories do.
+- **Native store products still need the Play Console.** The Android bridge is
+  wired (configure, read entitlements/transactions, start a purchase) and can be
+  exercised with a RevenueCat Test Store key on device without Play Console
+  products; real Play Billing needs the products published in the store track.
 - **The backend proxy does not exist yet.** Until it does, the direct authority
   covers device QA and the demo. Only use it with a debug export.

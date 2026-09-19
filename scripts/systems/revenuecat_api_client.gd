@@ -17,6 +17,7 @@ class_name RevenueCatApiClient
 
 const API_BASE := "https://api.revenuecat.com/v2"
 const MAX_ENTITLEMENTS := 100
+const MAX_TRANSACTIONS := 100
 const MAX_BODY_BYTES := 65_536
 ## A null `expires_at` means the entitlement never expires (one-time pack).
 const LIFETIME_EXPIRY_MS := -1
@@ -50,6 +51,98 @@ static func with_bearer(headers: PackedStringArray, token: String) -> PackedStri
 ## entitlement, already filtered against `now_ms` and capped. An entry whose
 ## expiry has already passed is never returned, so a stale cached body cannot
 ## resurrect a lapsed grant.
+## Parses the consumable transaction list emitted by the native plugin (and any
+## authority that speaks the same shape). Every row is a completed purchase, so
+## there is nothing to expire: the ledger's transaction key is what makes a
+## repeated read grant once and only once.
+static func parse_non_subscription_transactions(status_code: int, body: String) -> Dictionary:
+	var result := {"ok": false, "status": "", "error": "",
+		"transactions": [] as Array[Dictionary]}
+	if status_code != 200:
+		result["error"] = "provider_error" if status_code >= 500 else "http_error"
+		result["status"] = "http_%d" % status_code
+		return result
+	if body.length() > MAX_BODY_BYTES:
+		result["error"] = "response_too_large"
+		result["status"] = "http_200"
+		return result
+	var parsed := JSON.new()
+	if parsed.parse(body) != OK:
+		result["error"] = "malformed_response"
+		result["status"] = "http_200"
+		return result
+	var payload: Variant = parsed.data
+	if not payload is Dictionary:
+		result["error"] = "malformed_response"
+		result["status"] = "http_200"
+		return result
+	var items: Variant = (payload as Dictionary).get("items", null)
+	if not items is Array:
+		result["error"] = "malformed_response"
+		result["status"] = "http_200"
+		return result
+	var transactions: Array[Dictionary] = []
+	for raw in (items as Array):
+		if transactions.size() >= MAX_TRANSACTIONS:
+			break
+		if not raw is Dictionary:
+			continue
+		var transaction_id := str((raw as Dictionary).get("transaction_id", "")).strip_edges()
+		var product_id := str((raw as Dictionary).get("product_id", "")).strip_edges()
+		if transaction_id.is_empty() or product_id.is_empty():
+			continue
+		var purchased_at := 0
+		var raw_purchased: Variant = (raw as Dictionary).get("purchased_at", null)
+		if raw_purchased is int or raw_purchased is float:
+			purchased_at = int(raw_purchased)
+		transactions.append({
+			"transaction_id": transaction_id,
+			"product_id": product_id,
+			"purchased_at_ms": purchased_at,
+			"source": "non_subscription_transactions",
+		})
+	result["ok"] = true
+	result["status"] = "ok"
+	result["transactions"] = transactions
+	return result
+
+## Parses the native plugin's purchase outcome into `{ok, status, error,
+## product_id}`. A cancel is its own status rather than a failure, so the UI can
+## stay quiet when the customer simply closed the sheet.
+static func parse_purchase_result(status_code: int, body: String) -> Dictionary:
+	var result := {"ok": false, "status": "error", "error": "purchase_failed",
+		"product_id": ""}
+	if status_code != 200:
+		result["error"] = "provider_error" if status_code >= 500 else "http_error"
+		result["status"] = "http_%d" % status_code
+		return result
+	if body.length() > MAX_BODY_BYTES:
+		result["error"] = "response_too_large"
+		return result
+	var parsed := JSON.new()
+	if parsed.parse(body) != OK:
+		result["error"] = "malformed_response"
+		return result
+	var payload: Variant = parsed.data
+	if not payload is Dictionary:
+		result["error"] = "malformed_response"
+		return result
+	var data := payload as Dictionary
+	result["product_id"] = str(data.get("product_id", "")).strip_edges()
+	match str(data.get("status", "")).strip_edges().to_lower():
+		"purchased":
+			result["ok"] = true
+			result["status"] = "purchased"
+			result["error"] = ""
+		"cancelled":
+			result["status"] = "cancelled"
+			result["error"] = "cancelled"
+		_:
+			var code := str(data.get("code", "")).strip_edges().to_lower()
+			result["status"] = "error"
+			result["error"] = code if not code.is_empty() else "purchase_failed"
+	return result
+
 static func parse_active_entitlements(status_code: int, body: String,
 		now_ms: int = -1) -> Dictionary:
 	var result := {"ok": false, "status": "", "error": "", "active": [] as Array[Dictionary]}

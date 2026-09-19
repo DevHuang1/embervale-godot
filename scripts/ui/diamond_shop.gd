@@ -8,24 +8,32 @@ class_name DiamondShop
 ## compile it headlessly; the shop reads the same single source of truth.
 
 const ITEMS := preload("res://scripts/systems/diamond_catalog.gd").ITEMS
-const PURCHASE_STATES: Array[String] = ["unavailable", "pending", "failed",
-	"cancelled", "offline", "restoring", "confirmed"]
-var scan_purchase_state: String = "unavailable"
 var _store: Node = null
+## True while a native purchase sheet is open: the pack buttons stay disabled so
+## one sheet can never be stacked on another.
+var _buying := false
 
 @onready var game_state: GameState = GameState
 @onready var audio: AudioManager = AudioManager
-@onready var diamonds_label: Label = $Root/Center/Panel/VBox/Header/DiamondsLabel
-@onready var items_vbox: VBoxContainer = $Root/Center/Panel/VBox/Scroll/ItemsVBox
-@onready var message_label: Label = $Root/Center/Panel/VBox/Message
-@onready var close_button: Button = $Root/Center/Panel/VBox/Footer/Close
-@onready var unequip_button: Button = $Root/Center/Panel/VBox/Footer/UnequipAll
+@onready var diamonds_label: Label = $Root/Panel/VBox/Header/DiamondsLabel
+@onready var items_vbox: VBoxContainer = $Root/Panel/VBox/Scroll/ItemsVBox
+@onready var message_label: Label = $Root/Panel/VBox/Message
+@onready var close_button: Button = $Root/Panel/VBox/Footer/Close
+@onready var unequip_button: Button = $Root/Panel/VBox/Footer/UnequipAll
+
+## The panel was a fixed 660 px wide inside a CenterContainer, but the pack row
+## asked for three side-by-side buttons and blew the minimum width past the
+## phone frame, cutting the title and the footer off both edges. The frame keeps
+## the surface on-screen; the pack row below now stacks instead of stretching.
+func _apply_responsive_frame() -> void:
+	UiKit.apply_menu_frame(get_node_or_null("Root/Panel") as Control,
+		get_viewport().get_visible_rect().size, 40.0, 60.0)
 
 func _ready() -> void:
 	visible = false
 	process_mode = Node.PROCESS_MODE_ALWAYS  # stay interactive while the world is frozen
 	# The Glintmonger's case reads as a warm display sheet over the dim.
-	UiKit.apply_parchment($Root/Center/Panel)
+	UiKit.apply_parchment($Root/Panel)
 	UiKit.style_secondary_button(close_button)
 	UiKit.style_secondary_button(unequip_button)
 	close_button.pressed.connect(close)
@@ -47,15 +55,6 @@ func open() -> void:
 	visible = true
 	_refresh()
 	audio.play_ui_blip()
-
-func set_scan_purchase_state(state: String) -> bool:
-	var normalized := state.strip_edges().to_lower()
-	if normalized not in PURCHASE_STATES:
-		return false
-	scan_purchase_state = normalized
-	if visible:
-		_refresh()
-	return true
 
 var _freeze_was_visible := false
 var _freeze_held := false
@@ -80,6 +79,9 @@ func close() -> void:
 	audio.play_ui_cancel()
 
 func _refresh() -> void:
+	_apply_responsive_frame()
+	if not get_viewport().size_changed.is_connected(_apply_responsive_frame):
+		get_viewport().size_changed.connect(_apply_responsive_frame)
 	diamonds_label.text = "DIAMONDS  %d" % game_state.diamonds
 	for child in items_vbox.get_children():
 		child.queue_free()
@@ -98,27 +100,34 @@ func _build_web_store_row() -> Control:
 
 	var header := Label.new()
 	header.text = "EMBER MARKS · ONLINE STORE"
-	UiKit.style_label(header, &"MenuTitle", 13)
+	UiKit.style_label(header, &"MenuTitle", 32)
 	vbox.add_child(header)
 
 	var status := Label.new()
 	status.text = _store_status_text()
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	UiKit.style_label(status, &"Caption", 11)
+	UiKit.style_label(status, &"Caption", 18)
 	vbox.add_child(status)
 
 	var row := HBoxContainer.new()
 	vbox.add_child(row)
 	var state := _store_state()
 
-	var buy := Button.new()
-	buy.custom_minimum_size = Vector2(160, 0)
-	buy.text = "BUY ONLINE"
-	buy.tooltip_text = "Opens the hosted checkout in your browser."
-	buy.disabled = state not in ["ready", "pending"]
-	UiKit.style_primary_button(buy)
-	buy.pressed.connect(_on_buy_online)
-	row.add_child(buy)
+	# The browser row only exists when the build actually has a hosted funnel:
+	# an SDK-only build sells through the native pack row below, and a button
+	# that could only report failure would be a dead control.
+	var has_funnel := _store != null and _store.has_method("has_hosted_checkout") \
+		and bool(_store.has_hosted_checkout())
+	if has_funnel:
+		var buy := Button.new()
+		buy.name = "BuyOnline"
+		buy.custom_minimum_size = Vector2(160, 0)
+		buy.text = "BUY ONLINE"
+		buy.tooltip_text = "Opens the hosted checkout in your browser."
+		buy.disabled = state not in ["ready", "pending"]
+		UiKit.style_primary_button(buy)
+		buy.pressed.connect(_on_buy_online)
+		row.add_child(buy)
 
 	var restore := Button.new()
 	restore.custom_minimum_size = Vector2(120, 0)
@@ -128,7 +137,86 @@ func _build_web_store_row() -> Control:
 	UiKit.style_secondary_button(restore)
 	restore.pressed.connect(_on_restore_purchases)
 	row.add_child(restore)
+
+	var packs := _build_native_pack_row()
+	if packs != null:
+		vbox.add_child(packs)
 	return panel
+
+## A native SDK purchase (the Test Store sheet today, the store's own sheet with
+## a real key) opens in-app and delivers through the same claim path as a web
+## purchase. The row exists only when the native authority is live, so no dead
+## control is ever shown, and no price is duplicated here: the sheet owns pricing.
+func _build_native_pack_row() -> Control:
+	if _store == null or not _store.has_method("authority_name") \
+			or not _store.has_method("buy"):
+		return null
+	if str(_store.authority_name()) != "native" or _store_state() == "unavailable":
+		return null
+	# Packs stack full-width: three side-by-side buttons each demanded more
+	# width than the phone frame has, and the sheet owns pricing anyway.
+	var box := VBoxContainer.new()
+	box.name = "NativePacks"
+	box.add_theme_constant_override("separation", 8)
+	box.add_child(UiKit.section_header("Diamond Packs", UiKit.EMBER))
+	for tier in WebStoreCatalog.all():
+		var product_id := WebStoreCatalog.product_id_for(tier)
+		if product_id.is_empty():
+			continue
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		box.add_child(row)
+		var label := Label.new()
+		label.text = "%s · %d" % [str(tier.get("name", product_id)),
+			int(tier.get("diamonds", 0))]
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		UiKit.style_label(label, &"RowLabel", 22)
+		row.add_child(label)
+		var btn := Button.new()
+		btn.name = "Buy_%s" % product_id
+		btn.custom_minimum_size = Vector2(140, 56)
+		btn.text = "BUY"
+		btn.tooltip_text = str(tier.get("blurb", ""))
+		btn.disabled = _buying
+		UiKit.style_primary_button(btn)
+		btn.pressed.connect(_on_buy_pack.bind(product_id))
+		row.add_child(btn)
+	return box
+
+## Runs one in-app purchase and reports its outcome. Delivery is never taken
+## from the purchase result itself: StoreManager re-reads provider state and
+## claims exactly once, so this only narrates what the claim reported.
+func _on_buy_pack(product_id: String) -> void:
+	if _buying or _store == null or not _store.has_method("buy"):
+		return
+	_buying = true
+	message_label.text = "Opening the store · the sheet appears over the game."
+	audio.play_ui_blip()
+	_refresh()
+	var result: Dictionary = await _store.buy(product_id)
+	_buying = false
+	if bool(result.get("purchased", false)):
+		var marks := int(result.get("diamonds", 0))
+		if marks > 0:
+			message_label.text = "Pack delivered · +%d ember marks." % marks
+			audio.play_forge_success()
+		else:
+			message_label.text = "Purchase confirmed · tap RESTORE to deliver it."
+		_refresh()
+		return
+	match str(result.get("status", "")):
+		"cancelled":
+			message_label.text = "Purchase cancelled · nothing was charged."
+		"offline", "timeout":
+			message_label.text = "Offline · reconnect before buying."
+		"unconfigured", "unavailable", "unsupported":
+			message_label.text = "In-app purchases are not configured in this build."
+		_:
+			message_label.text = "The purchase could not be completed."
+			audio.play_ui_cancel()
+	_refresh()
 
 func _store_state() -> String:
 	if _store == null or not _store.has_method("availability_state"):
@@ -210,18 +298,10 @@ func _build_row(item: Dictionary) -> Control:
 	var hbox := HBoxContainer.new()
 	panel.add_child(hbox)
 
-	var glyph := Label.new()
-	match str(item.kind):
-		"scan_pack":
-			glyph.text = "SCAN"
-		"sfx":
-			glyph.text = "SFX"
-		"trail":
-			glyph.text = "TRAIL"
-		_:
-			glyph.text = "AURA"
-	UiKit.style_label(glyph, "", 22)
-	hbox.add_child(glyph)
+	var kind_icons := {"sfx": "sigil_wave",
+		"trail": "fire", "aura": "sigil_moon"}
+	hbox.add_child(UiKit.icon_well(str(kind_icons.get(str(item.kind), "relic")),
+		UiKit.MOON if str(item.kind) == "aura" else UiKit.EMBER, 56.0))
 
 	var info := VBoxContainer.new()
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -229,35 +309,18 @@ func _build_row(item: Dictionary) -> Control:
 	var name_l := Label.new()
 	name_l.text = "%s%s" % [str(item.name),
 		"" if str(item.kind) != "sfx" else "  (SFX)"]
-	UiKit.style_label(name_l, &"MenuTitle", 13)
+	name_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	UiKit.style_label(name_l, &"RowLabel", 24)
 	info.add_child(name_l)
 	var desc := Label.new()
 	desc.text = str(item.desc)
-	if str(item.kind) == "scan_pack":
-		desc.text += "\n5 SCANS · $%.2f · BALANCE %d/%d · %s · %s" % [
-			float(item.price), game_state.scans_remaining, game_state.MAX_SCANS,
-			str(item.get("duplicate_behavior", "")), str(item.get("restore_path", ""))]
-	UiKit.style_label(desc, &"Caption", 11)
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	UiKit.style_label(desc, &"Caption", 18)
 	info.add_child(desc)
 
 	var btn := Button.new()
 	btn.custom_minimum_size = Vector2(160, 0)
-	if str(item.kind) == "scan_pack":
-		var purchase_copy := {
-			"unavailable": ["UNAVAILABLE", "Purchase integration is not connected"],
-			"pending": ["PROCESSING", "Waiting for store confirmation; no scans granted yet."],
-			"failed": ["RETRY", "Purchase failed; no charge or scans were applied."],
-			"cancelled": ["TRY AGAIN", "Purchase cancelled; no scans were granted."],
-			"offline": ["OFFLINE", "Reconnect before starting a purchase."],
-			"restoring": ["RESTORING", "Checking provider ownership; no duplicate grant."],
-			"confirmed": ["CONFIRMED", "Provider confirmed; grant through the entitlement handler."]
-		}
-		var copy: Array = purchase_copy.get(scan_purchase_state, purchase_copy["unavailable"])
-		btn.text = str(copy[0])
-		btn.disabled = scan_purchase_state not in ["failed", "cancelled"]
-		btn.tooltip_text = str(copy[1])
-		UiKit.style_secondary_button(btn)
-	elif game_state.active_cosmetic_id_for(str(item.kind)) == str(item.id):
+	if game_state.active_cosmetic_id_for(str(item.kind)) == str(item.id):
 		var worn := UiKit.action_state("equipped", "Cosmetic is currently active")
 		btn.text = str(worn.get("label", "EQUIPPED"))
 		btn.disabled = true

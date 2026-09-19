@@ -210,23 +210,35 @@ func _test_claim_idempotency() -> void:
 		return
 	_use_scratch_save()
 	gs.reset()
-	var tier: Dictionary = CATALOG.tier_for_entitlement("embermarks_cache")
+	var tier: Dictionary = CATALOG.tier_for_product("embermarks_cache")
 	var expected := int(tier.get("diamonds", 0))
-	var first: Dictionary = store.claim([
-		{"entitlement_id": "embermarks_cache", "expires_at_ms": -1}])
-	_check(int(first.get("granted", 0)) == 1, "the first confirmed claim must grant one pack")
+	var first: Dictionary = store.claim_transactions([
+		{"transaction_id": "txn_alpha", "product_id": "embermarks_cache"}])
+	_check(int(first.get("granted", 0)) == 1, "a confirmed purchase must grant one pack")
 	_check(int(first.get("diamonds", 0)) == expected, "the grant must match the catalogued tier")
 	_check(gs.diamonds == expected, "ember marks must be delivered exactly once")
-	var second: Dictionary = store.claim([
+	var repeat: Dictionary = store.claim_transactions([
+		{"transaction_id": "txn_alpha", "product_id": "embermarks_cache"}])
+	_check(int(repeat.get("granted", 0)) == 0,
+		"re-reading one transaction must never grant a second pack")
+	_check(gs.diamonds == expected, "a repeated read must not inflate the balance")
+	_check(gs.is_provider_claim_recorded(
+		CATALOG.record_id_for_transaction("embermarks_cache", "txn_alpha")),
+		"the ledger must record the transaction claim id")
+	var second_purchase: Dictionary = store.claim_transactions([
+		{"transaction_id": "txn_beta", "product_id": "embermarks_cache"}])
+	_check(int(second_purchase.get("granted", 0)) == 1,
+		"a second purchase of the same consumable must grant again")
+	_check(gs.diamonds == expected * 2, "each purchase must deliver its own pack")
+	var entitlement_only: Dictionary = store.claim([
 		{"entitlement_id": "embermarks_cache", "expires_at_ms": -1}])
-	_check(int(second.get("granted", 0)) == 0, "a repeated claim must not grant again")
-	_check(gs.diamonds == expected, "a repeated claim must not inflate the balance")
-	_check(gs.is_provider_claim_recorded("revenuecat:embermarks_cache:one_time"),
-		"the ledger must record the provider claim id")
-	var unknown: Dictionary = store.claim([
-		{"entitlement_id": "unlisted_pack", "expires_at_ms": -1}])
+	_check(int(entitlement_only.get("granted", 0)) == 0,
+		"a consumable's active entitlement must never be claimed as a purchase")
+	_check(gs.diamonds == expected * 2, "an entitlement read must not change the balance")
+	var unknown: Dictionary = store.claim_transactions([
+		{"transaction_id": "txn_gamma", "product_id": "unlisted_pack"}])
 	_check(int(unknown.get("granted", 0)) == 0 and int(unknown.get("skipped", 0)) == 1,
-		"an uncatalogued entitlement must be skipped, never guessed at")
+		"an uncatalogued product must be skipped, never guessed at")
 
 func _test_save_round_trip_preserves_claims() -> void:
 	var gs := _game_state()
@@ -236,20 +248,22 @@ func _test_save_round_trip_preserves_claims() -> void:
 		return
 	_use_scratch_save()
 	gs.reset()
-	var tier: Dictionary = CATALOG.tier_for_entitlement("embermarks_pouch")
+	var tier: Dictionary = CATALOG.tier_for_product("embermarks_pouch")
 	var expected := int(tier.get("diamonds", 0))
-	store.claim([{"entitlement_id": "embermarks_pouch", "expires_at_ms": -1}])
+	store.claim_transactions([
+		{"transaction_id": "txn_persist", "product_id": "embermarks_pouch"}])
 	_check(gs.flush_save(), "a claimed pack must persist")
 	# Wipe memory, reload from disk: idempotency must survive the round trip.
 	gs.reset()
 	_check(gs.load_game(), "the claimed save must reload")
 	_check(gs.diamonds == expected, "the reload must restore the delivered ember marks")
-	_check(gs.is_provider_claim_recorded("revenuecat:embermarks_pouch:one_time"),
-		"provider record ids must survive a save/load round trip")
-	var repeat: Dictionary = store.claim([
-		{"entitlement_id": "embermarks_pouch", "expires_at_ms": -1}])
+	_check(gs.is_provider_claim_recorded(
+		CATALOG.record_id_for_transaction("embermarks_pouch", "txn_persist")),
+		"transaction record ids must survive a save/load round trip")
+	var repeat: Dictionary = store.claim_transactions([
+		{"transaction_id": "txn_persist", "product_id": "embermarks_pouch"}])
 	_check(int(repeat.get("granted", 0)) == 0,
-		"a reload must never re-open an already-claimed pack")
+		"a reload must never re-open an already-claimed purchase")
 	_check(gs.diamonds == expected, "a reload must not inflate the balance")
 
 func _find_entitlement(rows: Array, entitlement_id: String) -> Dictionary:

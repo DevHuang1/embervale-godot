@@ -3,11 +3,16 @@ package com.embervale.revenuecat
 import android.util.Log
 import com.revenuecat.purchases.CustomerInfo
 import com.revenuecat.purchases.LogLevel
+import com.revenuecat.purchases.PurchaseParams
 import com.revenuecat.purchases.Purchases
 import com.revenuecat.purchases.PurchasesConfiguration
 import com.revenuecat.purchases.PurchasesError
+import com.revenuecat.purchases.interfaces.GetStoreProductsCallback
 import com.revenuecat.purchases.interfaces.LogInCallback
+import com.revenuecat.purchases.interfaces.PurchaseCallback
 import com.revenuecat.purchases.interfaces.ReceiveCustomerInfoCallback
+import com.revenuecat.purchases.models.StoreProduct
+import com.revenuecat.purchases.models.StoreTransaction
 import org.godotengine.godot.Godot
 import org.godotengine.godot.plugin.GodotPlugin
 import org.godotengine.godot.plugin.SignalInfo
@@ -28,6 +33,10 @@ class RevenueCatBridgePlugin(godot: Godot) : GodotPlugin(godot) {
 
     private val activeEntitlementsSignal =
         SignalInfo(SIGNAL_ACTIVE_ENTITLEMENTS, String::class.java)
+    private val nonSubscriptionTransactionsSignal =
+        SignalInfo(SIGNAL_NON_SUBSCRIPTION_TRANSACTIONS, String::class.java)
+    private val purchaseResultSignal =
+        SignalInfo(SIGNAL_PURCHASE_RESULT, String::class.java)
     private val errorSignal = SignalInfo(SIGNAL_ERROR, String::class.java, String::class.java)
 
     /**
@@ -37,11 +46,13 @@ class RevenueCatBridgePlugin(godot: Godot) : GodotPlugin(godot) {
      */
     private var configureRequested = false
     private var pendingFetch = false
+    private var pendingTransactionFetch = false
 
     override fun getPluginName(): String = PLUGIN_NAME
 
     override fun getPluginSignals(): Set<SignalInfo> =
-        setOf(activeEntitlementsSignal, errorSignal)
+        setOf(activeEntitlementsSignal, nonSubscriptionTransactionsSignal,
+            purchaseResultSignal, errorSignal)
 
     /**
      * Configures the SDK with the public SDK key and the game's stable App User
@@ -78,6 +89,10 @@ class RevenueCatBridgePlugin(godot: Godot) : GodotPlugin(godot) {
                 if (pendingFetch) {
                     pendingFetch = false
                     getActiveEntitlements()
+                }
+                if (pendingTransactionFetch) {
+                    pendingTransactionFetch = false
+                    getNonSubscriptionTransactions()
                 }
             } catch (throwable: Throwable) {
                 emitError("configure_failed", throwable.message ?: "unknown configure failure")
@@ -116,6 +131,106 @@ class RevenueCatBridgePlugin(godot: Godot) : GodotPlugin(godot) {
             })
         } catch (throwable: Throwable) {
             emitError("provider_error", throwable.message ?: "unknown customer info failure")
+        }
+    }
+
+    /**
+     * Fetches the customer's consumable transactions. A repeatable pack cannot
+     * be counted from its entitlement (that stays active forever after the first
+     * purchase), so the game keys each purchase on these transaction ids.
+     */
+    @UsedByGodot
+    fun getNonSubscriptionTransactions() {
+        if (!Purchases.isConfigured) {
+            if (configureRequested) {
+                pendingTransactionFetch = true
+            } else {
+                emitError("not_configured", "configure must be called before reading transactions")
+            }
+            return
+        }
+        try {
+            Purchases.sharedInstance.invalidateCustomerInfoCache()
+            Purchases.sharedInstance.getCustomerInfo(object : ReceiveCustomerInfoCallback {
+                override fun onReceived(customerInfo: CustomerInfo) {
+                    emitNonSubscriptionTransactions(customerInfo)
+                }
+
+                override fun onError(error: PurchasesError) {
+                    emitProviderError(error)
+                }
+            })
+        } catch (throwable: Throwable) {
+            emitError("provider_error", throwable.message ?: "unknown customer info failure")
+        }
+    }
+
+    /**
+     * Starts a purchase for one product. Under a Test Store key the SDK presents
+     * its simulated purchase sheet, so the whole buy -> entitlement ->
+     * transaction -> claim loop works with no store account and no payment
+     * provider; under a real store key the same call opens the store sheet.
+     */
+    @UsedByGodot
+    fun purchase(productId: String) {
+        val wanted = productId.trim()
+        if (wanted.isEmpty()) {
+            emitPurchaseResult("error", "", "invalid_product", "an empty product id cannot be purchased")
+            return
+        }
+        if (!Purchases.isConfigured) {
+            emitPurchaseResult("error", wanted, "not_configured", "configure must be called before purchasing")
+            return
+        }
+        val activity = getActivity()
+        if (activity == null) {
+            emitPurchaseResult("error", wanted, "no_activity", "no Android activity is available yet")
+            return
+        }
+        try {
+            Purchases.sharedInstance.getProducts(listOf(wanted), object : GetStoreProductsCallback {
+                override fun onReceived(storeProducts: List<StoreProduct>) {
+                    val product = storeProducts.firstOrNull { it.id == wanted }
+                    if (product == null) {
+                        emitPurchaseResult("error", wanted, "product_unavailable",
+                            "the store has no product with id $wanted")
+                        return
+                    }
+                    Purchases.sharedInstance.purchase(
+                        PurchaseParams.Builder(activity, product).build(),
+                        object : PurchaseCallback {
+                            override fun onCompleted(
+                                storeTransaction: StoreTransaction,
+                                customerInfo: CustomerInfo,
+                            ) {
+                                Log.i(TAG, "purchase completed: ${storeTransaction.productIds}")
+                                // The caller re-reads entitlements and transactions
+                                // after this result, so nothing is emitted twice here.
+                                emitPurchaseResult("purchased", wanted, "", "")
+                            }
+
+                            override fun onError(error: PurchasesError, userCancelled: Boolean) {
+                                if (userCancelled) {
+                                    Log.i(TAG, "purchase cancelled: $wanted")
+                                    emitPurchaseResult("cancelled", wanted, "cancelled",
+                                        "the purchase was cancelled")
+                                } else {
+                                    // The purchase result is the single outcome of
+                                    // this call; the customer-info error signal stays
+                                    // reserved for reads so the two cannot race.
+                                    emitPurchaseResult("error", wanted, error.code.name, error.message)
+                                }
+                            }
+                        })
+                }
+
+                override fun onError(error: PurchasesError) {
+                    emitPurchaseResult("error", wanted, error.code.name, error.message)
+                }
+            })
+        } catch (throwable: Throwable) {
+            emitPurchaseResult("error", wanted, "provider_error",
+                throwable.message ?: "unknown purchase failure")
         }
     }
 
@@ -184,6 +299,45 @@ class RevenueCatBridgePlugin(godot: Godot) : GodotPlugin(godot) {
         GodotPlugin.emitSignal(godot, PLUGIN_NAME, activeEntitlementsSignal, payload)
     }
 
+    /**
+     * Emits the consumable transactions in the same list shape as the
+     * entitlement read, so the game keeps one parser per authority.
+     * `transactionIdentifier` is RevenueCat's stable id for the purchase and is
+     * what makes a repeat purchase grant once and only once.
+     */
+    private fun emitNonSubscriptionTransactions(customerInfo: CustomerInfo) {
+        val items = JSONArray()
+        for (transaction in customerInfo.nonSubscriptionTransactions) {
+            val row = JSONObject()
+            row.put("transaction_id", transaction.transactionIdentifier)
+            row.put("product_id", transaction.productIdentifier)
+            row.put("purchased_at", transaction.purchaseDate.time)
+            row.put("is_sandbox", transaction.isSandbox)
+            items.put(row)
+        }
+        val payload = JSONObject()
+            .put("object", "list")
+            .put("source", SOURCE_NATIVE)
+            .put("items", items)
+            .toString()
+        GodotPlugin.emitSignal(godot, PLUGIN_NAME, nonSubscriptionTransactionsSignal, payload)
+    }
+
+    /**
+     * Emits the outcome of a purchase attempt: `purchased`, `cancelled`, or
+     * `error`. A cancel is reported as its own status so the UI can stay quiet
+     * instead of showing a failure.
+     */
+    private fun emitPurchaseResult(status: String, productId: String, code: String, message: String) {
+        val payload = JSONObject()
+            .put("status", status)
+            .put("product_id", productId)
+            .put("code", code)
+            .put("message", message)
+            .toString()
+        GodotPlugin.emitSignal(godot, PLUGIN_NAME, purchaseResultSignal, payload)
+    }
+
     private fun emitProviderError(error: PurchasesError) {
         val code = error.code.name
         Log.w(TAG, "RevenueCat error: $code — ${error.message}")
@@ -198,6 +352,8 @@ class RevenueCatBridgePlugin(godot: Godot) : GodotPlugin(godot) {
         private const val TAG = "RevenueCatBridge"
         private const val PLUGIN_NAME = "RevenueCatBridge"
         private const val SOURCE_NATIVE = "revenuecat_native"
+        private const val SIGNAL_NON_SUBSCRIPTION_TRANSACTIONS = "non_subscription_transactions"
+        private const val SIGNAL_PURCHASE_RESULT = "purchase_result"
         const val SIGNAL_ACTIVE_ENTITLEMENTS = "active_entitlements"
         const val SIGNAL_ERROR = "customer_info_error"
     }
