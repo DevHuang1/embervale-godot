@@ -25,6 +25,11 @@ license file. `LICENSE` (MIT) must be visible at the top of the repository page.
 
 ## 2. Create the RevenueCat project
 
+> **SDK-only build (no Stripe):** follow `REVENUECAT_ANDROID_SDK.md` instead of
+> the funnel steps below — the three product/entitlement ids are the same, the
+> key goes in the shipped defaults resource, and there is no funnel or Stripe
+> step (see `REVENUECAT_ANDROID_SDK.md`).
+
 Follow `docs/REVENUECAT_DASHBOARD_RUNBOOK.md`, Path A. Summary:
 
 - [ ] Account → connect Stripe (**sandbox or test mode is enough**).
@@ -44,6 +49,14 @@ Values to keep:
 - purchase link base: `https://pay.rev.cat/<link_id>`
 - customer / App User ID: `ev_XXXXXXXX`
   (the app's own id is in `user://store.cfg` → `customer_id`)
+- public SDK key for the native reader: `goog_XXXXXXXX` (safe to ship; goes in
+  the gitignored `res://store_defaults.tres` for an APK build, never in a
+  committed file)
+
+Before an APK build, write `store_defaults.tres` with
+`tools/write_store_defaults.gd` (`project_id` / `funnel_url` / `native_api_key`;
+see the dashboard runbook, "Where each value goes"). It is gitignored and only
+read by exported builds.
 
 ## 3. Prove the chain on desktop first
 
@@ -67,15 +80,25 @@ godot --headless --path . --script tools/verify_revenuecat_setup.gd
 
 ## 4. Do it on the phone
 
-Android cannot read environment variables, so a device demo needs one decision:
+Android cannot read environment variables, so the build carries its non-secret
+values in `res://store_defaults.tres` (gitignored; editor/CI ignore it):
 
-- [ ] **Decide:** add a debug-only credential file (release builds keep refusing
-      it, same guard as today), or record the purchase from the desktop build and
-      say so in the video.
+```sh
+EMBERVALE_REVENUECAT_PUBLIC_KEY="test_XXXXXXXX"   # or goog_... for Play
+godot --headless --path . --script tools/write_store_defaults.gd
+# -> STORE DEFAULTS WRITTEN   (-- --clear removes it for a public build)
+```
+
+- [ ] Write `store_defaults.tres` for the path you are demoing.
+- [ ] Validate it offline: `godot --headless --path . --script tools/verify_revenuecat_setup.gd`
+      -> `SHIPPED DEFAULTS VALID`.
 - [ ] Export the APK, install on the device.
 - [ ] Confirm the manifest carries the `INTERNET` permission
       (`aapt2 dump xmltree --file AndroidManifest.xml app.apk | grep -i internet`).
-- [ ] Repeat the purchase + restore on the device.
+- [ ] Confirm the install floor: `aapt2 dump badging app.apk | grep -i sdkVersion`
+      must report `sdkVersion:'24'` and the expected versionCode.
+- [ ] Repeat the purchase + restore on the device (`tests/android_native_store_check.tscn`
+      prints the `QA_NATIVE RESULT` verdict for the SDK path).
 
 One claim per entitlement per device: a test grant or a first purchase *burns*
 that pack for that device. Use a fresh customer id per experiment, and

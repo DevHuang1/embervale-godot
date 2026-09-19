@@ -21,6 +21,11 @@ coherent slice before opening another large refactor.
   a lifetime plus a hard cap, cleanup path, or pool.
 - Never claim visual acceptance from the dummy renderer or device performance
   without a real renderer/device measurement.
+- Pin `gradle_build/min_sdk="24"` in the Android export preset before any Gradle
+  build. The preset is gitignored, and Godot 4.7's Gradle-build default is 29,
+  which yields an APK that Android 9 (API 28) and older refuse to install with a
+  "parse error". Verify every Android artifact with `aapt2 dump badging` (minSdk
+  24, expected versionCode) before publishing it.
 - Do not copy protected art, UI, maps, names, lore, or exact designs from other
   RPGs. Use successful games only as quality references.
 

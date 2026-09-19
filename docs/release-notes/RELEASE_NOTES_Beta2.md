@@ -8,7 +8,7 @@
 **Checksums:** `exports/beta2/SHA256SUMS.txt`
 (SHA-256: `20ddf495977080213b2a3537ad44cc119a837754409a0473590f27d12b7a58a9`)
 
-> Signed with Godot's bundled development certificate — fine for sideloaded testing/distribution via GitHub Releases; **not** for Play Store submission. Store gates are tracked in `RELEASE_CHECKLIST.md`.
+> Signed with Godot's bundled development certificate — fine for sideloaded testing/distribution via GitHub Releases; **not** for Play Store submission. Store gates are tracked in `../RELEASE_CHECKLIST.md`.
 
 ## What is in this beta
 

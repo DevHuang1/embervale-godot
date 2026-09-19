@@ -11,7 +11,7 @@
 > Signed with Godot's bundled development certificate — the **same certificate as
 > Beta 1–3**, so this installs straight over Beta 3 and keeps existing saves.
 > Fine for sideloaded testing/distribution via GitHub Releases; **not** for Play
-> Store submission. Store gates are tracked in `RELEASE_CHECKLIST.md`.
+> Store submission. Store gates are tracked in `../RELEASE_CHECKLIST.md`.
 
 ## What is in this beta
 
